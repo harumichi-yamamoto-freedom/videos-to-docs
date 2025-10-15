@@ -42,6 +42,13 @@ export default function Home() {
   const [bulkSelectedPromptIds, setBulkSelectedPromptIds] = useState<string[]>([]);
   const converterRef = useRef<VideoConverter | null>(null);
   const geminiClientRef = useRef<GeminiClient | null>(null);
+  
+  // デバッグ用: テストエラーの設定
+  const [debugErrorMode, setDebugErrorMode] = useState({
+    ffmpegError: false,
+    geminiError: false,
+    errorAtFileIndex: 0, // どのファイルでエラーを起こすか
+  });
 
   // プロンプト一覧を読み込み
   useEffect(() => {
@@ -160,19 +167,28 @@ export default function Home() {
           )
         );
 
-        const result = await converterRef.current!.convertToMp3(file.file, {
-          bitrate,
-          sampleRate,
-          onProgress: (progress) => {
-            setProcessingStatuses(prev =>
-              prev.map((status, idx) =>
-                idx === i
-                  ? { ...status, audioConversionProgress: Math.round(progress.ratio * 100) }
-                  : status
-              )
-            );
-          },
-        });
+        // デバッグ用: 意図的にFFmpegエラーを発生させる
+        let result;
+        if (debugErrorMode.ffmpegError && i === debugErrorMode.errorAtFileIndex) {
+          result = {
+            success: false,
+            error: '[デバッグ] 意図的に発生させたFFmpegエラー'
+          };
+        } else {
+          result = await converterRef.current!.convertToMp3(file.file, {
+            bitrate,
+            sampleRate,
+            onProgress: (progress) => {
+              setProcessingStatuses(prev =>
+                prev.map((status, idx) =>
+                  idx === i
+                    ? { ...status, audioConversionProgress: Math.round(progress.ratio * 100) }
+                    : status
+                )
+              );
+            },
+          });
+        }
 
         if (!result.success || !result.outputBlob) {
           setProcessingStatuses(prev =>
@@ -215,6 +231,11 @@ export default function Home() {
   // 文書生成処理（並列実行される）
   const processTranscription = async (file: FileWithPrompts, fileIndex: number, audioBlob: Blob) => {
     try {
+      // デバッグ用: 意図的にGeminiエラーを発生させる
+      if (debugErrorMode.geminiError && fileIndex === debugErrorMode.errorAtFileIndex) {
+        throw new Error('[デバッグ] 意図的に発生させたGemini APIエラー');
+      }
+
       // 文書生成開始
       setProcessingStatuses(prev =>
         prev.map((status, idx) =>
@@ -345,19 +366,28 @@ export default function Home() {
             )
           );
 
-          const result = await converterRef.current!.convertToMp3(file.file, {
-            bitrate,
-            sampleRate,
-            onProgress: (progress) => {
-              setProcessingStatuses(prev =>
-                prev.map((s, idx) =>
-                  idx === i
-                    ? { ...s, audioConversionProgress: Math.round(progress.ratio * 100) }
-                    : s
-                )
-              );
-            },
-          });
+          // デバッグ用: 意図的にFFmpegエラーを発生させる
+          let result;
+          if (debugErrorMode.ffmpegError && i === debugErrorMode.errorAtFileIndex) {
+            result = {
+              success: false,
+              error: '[デバッグ] 意図的に発生させたFFmpegエラー'
+            };
+          } else {
+            result = await converterRef.current!.convertToMp3(file.file, {
+              bitrate,
+              sampleRate,
+              onProgress: (progress) => {
+                setProcessingStatuses(prev =>
+                  prev.map((s, idx) =>
+                    idx === i
+                      ? { ...s, audioConversionProgress: Math.round(progress.ratio * 100) }
+                      : s
+                  )
+                );
+              },
+            });
+          }
 
           if (!result.success || !result.outputBlob) {
             setProcessingStatuses(prev =>
@@ -401,6 +431,11 @@ export default function Home() {
   // 文書生成処理（再開用 - 未完了のプロンプトのみ処理）
   const processTranscriptionResume = async (file: FileWithPrompts, fileIndex: number, audioBlob: Blob, completedPromptIds: string[]) => {
     try {
+      // デバッグ用: 意図的にGeminiエラーを発生させる
+      if (debugErrorMode.geminiError && fileIndex === debugErrorMode.errorAtFileIndex) {
+        throw new Error('[デバッグ] 意図的に発生させたGemini APIエラー');
+      }
+
       // 文書生成開始
       setProcessingStatuses(prev =>
         prev.map((status, idx) =>
@@ -786,6 +821,54 @@ export default function Home() {
                   1つのファイルに複数のプロンプトを適用し、異なる形式の文書を同時生成できます。
                 </p>
               </div>
+
+              {/* デバッグ用エラー注入コントロール */}
+              {process.env.NODE_ENV === 'development' && (
+                <div className="mt-4 bg-gradient-to-br from-red-50 to-orange-50 border border-red-300 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-red-900 mb-3">
+                    🐛 デバッグモード
+                  </h4>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={debugErrorMode.ffmpegError}
+                          onChange={(e) => setDebugErrorMode(prev => ({ ...prev, ffmpegError: e.target.checked }))}
+                          className="w-4 h-4 text-red-600"
+                        />
+                        <span className="text-xs text-red-800">FFmpegエラーを発生させる</span>
+                      </label>
+                    </div>
+                    <div>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={debugErrorMode.geminiError}
+                          onChange={(e) => setDebugErrorMode(prev => ({ ...prev, geminiError: e.target.checked }))}
+                          className="w-4 h-4 text-red-600"
+                        />
+                        <span className="text-xs text-red-800">Geminiエラーを発生させる</span>
+                      </label>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-red-800 mb-1">
+                        エラーを起こすファイル（インデックス）:
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={debugErrorMode.errorAtFileIndex}
+                        onChange={(e) => setDebugErrorMode(prev => ({ ...prev, errorAtFileIndex: parseInt(e.target.value) || 0 }))}
+                        className="w-full px-2 py-1 text-xs border border-red-300 rounded"
+                      />
+                    </div>
+                    <p className="text-xs text-red-600 italic">
+                      ※ 開発環境でのみ表示されます
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
