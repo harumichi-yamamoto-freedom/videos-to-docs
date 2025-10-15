@@ -105,12 +105,25 @@ export const TranscriptionList: React.FC = () => {
 
     if (documents.length === 0) {
         return (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
-                <FileText className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                <p className="text-gray-600">まだ生成された文書はありません</p>
-                <p className="text-sm text-gray-500 mt-1">
-                    動画や音声を変換して文書を生成しましょう
-                </p>
+            <div className="space-y-4">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold text-gray-900">
+                        生成された文書（0件）
+                    </h3>
+                    <button
+                        onClick={loadDocuments}
+                        className="text-sm text-blue-600 hover:text-blue-800 underline"
+                    >
+                        更新
+                    </button>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+                    <FileText className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-600">まだ生成された文書はありません</p>
+                    <p className="text-sm text-gray-500 mt-1">
+                        動画や音声を変換して文書を生成しましょう
+                    </p>
+                </div>
             </div>
         );
     }
