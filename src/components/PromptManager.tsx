@@ -57,10 +57,6 @@ export const PromptManager: React.FC = () => {
 
     // 編集開始
     const handleStartEdit = (prompt: Prompt) => {
-        if (prompt.isDefault) {
-            alert('デフォルトプロンプトは編集できません');
-            return;
-        }
         setEditingId(prompt.id!);
         setEditName(prompt.name);
         setEditContent(prompt.content);
@@ -79,11 +75,6 @@ export const PromptManager: React.FC = () => {
 
     // 削除
     const handleDelete = async (prompt: Prompt) => {
-        if (prompt.isDefault) {
-            alert('デフォルトプロンプトは削除できません');
-            return;
-        }
-
         if (!confirm(`「${prompt.name}」を削除しますか？`)) return;
 
         try {
