@@ -107,15 +107,15 @@ export const DEFAULT_PROMPTS = [
 
 /**
  * デフォルトプロンプトを初期化
+ * プロンプトが一つも保存されていない場合のみ作成
  */
 export async function initializeDefaultPrompts(): Promise<void> {
     try {
         const existingPrompts = await getPrompts();
 
-        // デフォルトプロンプトが存在しない場合のみ追加
-        for (const defaultPrompt of DEFAULT_PROMPTS) {
-            const exists = existingPrompts.some(p => p.name === defaultPrompt.name && p.isDefault);
-            if (!exists) {
+        // プロンプトが一つも存在しない場合のみ、デフォルトプロンプトを作成
+        if (existingPrompts.length === 0) {
+            for (const defaultPrompt of DEFAULT_PROMPTS) {
                 await addDoc(collection(db, 'prompts'), {
                     ...defaultPrompt,
                     createdAt: Timestamp.now(),
