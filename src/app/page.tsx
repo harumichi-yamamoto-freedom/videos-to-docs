@@ -24,6 +24,9 @@ interface FileProcessingStatus {
   transcriptionCount: number; // 生成された文書数
   totalTranscriptions: number; // 生成予定の文書数
   error?: string;
+  convertedAudioBlob?: Blob; // 変換済み音声データ（再開用）
+  completedPromptIds: string[]; // 完了したプロンプトID（再開用）
+  failedPhase?: 'audio_conversion' | 'text_generation'; // 失敗したフェーズ
 }
 
 export default function Home() {
@@ -121,6 +124,7 @@ export default function Home() {
       audioConversionProgress: 0,
       totalTranscriptions: fileWithPrompts.selectedPromptIds.length,
       transcriptionCount: 0,
+      completedPromptIds: [],
     }));
     setProcessingStatuses(initialStatuses);
 
@@ -177,13 +181,21 @@ export default function Home() {
                 ? {
                   ...status,
                   status: 'error',
-                  error: result.error || '音声変換に失敗しました'
+                  error: result.error || '音声変換に失敗しました',
+                  failedPhase: 'audio_conversion'
                 }
                 : status
             )
           );
         } else {
-          // 音声変換が成功したら、すぐに文書生成を並列で開始
+          // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始
+          setProcessingStatuses(prev =>
+            prev.map((status, idx) =>
+              idx === i
+                ? { ...status, convertedAudioBlob: result.outputBlob }
+                : status
+            )
+          );
           const transcriptionPromise = processTranscription(file, i, result.outputBlob);
           transcriptionPromises.push(transcriptionPromise);
         }
@@ -238,14 +250,16 @@ export default function Home() {
                 sampleRate
               );
 
-              // 進捗を更新
+              // 進捗を更新（完了したプロンプトIDを記録）
               setProcessingStatuses(prev =>
                 prev.map((status, idx) => {
                   if (idx === fileIndex) {
                     const newCount = status.transcriptionCount + 1;
+                    const completedPromptIds = [...status.completedPromptIds, prompt.id!];
                     return {
                       ...status,
                       transcriptionCount: newCount,
+                      completedPromptIds,
                     };
                   }
                   return status;
@@ -275,7 +289,206 @@ export default function Home() {
             ? {
               ...status,
               status: 'error',
-              error: error instanceof Error ? error.message : '不明なエラー'
+              error: error instanceof Error ? error.message : '不明なエラー',
+              failedPhase: 'text_generation'
+            }
+            : status
+        )
+      );
+    }
+  };
+
+  // 処理の再開
+  const handleResumeProcessing = async () => {
+    setIsProcessing(true);
+
+    // VideoConverterインスタンスを作成
+    if (!converterRef.current) {
+      converterRef.current = new VideoConverter();
+    }
+
+    // GeminiClientインスタンスを作成
+    if (!geminiClientRef.current) {
+      geminiClientRef.current = new GeminiClient();
+    }
+
+    try {
+      // FFmpegを初回のみロード
+      if (!ffmpegLoaded) {
+        await converterRef.current.load();
+        setFfmpegLoaded(true);
+      }
+
+      const transcriptionPromises: Promise<void>[] = [];
+
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i];
+        const status = processingStatuses[i];
+
+        // 完了済みのファイルはスキップ
+        if (status.status === 'completed') {
+          continue;
+        }
+
+        // 音声変換済みの場合は、文書生成のみを実行
+        if (status.convertedAudioBlob) {
+          // 未完了のプロンプトのみを処理
+          const transcriptionPromise = processTranscriptionResume(file, i, status.convertedAudioBlob, status.completedPromptIds);
+          transcriptionPromises.push(transcriptionPromise);
+        } else {
+          // 音声変換から再実行
+          setProcessingStatuses(prev =>
+            prev.map((s, idx) =>
+              idx === i
+                ? { ...s, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0, error: undefined }
+                : s
+            )
+          );
+
+          const result = await converterRef.current!.convertToMp3(file.file, {
+            bitrate,
+            sampleRate,
+            onProgress: (progress) => {
+              setProcessingStatuses(prev =>
+                prev.map((s, idx) =>
+                  idx === i
+                    ? { ...s, audioConversionProgress: Math.round(progress.ratio * 100) }
+                    : s
+                )
+              );
+            },
+          });
+
+          if (!result.success || !result.outputBlob) {
+            setProcessingStatuses(prev =>
+              prev.map((s, idx) =>
+                idx === i
+                  ? {
+                    ...s,
+                    status: 'error',
+                    error: result.error || '音声変換に失敗しました',
+                    failedPhase: 'audio_conversion'
+                  }
+                  : s
+              )
+            );
+          } else {
+            // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始
+            setProcessingStatuses(prev =>
+              prev.map((s, idx) =>
+                idx === i
+                  ? { ...s, convertedAudioBlob: result.outputBlob }
+                  : s
+              )
+            );
+            const transcriptionPromise = processTranscriptionResume(file, i, result.outputBlob, status.completedPromptIds);
+            transcriptionPromises.push(transcriptionPromise);
+          }
+        }
+      }
+
+      // すべての文書生成が完了するまで待機
+      await Promise.all(transcriptionPromises);
+
+    } catch (error) {
+      console.error('再開処理エラー:', error);
+      alert('処理中にエラーが発生しました: ' + (error instanceof Error ? error.message : '不明なエラー'));
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // 文書生成処理（再開用 - 未完了のプロンプトのみ処理）
+  const processTranscriptionResume = async (file: FileWithPrompts, fileIndex: number, audioBlob: Blob, completedPromptIds: string[]) => {
+    try {
+      // 文書生成開始
+      setProcessingStatuses(prev =>
+        prev.map((status, idx) =>
+          idx === fileIndex
+            ? { ...status, status: 'transcribing', phase: 'text_generation', error: undefined }
+            : status
+        )
+      );
+
+      // 選択されたプロンプトのうち、未完了のものだけを取得
+      const selectedPrompts = availablePrompts.filter(p =>
+        file.selectedPromptIds.includes(p.id!) && !completedPromptIds.includes(p.id!)
+      );
+
+      // 未完了のプロンプトがない場合は完了扱い
+      if (selectedPrompts.length === 0) {
+        setProcessingStatuses(prev =>
+          prev.map((status, idx) =>
+            idx === fileIndex
+              ? { ...status, status: 'completed', phase: 'completed' }
+              : status
+          )
+        );
+        return;
+      }
+
+      // 各プロンプトで文書生成（並列処理）
+      await Promise.all(
+        selectedPrompts.map(async (prompt) => {
+          try {
+            const transcriptionResult = await geminiClientRef.current!.transcribeAudio(
+              audioBlob,
+              file.file.name,
+              prompt.content
+            );
+
+            if (transcriptionResult.success && transcriptionResult.text) {
+              // Firestoreに保存
+              await saveTranscription(
+                file.file.name,
+                transcriptionResult.text,
+                prompt.name,
+                file.file.type.startsWith('video/') ? 'video' : 'audio',
+                bitrate,
+                sampleRate
+              );
+
+              // 進捗を更新（完了したプロンプトIDを記録）
+              setProcessingStatuses(prev =>
+                prev.map((status, idx) => {
+                  if (idx === fileIndex) {
+                    const newCount = status.transcriptionCount + 1;
+                    const newCompletedPromptIds = [...status.completedPromptIds, prompt.id!];
+                    return {
+                      ...status,
+                      transcriptionCount: newCount,
+                      completedPromptIds: newCompletedPromptIds,
+                    };
+                  }
+                  return status;
+                })
+              );
+            }
+          } catch (promptError) {
+            console.error(`プロンプト「${prompt.name}」での文書生成エラー:`, promptError);
+          }
+        })
+      );
+
+      // 完了
+      setProcessingStatuses(prev =>
+        prev.map((status, idx) =>
+          idx === fileIndex
+            ? { ...status, status: 'completed', phase: 'completed' }
+            : status
+        )
+      );
+
+    } catch (error) {
+      console.error(`ファイル ${file.file.name} の文書生成エラー:`, error);
+      setProcessingStatuses(prev =>
+        prev.map((status, idx) =>
+          idx === fileIndex
+            ? {
+              ...status,
+              status: 'error',
+              error: error instanceof Error ? error.message : '不明なエラー',
+              failedPhase: 'text_generation'
             }
             : status
         )
@@ -419,12 +632,23 @@ export default function Home() {
               )}
 
               {processingStatuses.length > 0 && !isProcessing && (
-                <button
-                  onClick={handleReset}
-                  className="mt-6 w-full bg-gray-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-gray-700 transition-colors"
-                >
-                  新しい処理を開始
-                </button>
+                <div className="mt-6 flex space-x-3">
+                  {/* エラーまたは未完了のファイルがある場合は再開ボタンを表示 */}
+                  {processingStatuses.some(s => s.status === 'error' || s.status !== 'completed') && (
+                    <button
+                      onClick={handleResumeProcessing}
+                      className="flex-1 bg-orange-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-orange-700 transition-colors shadow-md hover:shadow-lg"
+                    >
+                      🔄 処理を再開
+                    </button>
+                  )}
+                  <button
+                    onClick={handleReset}
+                    className="flex-1 bg-gray-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-gray-700 transition-colors"
+                  >
+                    新しい処理を開始
+                  </button>
+                </div>
               )}
             </div>
 
@@ -499,7 +723,19 @@ export default function Home() {
                           <div>
                             <p className="text-sm font-medium text-red-800 mb-1">
                               ❌ エラーが発生しました
+                              {status.failedPhase === 'audio_conversion' && ' (音声変換)'}
+                              {status.failedPhase === 'text_generation' && ' (文書生成)'}
                             </p>
+                            {status.completedPromptIds.length > 0 && (
+                              <p className="text-xs text-green-600 mb-1">
+                                ✓ 完了: {status.completedPromptIds.length}/{status.totalTranscriptions} プロンプト
+                              </p>
+                            )}
+                            {status.convertedAudioBlob && (
+                              <p className="text-xs text-blue-600 mb-1">
+                                ✓ 音声変換済み（再開時はスキップされます）
+                              </p>
+                            )}
                             <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
                               <div className="h-full bg-red-600" style={{ width: '100%' }} />
                             </div>
