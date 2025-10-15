@@ -162,70 +162,87 @@ export default function Home() {
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
 
-        // 音声変換処理を開始（直列処理）
-        audioConversionQueueRef.current = true;
+        // 音声ファイルかどうかを判定
+        const isAudioFile = file.file.type.startsWith('audio/') ||
+          file.file.name.toLowerCase().match(/\.(mp3|wav|m4a|aac|ogg|flac)$/);
 
-        try {
-          // 音声変換開始
+        if (isAudioFile) {
+          // 音声ファイルの場合：音声変換をスキップして直接文書生成へ
           setProcessingStatuses(prev =>
             prev.map((status, idx) =>
               idx === i
-                ? { ...status, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
+                ? { ...status, convertedAudioBlob: file.file as Blob }
                 : status
             )
           );
+          const transcriptionPromise = processTranscription(file, i, file.file as Blob);
+          transcriptionPromises.push(transcriptionPromise);
+        } else {
+          // 動画ファイルの場合：音声変換が必要（直列処理）
+          audioConversionQueueRef.current = true;
 
-          // デバッグ用: 意図的にFFmpegエラーを発生させる
-          let result;
-          if (debugErrorMode.ffmpegError && i === debugErrorMode.errorAtFileIndex) {
-            result = {
-              success: false,
-              error: '[デバッグ] 意図的に発生させたFFmpegエラー'
-            };
-          } else {
-            result = await converterRef.current!.convertToMp3(file.file, {
-              bitrate,
-              sampleRate,
-              onProgress: (progress) => {
-                setProcessingStatuses(prev =>
-                  prev.map((status, idx) =>
-                    idx === i
-                      ? { ...status, audioConversionProgress: Math.round(progress.ratio * 100) }
-                      : status
-                  )
-                );
-              },
-            });
-          }
-
-          if (!result.success || !result.outputBlob) {
+          try {
+            // 音声変換開始
             setProcessingStatuses(prev =>
               prev.map((status, idx) =>
                 idx === i
-                  ? {
-                    ...status,
-                    status: 'error',
-                    error: result.error || '音声変換に失敗しました',
-                    failedPhase: 'audio_conversion'
-                  }
+                  ? { ...status, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
                   : status
               )
             );
-          } else {
-            // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始
-            setProcessingStatuses(prev =>
-              prev.map((status, idx) =>
-                idx === i
-                  ? { ...status, convertedAudioBlob: result.outputBlob }
-                  : status
-              )
-            );
-            const transcriptionPromise = processTranscription(file, i, result.outputBlob);
-            transcriptionPromises.push(transcriptionPromise);
+
+            // デバッグ用: 意図的にFFmpegエラーを発生させる
+            let result;
+            if (debugErrorMode.ffmpegError && i === debugErrorMode.errorAtFileIndex) {
+              result = {
+                success: false,
+                error: '[デバッグ] 意図的に発生させたFFmpegエラー'
+              };
+            } else {
+              result = await converterRef.current!.convertToMp3(file.file, {
+                bitrate,
+                sampleRate,
+                onProgress: (progress) => {
+                  setProcessingStatuses(prev =>
+                    prev.map((status, idx) =>
+                      idx === i
+                        ? { ...status, audioConversionProgress: Math.round(progress.ratio * 100) }
+                        : status
+                    )
+                  );
+                },
+              });
+            }
+
+            if (!result.success || !result.outputBlob) {
+              setProcessingStatuses(prev =>
+                prev.map((status, idx) =>
+                  idx === i
+                    ? {
+                      ...status,
+                      status: 'error',
+                      error: result.error || '音声変換に失敗しました',
+                      failedPhase: 'audio_conversion'
+                    }
+                    : status
+                )
+              );
+            } else {
+              // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始
+              setProcessingStatuses(prev =>
+                prev.map((status, idx) =>
+                  idx === i
+                    ? { ...status, convertedAudioBlob: result.outputBlob }
+                    : status
+                )
+              );
+              const transcriptionPromise = processTranscription(file, i, result.outputBlob);
+              transcriptionPromises.push(transcriptionPromise);
+            }
+          } finally {
+            // 音声変換処理完了
+            audioConversionQueueRef.current = false;
           }
-        } finally {
-          // 音声変換処理完了
-          audioConversionQueueRef.current = false;
         }
       }
 
@@ -298,9 +315,15 @@ export default function Home() {
                   return status;
                 })
               );
+            } else if (!transcriptionResult.success) {
+              // API呼び出しは成功したが、処理が失敗した場合
+              console.error(`プロンプト「${prompt.name}」での文書生成失敗:`, transcriptionResult.error);
+              throw new Error(transcriptionResult.error || 'Gemini API処理失敗');
             }
           } catch (promptError) {
             console.error(`プロンプト「${prompt.name}」での文書生成エラー:`, promptError);
+            // エラーを再スローして外側のcatchで処理
+            throw promptError;
           }
         })
       );
@@ -401,9 +424,15 @@ export default function Home() {
                   return status;
                 })
               );
+            } else if (!transcriptionResult.success) {
+              // API呼び出しは成功したが、処理が失敗した場合
+              console.error(`プロンプト「${prompt.name}」での文書生成失敗:`, transcriptionResult.error);
+              throw new Error(transcriptionResult.error || 'Gemini API処理失敗');
             }
           } catch (promptError) {
             console.error(`プロンプト「${prompt.name}」での文書生成エラー:`, promptError);
+            // エラーを再スローして外側のcatchで処理
+            throw promptError;
           }
         })
       );
@@ -475,84 +504,100 @@ export default function Home() {
           // Geminiエラーの場合：即座に並列処理を開始
           await processTranscriptionResume(file, fileIndex, status.convertedAudioBlob, status.completedPromptIds);
         } else {
-          // 音声変換エラーの場合：他の音声変換処理が終わるまで待機（直列処理）
-          // 待機中の状態を表示
-          setProcessingStatuses(prev =>
-            prev.map((s, idx) =>
-              idx === fileIndex
-                ? { ...s, phase: 'waiting' }
-                : s
-            )
-          );
+          // 音声ファイルかどうかを判定
+          const isAudioFile = file.file.type.startsWith('audio/') ||
+            file.file.name.toLowerCase().match(/\.(mp3|wav|m4a|aac|ogg|flac)$/);
 
-          // 音声変換処理中の場合は待機
-          while (audioConversionQueueRef.current) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-
-          // 音声変換を開始
-          audioConversionQueueRef.current = true;
-
-          try {
+          if (isAudioFile) {
+            // 音声ファイルの場合：音声変換をスキップして直接文書生成へ
             setProcessingStatuses(prev =>
               prev.map((s, idx) =>
                 idx === fileIndex
-                  ? { ...s, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
+                  ? { ...s, convertedAudioBlob: file.file as Blob }
+                  : s
+              )
+            );
+            await processTranscriptionResume(file, fileIndex, file.file as Blob, status.completedPromptIds);
+          } else {
+            // 動画ファイルで音声変換エラーの場合：他の音声変換処理が終わるまで待機（直列処理）
+            // 待機中の状態を表示
+            setProcessingStatuses(prev =>
+              prev.map((s, idx) =>
+                idx === fileIndex
+                  ? { ...s, phase: 'waiting' }
                   : s
               )
             );
 
-            // デバッグ用: 意図的にFFmpegエラーを発生させる
-            let result;
-            if (debugErrorMode.ffmpegError && fileIndex === debugErrorMode.errorAtFileIndex) {
-              result = {
-                success: false,
-                error: '[デバッグ] 意図的に発生させたFFmpegエラー'
-              };
-            } else {
-              result = await converterRef.current!.convertToMp3(file.file, {
-                bitrate,
-                sampleRate,
-                onProgress: (progress) => {
-                  setProcessingStatuses(prev =>
-                    prev.map((s, idx) =>
-                      idx === fileIndex
-                        ? { ...s, audioConversionProgress: Math.round(progress.ratio * 100) }
-                        : s
-                    )
-                  );
-                },
-              });
+            // 音声変換処理中の場合は待機
+            while (audioConversionQueueRef.current) {
+              await new Promise(resolve => setTimeout(resolve, 100));
             }
 
-            if (!result.success || !result.outputBlob) {
+            // 音声変換を開始
+            audioConversionQueueRef.current = true;
+
+            try {
               setProcessingStatuses(prev =>
                 prev.map((s, idx) =>
                   idx === fileIndex
-                    ? {
-                      ...s,
-                      status: 'error',
-                      error: result.error || '音声変換に失敗しました',
-                      failedPhase: 'audio_conversion',
-                      isResuming: false
-                    }
+                    ? { ...s, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
                     : s
                 )
               );
-            } else {
-              // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を開始
-              setProcessingStatuses(prev =>
-                prev.map((s, idx) =>
-                  idx === fileIndex
-                    ? { ...s, convertedAudioBlob: result.outputBlob }
-                    : s
-                )
-              );
-              await processTranscriptionResume(file, fileIndex, result.outputBlob, status.completedPromptIds);
+
+              // デバッグ用: 意図的にFFmpegエラーを発生させる
+              let result;
+              if (debugErrorMode.ffmpegError && fileIndex === debugErrorMode.errorAtFileIndex) {
+                result = {
+                  success: false,
+                  error: '[デバッグ] 意図的に発生させたFFmpegエラー'
+                };
+              } else {
+                result = await converterRef.current!.convertToMp3(file.file, {
+                  bitrate,
+                  sampleRate,
+                  onProgress: (progress) => {
+                    setProcessingStatuses(prev =>
+                      prev.map((s, idx) =>
+                        idx === fileIndex
+                          ? { ...s, audioConversionProgress: Math.round(progress.ratio * 100) }
+                          : s
+                      )
+                    );
+                  },
+                });
+              }
+
+              if (!result.success || !result.outputBlob) {
+                setProcessingStatuses(prev =>
+                  prev.map((s, idx) =>
+                    idx === fileIndex
+                      ? {
+                        ...s,
+                        status: 'error',
+                        error: result.error || '音声変換に失敗しました',
+                        failedPhase: 'audio_conversion',
+                        isResuming: false
+                      }
+                      : s
+                  )
+                );
+              } else {
+                // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を開始
+                setProcessingStatuses(prev =>
+                  prev.map((s, idx) =>
+                    idx === fileIndex
+                      ? { ...s, convertedAudioBlob: result.outputBlob }
+                      : s
+                  )
+                );
+                await processTranscriptionResume(file, fileIndex, result.outputBlob, status.completedPromptIds);
+              }
+            } finally {
+              // 音声変換処理完了
+              audioConversionQueueRef.current = false;
             }
-          } finally {
-            // 音声変換処理完了
-            audioConversionQueueRef.current = false;
           }
         }
 

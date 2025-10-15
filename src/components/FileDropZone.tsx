@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
-import { Upload, X, FileVideo } from 'lucide-react';
+import { Upload, X, FileVideo, FileAudio } from 'lucide-react';
 
 interface FileDropZoneProps {
     onFilesSelected: (files: File[]) => void;
@@ -32,7 +32,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
 
         const files = Array.from(e.dataTransfer.files).filter(file =>
             file.type.startsWith('video/') ||
-            file.name.toLowerCase().match(/\.(mp4|mov|avi|mkv|webm)$/)
+            file.type.startsWith('audio/') ||
+            file.name.toLowerCase().match(/\.(mp4|mov|avi|mkv|webm|mp3|wav|m4a|aac|ogg|flac)$/)
         );
 
         if (files.length > 0) {
@@ -43,7 +44,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
     const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []).filter(file =>
             file.type.startsWith('video/') ||
-            file.name.toLowerCase().match(/\.(mp4|mov|avi|mkv|webm)$/)
+            file.type.startsWith('audio/') ||
+            file.name.toLowerCase().match(/\.(mp4|mov|avi|mkv|webm|mp3|wav|m4a|aac|ogg|flac)$/)
         );
 
         if (files.length > 0) {
@@ -64,8 +66,8 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
             {/* ドロップゾーン */}
             <div
                 className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-colors ${isDragOver
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-300 hover:border-gray-400'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-300 hover:border-gray-400'
                     }`}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
@@ -74,7 +76,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
                 <input
                     type="file"
                     multiple
-                    accept="video/*,.mp4,.mov,.avi,.mkv,.webm"
+                    accept="video/*,audio/*,.mp4,.mov,.avi,.mkv,.webm,.mp3,.wav,.m4a,.aac,.ogg,.flac"
                     onChange={handleFileInput}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                 />
@@ -86,13 +88,14 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
 
                     <div>
                         <p className="text-lg font-medium text-gray-900">
-                            動画ファイルをドラッグ&ドロップ
+                            動画・音声ファイルをドラッグ&ドロップ
                         </p>
                         <p className="text-sm text-gray-500 mt-1">
                             またはクリックしてファイルを選択
                         </p>
                         <p className="text-xs text-gray-400 mt-2">
-                            対応形式: MP4, MOV, AVI, MKV, WebM
+                            動画: MP4, MOV, AVI, MKV, WebM<br />
+                            音声: MP3, WAV, M4A, AAC, OGG, FLAC
                         </p>
                     </div>
                 </div>
@@ -105,31 +108,40 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
                         選択されたファイル ({selectedFiles.length}件)
                     </h3>
                     <div className="space-y-2">
-                        {selectedFiles.map((file, index) => (
-                            <div
-                                key={`${file.name}-${index}`}
-                                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                            >
-                                <div className="flex items-center space-x-3">
-                                    <FileVideo className="w-5 h-5 text-blue-600" />
-                                    <div>
-                                        <p className="text-sm font-medium text-gray-900">
-                                            {file.name}
-                                        </p>
-                                        <p className="text-xs text-gray-500">
-                                            {formatFileSize(file.size)}
-                                        </p>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => onRemoveFile(index)}
-                                    className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                                    title="ファイルを削除"
+                        {selectedFiles.map((file, index) => {
+                            const isAudio = file.type.startsWith('audio/') ||
+                                file.name.toLowerCase().match(/\.(mp3|wav|m4a|aac|ogg|flac)$/);
+
+                            return (
+                                <div
+                                    key={`${file.name}-${index}`}
+                                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
                                 >
-                                    <X className="w-4 h-4" />
-                                </button>
-                            </div>
-                        ))}
+                                    <div className="flex items-center space-x-3">
+                                        {isAudio ? (
+                                            <FileAudio className="w-5 h-5 text-purple-600" />
+                                        ) : (
+                                            <FileVideo className="w-5 h-5 text-blue-600" />
+                                        )}
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-900">
+                                                {file.name}
+                                            </p>
+                                            <p className="text-xs text-gray-500">
+                                                {formatFileSize(file.size)} {isAudio ? '(音声)' : '(動画)'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => onRemoveFile(index)}
+                                        className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                                        title="ファイルを削除"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             )}

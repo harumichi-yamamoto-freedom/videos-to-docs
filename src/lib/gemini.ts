@@ -83,8 +83,16 @@ export class GeminiClient {
             if (error instanceof Error) {
                 errorMessage = error.message;
 
+                // ネットワークエラーチェック
+                if (errorMessage.includes('fetch') ||
+                    errorMessage.includes('network') ||
+                    errorMessage.includes('Failed to fetch') ||
+                    errorMessage.includes('NetworkError') ||
+                    errorMessage.toLowerCase().includes('offline')) {
+                    errorMessage = 'ネットワークエラー: インターネット接続を確認してください。';
+                }
                 // APIキーのエラーチェック
-                if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('API key not valid')) {
+                else if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('API key not valid')) {
                     errorMessage = 'Gemini APIキーが無効です。.env.localファイルを確認してください。';
                 } else if (errorMessage.includes('not found') || errorMessage.includes('404')) {
                     errorMessage = '指定されたモデルが見つかりません。Gemini APIキーが正しく設定されているか確認してください。';
