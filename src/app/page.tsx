@@ -9,7 +9,7 @@ import { VideoConverter } from '@/lib/ffmpeg';
 import { GeminiClient } from '@/lib/gemini';
 import { saveTranscription } from '@/lib/firestore';
 import { Prompt, getPrompts } from '@/lib/prompts';
-import { Music, Sparkles, FileText, Settings, CheckSquare, Square } from 'lucide-react';
+import { Music, Sparkles, FileText, Settings, CheckSquare, Square, Loader2 } from 'lucide-react';
 
 interface FileWithPrompts {
   file: File;
@@ -141,10 +141,56 @@ export default function Home() {
         setFfmpegLoaded(true);
       }
 
-      // 並列処理: 各ファイルの処理を同時に開始
-      await Promise.all(
-        selectedFiles.map((file, index) => processFile(file, index))
-      );
+      // パイプライン処理: 音声変換（直列）→ 変換完了次第、文書生成を並列開始
+      const transcriptionPromises: Promise<void>[] = [];
+
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i];
+
+        // 音声変換開始
+        setProcessingStatuses(prev =>
+          prev.map((status, idx) =>
+            idx === i
+              ? { ...status, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
+              : status
+          )
+        );
+
+        const result = await converterRef.current!.convertToMp3(file.file, {
+          bitrate,
+          sampleRate,
+          onProgress: (progress) => {
+            setProcessingStatuses(prev =>
+              prev.map((status, idx) =>
+                idx === i
+                  ? { ...status, audioConversionProgress: Math.round(progress.ratio * 100) }
+                  : status
+              )
+            );
+          },
+        });
+
+        if (!result.success || !result.outputBlob) {
+          setProcessingStatuses(prev =>
+            prev.map((status, idx) =>
+              idx === i
+                ? {
+                  ...status,
+                  status: 'error',
+                  error: result.error || '音声変換に失敗しました'
+                }
+                : status
+            )
+          );
+        } else {
+          // 音声変換が成功したら、すぐに文書生成を並列で開始
+          const transcriptionPromise = processTranscription(file, i, result.outputBlob);
+          transcriptionPromises.push(transcriptionPromise);
+        }
+      }
+
+      // すべての文書生成が完了するまで待機
+      await Promise.all(transcriptionPromises);
 
     } catch (error) {
       console.error('処理エラー:', error);
@@ -154,37 +200,10 @@ export default function Home() {
     }
   };
 
-  // 個別ファイルの処理（並列実行される）
-  const processFile = async (file: FileWithPrompts, fileIndex: number) => {
+  // 文書生成処理（並列実行される）
+  const processTranscription = async (file: FileWithPrompts, fileIndex: number, audioBlob: Blob) => {
     try {
-      // フェーズ1: 音声変換
-      setProcessingStatuses(prev =>
-        prev.map((status, idx) =>
-          idx === fileIndex
-            ? { ...status, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
-            : status
-        )
-      );
-
-      const result = await converterRef.current!.convertToMp3(file.file, {
-        bitrate,
-        sampleRate,
-        onProgress: (progress) => {
-          setProcessingStatuses(prev =>
-            prev.map((status, idx) =>
-              idx === fileIndex && status.phase === 'audio_conversion'
-                ? { ...status, audioConversionProgress: Math.round(progress.ratio * 100) }
-                : status
-            )
-          );
-        },
-      });
-
-      if (!result.success || !result.outputBlob) {
-        throw new Error(result.error || '音声変換に失敗しました');
-      }
-
-      // フェーズ2: 文書生成（複数プロンプトで並列処理）
+      // 文書生成開始
       setProcessingStatuses(prev =>
         prev.map((status, idx) =>
           idx === fileIndex
@@ -203,7 +222,7 @@ export default function Home() {
         selectedPrompts.map(async (prompt) => {
           try {
             const transcriptionResult = await geminiClientRef.current!.transcribeAudio(
-              result.outputBlob!,
+              audioBlob,
               file.file.name,
               prompt.content
             );
@@ -249,7 +268,7 @@ export default function Home() {
       );
 
     } catch (error) {
-      console.error(`ファイル ${file.file.name} の処理エラー:`, error);
+      console.error(`ファイル ${file.file.name} の文書生成エラー:`, error);
       setProcessingStatuses(prev =>
         prev.map((status, idx) =>
           idx === fileIndex
@@ -450,16 +469,11 @@ export default function Home() {
 
                         {/* 文章生成中 */}
                         {status.phase === 'text_generation' && (
-                          <div>
-                            <p className="text-sm font-medium text-purple-800 mb-1">
+                          <div className="flex items-center space-x-3">
+                            <Loader2 className="w-5 h-5 text-purple-600 animate-spin" />
+                            <p className="text-sm font-medium text-purple-800">
                               文章生成中: {status.transcriptionCount}/{status.totalTranscriptions}
                             </p>
-                            <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                              <div
-                                className="h-full bg-purple-600 transition-all duration-300"
-                                style={{ width: `${(status.transcriptionCount / status.totalTranscriptions) * 100}%` }}
-                              />
-                            </div>
                           </div>
                         )}
 

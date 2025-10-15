@@ -49,39 +49,56 @@ export class VideoConverter {
 
         const { bitrate = '192k', sampleRate = 44100, onProgress } = options;
 
-        try {
-            // 入力ファイル名を生成
-            const inputFileName = `input_${Date.now()}.${videoFile.name.split('.').pop()}`;
-            const outputFileName = `output_${Date.now()}.mp3`;
+        const inputFileName = `input_${Date.now()}.${videoFile.name.split('.').pop()}`;
+        const outputFileName = `output_${Date.now()}.mp3`;
 
+        try {
             // ファイルをFFmpegに書き込み
             await this.ffmpeg.writeFile(inputFileName, await fetchFile(videoFile));
 
-            // 進捗監視の設定
-            this.ffmpeg.on('progress', ({ progress }) => {
+            // 進捗監視のハンドラーを定義
+            const progressHandler = ({ progress }: { progress: number }) => {
                 if (onProgress) {
                     onProgress({ ratio: progress });
                 }
-            });
+            };
 
-            // MP3に変換
-            await this.ffmpeg.exec([
-                '-i', inputFileName,
-                '-vn', // ビデオストリームを無効化
-                '-acodec', 'libmp3lame',
-                '-ab', bitrate,
-                '-ar', sampleRate.toString(),
-                '-y', // 出力ファイルを上書き
-                outputFileName
-            ]);
+            // 進捗監視の設定
+            this.ffmpeg.on('progress', progressHandler);
+
+            try {
+                // MP3に変換
+                await this.ffmpeg.exec([
+                    '-i', inputFileName,
+                    '-vn', // ビデオストリームを無効化
+                    '-acodec', 'libmp3lame',
+                    '-ab', bitrate,
+                    '-ar', sampleRate.toString(),
+                    '-y', // 出力ファイルを上書き
+                    outputFileName
+                ]);
+            } finally {
+                // 進捗監視を解除
+                this.ffmpeg.off('progress', progressHandler);
+            }
 
             // 出力ファイルを読み取り
             const data = await this.ffmpeg.readFile(outputFileName);
-            const outputBlob = new Blob([data], { type: 'audio/mpeg' });
+            // Uint8Arrayに変換してからBlobを作成
+            const uint8Array = new Uint8Array(data as Uint8Array);
+            const outputBlob = new Blob([uint8Array], { type: 'audio/mpeg' });
 
-            // 一時ファイルを削除
-            await this.ffmpeg.deleteFile(inputFileName);
-            await this.ffmpeg.deleteFile(outputFileName);
+            // 一時ファイルを削除（エラーを無視）
+            try {
+                await this.ffmpeg.deleteFile(inputFileName);
+            } catch {
+                // 削除エラーは無視
+            }
+            try {
+                await this.ffmpeg.deleteFile(outputFileName);
+            } catch {
+                // 削除エラーは無視
+            }
 
             return {
                 success: true,
@@ -89,6 +106,19 @@ export class VideoConverter {
             };
         } catch (error) {
             console.error('変換エラー:', error);
+
+            // エラー時もクリーンアップを試みる
+            try {
+                await this.ffmpeg.deleteFile(inputFileName);
+            } catch {
+                // 削除エラーは無視
+            }
+            try {
+                await this.ffmpeg.deleteFile(outputFileName);
+            } catch {
+                // 削除エラーは無視
+            }
+
             return {
                 success: false,
                 error: error instanceof Error ? error.message : '不明なエラーが発生しました'
