@@ -27,6 +27,7 @@ interface FileProcessingStatus {
   convertedAudioBlob?: Blob; // 変換済み音声データ（再開用）
   completedPromptIds: string[]; // 完了したプロンプトID（再開用）
   failedPhase?: 'audio_conversion' | 'text_generation'; // 失敗したフェーズ
+  isResuming?: boolean; // 再開処理中かどうか
 }
 
 export default function Home() {
@@ -42,7 +43,10 @@ export default function Home() {
   const [bulkSelectedPromptIds, setBulkSelectedPromptIds] = useState<string[]>([]);
   const converterRef = useRef<VideoConverter | null>(null);
   const geminiClientRef = useRef<GeminiClient | null>(null);
-  
+
+  // 音声変換の処理キュー（直列処理用）
+  const audioConversionQueueRef = useRef<boolean>(false); // 音声変換処理中かどうか
+
   // デバッグ用: テストエラーの設定
   const [debugErrorMode, setDebugErrorMode] = useState({
     ffmpegError: false,
@@ -158,62 +162,70 @@ export default function Home() {
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
 
-        // 音声変換開始
-        setProcessingStatuses(prev =>
-          prev.map((status, idx) =>
-            idx === i
-              ? { ...status, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
-              : status
-          )
-        );
+        // 音声変換処理を開始（直列処理）
+        audioConversionQueueRef.current = true;
 
-        // デバッグ用: 意図的にFFmpegエラーを発生させる
-        let result;
-        if (debugErrorMode.ffmpegError && i === debugErrorMode.errorAtFileIndex) {
-          result = {
-            success: false,
-            error: '[デバッグ] 意図的に発生させたFFmpegエラー'
-          };
-        } else {
-          result = await converterRef.current!.convertToMp3(file.file, {
-            bitrate,
-            sampleRate,
-            onProgress: (progress) => {
-              setProcessingStatuses(prev =>
-                prev.map((status, idx) =>
-                  idx === i
-                    ? { ...status, audioConversionProgress: Math.round(progress.ratio * 100) }
-                    : status
-                )
-              );
-            },
-          });
-        }
-
-        if (!result.success || !result.outputBlob) {
+        try {
+          // 音声変換開始
           setProcessingStatuses(prev =>
             prev.map((status, idx) =>
               idx === i
-                ? {
-                  ...status,
-                  status: 'error',
-                  error: result.error || '音声変換に失敗しました',
-                  failedPhase: 'audio_conversion'
-                }
+                ? { ...status, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
                 : status
             )
           );
-        } else {
-          // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始
-          setProcessingStatuses(prev =>
-            prev.map((status, idx) =>
-              idx === i
-                ? { ...status, convertedAudioBlob: result.outputBlob }
-                : status
-            )
-          );
-          const transcriptionPromise = processTranscription(file, i, result.outputBlob);
-          transcriptionPromises.push(transcriptionPromise);
+
+          // デバッグ用: 意図的にFFmpegエラーを発生させる
+          let result;
+          if (debugErrorMode.ffmpegError && i === debugErrorMode.errorAtFileIndex) {
+            result = {
+              success: false,
+              error: '[デバッグ] 意図的に発生させたFFmpegエラー'
+            };
+          } else {
+            result = await converterRef.current!.convertToMp3(file.file, {
+              bitrate,
+              sampleRate,
+              onProgress: (progress) => {
+                setProcessingStatuses(prev =>
+                  prev.map((status, idx) =>
+                    idx === i
+                      ? { ...status, audioConversionProgress: Math.round(progress.ratio * 100) }
+                      : status
+                  )
+                );
+              },
+            });
+          }
+
+          if (!result.success || !result.outputBlob) {
+            setProcessingStatuses(prev =>
+              prev.map((status, idx) =>
+                idx === i
+                  ? {
+                    ...status,
+                    status: 'error',
+                    error: result.error || '音声変換に失敗しました',
+                    failedPhase: 'audio_conversion'
+                  }
+                  : status
+              )
+            );
+          } else {
+            // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始
+            setProcessingStatuses(prev =>
+              prev.map((status, idx) =>
+                idx === i
+                  ? { ...status, convertedAudioBlob: result.outputBlob }
+                  : status
+              )
+            );
+            const transcriptionPromise = processTranscription(file, i, result.outputBlob);
+            transcriptionPromises.push(transcriptionPromise);
+          }
+        } finally {
+          // 音声変換処理完了
+          audioConversionQueueRef.current = false;
         }
       }
 
@@ -531,6 +543,155 @@ export default function Home() {
     }
   };
 
+  // 個別ファイルの再開処理
+  const handleResumeFile = (fileIndex: number) => {
+    const file = selectedFiles[fileIndex];
+    const status = processingStatuses[fileIndex];
+
+    if (!file || !status) return;
+    if (status.isResuming) return; // 既に再開処理中の場合はスキップ
+
+    // 再開処理中フラグを立てる
+    setProcessingStatuses(prev =>
+      prev.map((s, idx) =>
+        idx === fileIndex
+          ? { ...s, isResuming: true, error: undefined }
+          : s
+      )
+    );
+
+    // 非同期処理を開始（await せずにバックグラウンドで実行）
+    (async () => {
+      // VideoConverterインスタンスを作成
+      if (!converterRef.current) {
+        converterRef.current = new VideoConverter();
+      }
+
+      // GeminiClientインスタンスを作成
+      if (!geminiClientRef.current) {
+        geminiClientRef.current = new GeminiClient();
+      }
+
+      try {
+        // FFmpegを初回のみロード
+        if (!ffmpegLoaded) {
+          await converterRef.current.load();
+          setFfmpegLoaded(true);
+        }
+
+        // 音声変換済みの場合は、文書生成のみを実行（並列処理可能）
+        if (status.convertedAudioBlob) {
+          // Geminiエラーの場合：即座に並列処理を開始
+          await processTranscriptionResume(file, fileIndex, status.convertedAudioBlob, status.completedPromptIds);
+        } else {
+          // 音声変換エラーの場合：他の音声変換処理が終わるまで待機（直列処理）
+          // 待機中の状態を表示
+          setProcessingStatuses(prev =>
+            prev.map((s, idx) =>
+              idx === fileIndex
+                ? { ...s, phase: 'waiting' }
+                : s
+            )
+          );
+
+          // 音声変換処理中の場合は待機
+          while (audioConversionQueueRef.current) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+
+          // 音声変換を開始
+          audioConversionQueueRef.current = true;
+
+          try {
+            setProcessingStatuses(prev =>
+              prev.map((s, idx) =>
+                idx === fileIndex
+                  ? { ...s, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
+                  : s
+              )
+            );
+
+            // デバッグ用: 意図的にFFmpegエラーを発生させる
+            let result;
+            if (debugErrorMode.ffmpegError && fileIndex === debugErrorMode.errorAtFileIndex) {
+              result = {
+                success: false,
+                error: '[デバッグ] 意図的に発生させたFFmpegエラー'
+              };
+            } else {
+              result = await converterRef.current!.convertToMp3(file.file, {
+                bitrate,
+                sampleRate,
+                onProgress: (progress) => {
+                  setProcessingStatuses(prev =>
+                    prev.map((s, idx) =>
+                      idx === fileIndex
+                        ? { ...s, audioConversionProgress: Math.round(progress.ratio * 100) }
+                        : s
+                    )
+                  );
+                },
+              });
+            }
+
+            if (!result.success || !result.outputBlob) {
+              setProcessingStatuses(prev =>
+                prev.map((s, idx) =>
+                  idx === fileIndex
+                    ? {
+                      ...s,
+                      status: 'error',
+                      error: result.error || '音声変換に失敗しました',
+                      failedPhase: 'audio_conversion',
+                      isResuming: false
+                    }
+                    : s
+                )
+              );
+            } else {
+              // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を開始
+              setProcessingStatuses(prev =>
+                prev.map((s, idx) =>
+                  idx === fileIndex
+                    ? { ...s, convertedAudioBlob: result.outputBlob }
+                    : s
+                )
+              );
+              await processTranscriptionResume(file, fileIndex, result.outputBlob, status.completedPromptIds);
+            }
+          } finally {
+            // 音声変換処理完了
+            audioConversionQueueRef.current = false;
+          }
+        }
+
+      } catch (error) {
+        console.error('個別ファイル再開処理エラー:', error);
+        setProcessingStatuses(prev =>
+          prev.map((s, idx) =>
+            idx === fileIndex
+              ? {
+                ...s,
+                status: 'error',
+                error: error instanceof Error ? error.message : '不明なエラー',
+                isResuming: false
+              }
+              : s
+          )
+        );
+      } finally {
+        // 再開処理完了フラグをクリア
+        setProcessingStatuses(prev =>
+          prev.map((s, idx) =>
+            idx === fileIndex && s.isResuming
+              ? { ...s, isResuming: false }
+              : s
+          )
+        );
+      }
+    })();
+  };
+
   // リセット
   const handleReset = () => {
     setSelectedFiles([]);
@@ -667,23 +828,12 @@ export default function Home() {
               )}
 
               {processingStatuses.length > 0 && !isProcessing && (
-                <div className="mt-6 flex space-x-3">
-                  {/* エラーまたは未完了のファイルがある場合は再開ボタンを表示 */}
-                  {processingStatuses.some(s => s.status === 'error' || s.status !== 'completed') && (
-                    <button
-                      onClick={handleResumeProcessing}
-                      className="flex-1 bg-orange-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-orange-700 transition-colors shadow-md hover:shadow-lg"
-                    >
-                      🔄 処理を再開
-                    </button>
-                  )}
-                  <button
-                    onClick={handleReset}
-                    className="flex-1 bg-gray-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-gray-700 transition-colors"
-                  >
-                    新しい処理を開始
-                  </button>
-                </div>
+                <button
+                  onClick={handleReset}
+                  className="mt-6 w-full bg-gray-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-gray-700 transition-colors"
+                >
+                  新しい処理を開始
+                </button>
               )}
             </div>
 
@@ -738,42 +888,49 @@ export default function Home() {
 
                         {/* 完了 */}
                         {status.phase === 'completed' && (
-                          <div>
-                            <p className="text-sm font-medium text-green-800 mb-1">
-                              ✅ 完了
-                            </p>
-                            <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                              <div className="h-full bg-green-600" style={{ width: '100%' }} />
-                            </div>
-                          </div>
+                          <p className="text-sm font-medium text-green-800">
+                            ✅ 完了
+                          </p>
                         )}
 
                         {/* 待機中 */}
-                        {status.phase === 'waiting' && (
+                        {status.phase === 'waiting' && status.isResuming && (
+                          <p className="text-sm text-yellow-700">
+                            🕐 音声変換待機中...（他のファイルの音声変換が終わり次第開始されます）
+                          </p>
+                        )}
+                        {status.phase === 'waiting' && !status.isResuming && (
                           <p className="text-sm text-gray-500">待機中...</p>
                         )}
 
                         {/* エラー */}
-                        {status.status === 'error' && (
-                          <div>
-                            <p className="text-sm font-medium text-red-800 mb-1">
-                              ❌ エラーが発生しました
-                              {status.failedPhase === 'audio_conversion' && ' (音声変換)'}
-                              {status.failedPhase === 'text_generation' && ' (文書生成)'}
-                            </p>
-                            {status.completedPromptIds.length > 0 && (
-                              <p className="text-xs text-green-600 mb-1">
-                                ✓ 完了: {status.completedPromptIds.length}/{status.totalTranscriptions} プロンプト
+                        {status.status === 'error' && !status.isResuming && (
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-red-800 mb-1">
+                                ❌ エラーが発生しました
+                                {status.failedPhase === 'audio_conversion' && ' (音声変換)'}
+                                {status.failedPhase === 'text_generation' && ' (文書生成)'}
                               </p>
-                            )}
-                            {status.convertedAudioBlob && (
-                              <p className="text-xs text-blue-600 mb-1">
-                                ✓ 音声変換済み（再開時はスキップされます）
-                              </p>
-                            )}
-                            <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                              <div className="h-full bg-red-600" style={{ width: '100%' }} />
+                              {status.completedPromptIds.length > 0 && (
+                                <p className="text-xs text-green-600 mb-1">
+                                  ✓ 完了: {status.completedPromptIds.length}/{status.totalTranscriptions} プロンプト
+                                </p>
+                              )}
+                              {status.convertedAudioBlob && (
+                                <p className="text-xs text-blue-600 mb-1">
+                                  ✓ 音声変換済み（再開時はスキップされます）
+                                </p>
+                              )}
                             </div>
+                            <button
+                              onClick={() => handleResumeFile(index)}
+                              disabled={status.isResuming}
+                              className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
+                            >
+                              <span>🔄</span>
+                              <span>{status.isResuming ? '再開中...' : '再開'}</span>
+                            </button>
                           </div>
                         )}
                       </div>
