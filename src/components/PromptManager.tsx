@@ -50,7 +50,7 @@ export const PromptManager: React.FC = () => {
             setIsCreating(false);
             setEditName('');
             setEditContent('');
-        } catch (error) {
+        } catch {
             alert('プロンプトの作成に失敗しました');
         }
     };
@@ -72,7 +72,7 @@ export const PromptManager: React.FC = () => {
             await updatePrompt(promptId, { name: editName, content: editContent });
             await loadPrompts();
             setEditingId(null);
-        } catch (error) {
+        } catch {
             alert('プロンプトの更新に失敗しました');
         }
     };
@@ -89,7 +89,7 @@ export const PromptManager: React.FC = () => {
         try {
             await deletePrompt(prompt.id!);
             await loadPrompts();
-        } catch (error) {
+        } catch {
             alert('プロンプトの削除に失敗しました');
         }
     };

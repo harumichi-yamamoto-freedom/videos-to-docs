@@ -45,7 +45,7 @@ WebAssembly (FFmpeg.wasm) を使用して、ブラウザ内で動画をMP3に変
 
 ```bash
 git clone <repository-url>
-cd video-to-mp3-converter
+cd videos-to-docs
 ```
 
 ### 2. 依存関係のインストール

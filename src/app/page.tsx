@@ -43,6 +43,7 @@ export default function Home() {
   // プロンプト一覧を読み込み
   useEffect(() => {
     loadPrompts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadPrompts = async () => {
@@ -199,7 +200,7 @@ export default function Home() {
 
       // 各プロンプトで文書生成（並列処理）
       await Promise.all(
-        selectedPrompts.map(async (prompt, promptIndex) => {
+        selectedPrompts.map(async (prompt) => {
           try {
             const transcriptionResult = await geminiClientRef.current!.transcribeAudio(
               result.outputBlob!,

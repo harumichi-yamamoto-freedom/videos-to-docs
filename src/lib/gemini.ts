@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
 
 export interface TranscriptionResult {
     success: boolean;
@@ -8,7 +8,7 @@ export interface TranscriptionResult {
 
 export class GeminiClient {
     private genAI: GoogleGenerativeAI;
-    private model: any;
+    private model: GenerativeModel;
 
     constructor() {
         const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
