@@ -2,9 +2,8 @@ import { useState, useRef, useCallback } from 'react';
 import { VideoConverter } from '@/lib/ffmpeg';
 import { GeminiClient } from '@/lib/gemini';
 import { saveTranscription } from '@/lib/firestore';
-import { FileProcessingStatus, FileWithPrompts, DebugErrorMode, SegmentStatus } from '@/types/processing';
+import { FileProcessingStatus, FileWithPrompts, DebugErrorMode } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
-import { calculateOverallProgress } from '@/utils/progressCalculator';
 
 export const useVideoProcessing = (
     availablePrompts: Prompt[],

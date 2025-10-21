@@ -19,7 +19,7 @@ export const convertVideoToAudioSegments = async (
         let totalDuration: number;
         try {
             totalDuration = await converter.getVideoDuration(file.file);
-        } catch (durationError) {
+        } catch {
             setProcessingStatuses(prev =>
                 prev.map((status, idx) =>
                     idx === fileIndex
