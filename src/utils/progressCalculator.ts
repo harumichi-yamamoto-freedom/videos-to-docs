@@ -25,3 +25,4 @@ export const calculateOverallProgress = (segments: SegmentStatus[]): number => {
     return result;
 };
 
+

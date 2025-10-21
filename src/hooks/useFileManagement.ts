@@ -35,12 +35,24 @@ export const useFileManagement = (bulkSelectedPromptIds: string[]) => {
         setSelectedFiles([]);
     }, []);
 
+    // 削除されたプロンプトIDをファイルの選択から除外
+    const cleanupDeletedPrompts = useCallback((validPromptIds: string[]) => {
+        setSelectedFiles(prev => prev.map(fileWithPrompts => ({
+            ...fileWithPrompts,
+            selectedPromptIds: fileWithPrompts.selectedPromptIds.filter(id =>
+                validPromptIds.includes(id)
+            )
+        })));
+    }, []);
+
     return {
         selectedFiles,
         handleFilesSelected,
         handleRemoveFile,
         toggleFilePrompt,
         clearFiles,
+        cleanupDeletedPrompts,
     };
 };
+
 

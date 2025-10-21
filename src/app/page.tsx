@@ -37,7 +37,7 @@ export default function Home() {
   });
 
   // プロンプト管理
-  const { availablePrompts, bulkSelectedPromptIds, toggleBulkPrompt } = usePromptManagement();
+  const { availablePrompts, bulkSelectedPromptIds, toggleBulkPrompt, reloadPrompts } = usePromptManagement();
 
   // ファイル管理
   const {
@@ -46,6 +46,7 @@ export default function Home() {
     handleRemoveFile,
     toggleFilePrompt,
     clearFiles,
+    cleanupDeletedPrompts,
   } = useFileManagement(bulkSelectedPromptIds);
 
   // ビデオ処理
@@ -126,8 +127,22 @@ export default function Home() {
     setShowPromptCreateModal(false);
   };
 
-  const handlePromptSaved = () => {
+  const handlePromptSaved = async () => {
+    // 左側のプロンプト一覧を更新
     setPromptUpdateTrigger(prev => prev + 1);
+    // 右側のプロンプト一覧も更新
+    const updatedPrompts = await reloadPrompts();
+    // ファイルごとの選択プロンプトから削除されたものを除外
+    const validPromptIds = updatedPrompts.map(p => p.id!);
+    cleanupDeletedPrompts(validPromptIds);
+  };
+
+  const handlePromptDeleted = async () => {
+    // 右側のプロンプト一覧を更新
+    const updatedPrompts = await reloadPrompts();
+    // ファイルごとの選択プロンプトから削除されたものを除外
+    const validPromptIds = updatedPrompts.map(p => p.id!);
+    cleanupDeletedPrompts(validPromptIds);
   };
 
   const handleDownloadDocument = () => {
@@ -186,6 +201,7 @@ export default function Home() {
               <PromptListSidebar
                 onPromptClick={handlePromptClick}
                 onCreateClick={handlePromptCreateClick}
+                onPromptDeleted={handlePromptDeleted}
                 updateTrigger={promptUpdateTrigger}
               />
             </div>

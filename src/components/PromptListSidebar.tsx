@@ -10,12 +10,14 @@ import { Prompt, getPrompts, deletePrompt } from '@/lib/prompts';
 export interface PromptListSidebarProps {
     onPromptClick: (prompt: Prompt) => void;
     onCreateClick: () => void;
+    onPromptDeleted?: () => void;
     updateTrigger?: number;
 }
 
 export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
     onPromptClick,
     onCreateClick,
+    onPromptDeleted,
     updateTrigger,
 }) => {
     const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -66,6 +68,10 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
         try {
             await deletePrompt(prompt.id!);
             await loadPromptsQuietly();
+            // 親コンポーネントに削除を通知
+            if (onPromptDeleted) {
+                onPromptDeleted();
+            }
         } catch (error) {
             alert('削除に失敗しました');
             console.error(error);
