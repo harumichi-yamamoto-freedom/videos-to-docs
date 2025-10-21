@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { TranscriptionDocument, getTranscriptions, deleteTranscription } from '@/lib/firestore';
+import { TranscriptionDocument, getTranscriptionDocuments, deleteTranscription } from '@/lib/firestore';
 import { FileText, Trash2, Calendar, Music, Video, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 
 export const TranscriptionList: React.FC = () => {
@@ -15,7 +15,7 @@ export const TranscriptionList: React.FC = () => {
         try {
             setLoading(true);
             setError(null);
-            const docs = await getTranscriptions(20);
+            const docs = await getTranscriptionDocuments(20);
             setDocuments(docs);
         } catch (err) {
             setError(err instanceof Error ? err.message : '文書の取得に失敗しました');

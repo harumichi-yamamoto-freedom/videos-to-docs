@@ -17,9 +17,18 @@ export interface TranscriptionDocument {
     originalFileType: string; // 'video' or 'audio'
     transcription: string;
     promptName: string; // 使用したプロンプト名
-    createdAt: Date;
+    createdAt: any; // Firestore Timestamp または Date
     bitrate?: string;
     sampleRate?: number;
+}
+
+// エイリアス（後方互換性のため）
+export interface Transcription {
+    id?: string;
+    fileName: string;
+    text: string; // transcription のエイリアス
+    promptName: string;
+    createdAt: any;
 }
 
 /**
@@ -52,9 +61,9 @@ export async function saveTranscription(
 }
 
 /**
- * Firestoreから文書を取得（新しい順）
+ * Firestoreから文書を取得（新しい順） - TranscriptionDocument形式
  */
-export async function getTranscriptions(limitCount: number = 10): Promise<TranscriptionDocument[]> {
+export async function getTranscriptionDocuments(limitCount: number = 20): Promise<TranscriptionDocument[]> {
     try {
         const q = query(
             collection(db, 'transcriptions'),
@@ -65,10 +74,10 @@ export async function getTranscriptions(limitCount: number = 10): Promise<Transc
         const querySnapshot = await getDocs(q);
         const documents: TranscriptionDocument[] = [];
 
-        querySnapshot.forEach((doc) => {
-            const data = doc.data();
+        querySnapshot.forEach((docSnapshot) => {
+            const data = docSnapshot.data();
             documents.push({
-                id: doc.id,
+                id: docSnapshot.id,
                 fileName: data.fileName,
                 originalFileType: data.originalFileType,
                 transcription: data.transcription,
@@ -76,6 +85,38 @@ export async function getTranscriptions(limitCount: number = 10): Promise<Transc
                 bitrate: data.bitrate,
                 sampleRate: data.sampleRate,
                 createdAt: data.createdAt.toDate(),
+            });
+        });
+
+        return documents;
+    } catch (error) {
+        console.error('Firestore取得エラー:', error);
+        throw new Error('文書の取得に失敗しました');
+    }
+}
+
+/**
+ * Firestoreから文書を取得（新しい順） - Transcription形式（簡略版）
+ */
+export async function getTranscriptions(limitCount: number = 100): Promise<Transcription[]> {
+    try {
+        const q = query(
+            collection(db, 'transcriptions'),
+            orderBy('createdAt', 'desc'),
+            limit(limitCount)
+        );
+
+        const querySnapshot = await getDocs(q);
+        const documents: Transcription[] = [];
+
+        querySnapshot.forEach((docSnapshot) => {
+            const data = docSnapshot.data();
+            documents.push({
+                id: docSnapshot.id,
+                fileName: data.fileName,
+                text: data.transcription, // transcription を text にマッピング
+                promptName: data.promptName || '不明',
+                createdAt: data.createdAt,
             });
         });
 
