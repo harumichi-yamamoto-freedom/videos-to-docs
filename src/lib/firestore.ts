@@ -17,7 +17,7 @@ export interface TranscriptionDocument {
     originalFileType: string; // 'video' or 'audio'
     transcription: string;
     promptName: string; // 使用したプロンプト名
-    createdAt: any; // Firestore Timestamp または Date
+    createdAt: Timestamp | Date; // Firestore Timestamp または Date
     bitrate?: string;
     sampleRate?: number;
 }
@@ -28,7 +28,7 @@ export interface Transcription {
     fileName: string;
     text: string; // transcription のエイリアス
     promptName: string;
-    createdAt: any;
+    createdAt: Timestamp | Date;
 }
 
 /**

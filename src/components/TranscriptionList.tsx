@@ -45,7 +45,8 @@ export const TranscriptionList: React.FC = () => {
     };
 
     // 日付フォーマット
-    const formatDate = (date: Date) => {
+    const formatDate = (timestamp: Date | { toDate: () => Date }) => {
+        const date = 'toDate' in timestamp ? timestamp.toDate() : timestamp;
         return new Intl.DateTimeFormat('ja-JP', {
             year: 'numeric',
             month: '2-digit',

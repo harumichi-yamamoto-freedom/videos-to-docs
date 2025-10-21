@@ -74,9 +74,9 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         }
     };
 
-    const formatDate = (timestamp: any): string => {
+    const formatDate = (timestamp: Date | { toDate: () => Date } | undefined): string => {
         if (!timestamp) return '';
-        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+        const date = 'toDate' in timestamp ? timestamp.toDate() : timestamp;
         return new Intl.DateTimeFormat('ja-JP', {
             month: 'short',
             day: 'numeric',
