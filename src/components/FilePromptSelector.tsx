@@ -1,85 +1,62 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Prompt, getPrompts } from '@/lib/prompts';
+import React from 'react';
 import { CheckSquare, Square } from 'lucide-react';
+import { FileWithPrompts } from '@/types/processing';
+import { Prompt } from '@/lib/prompts';
 
 interface FilePromptSelectorProps {
-    fileName: string;
-    selectedPromptIds: string[];
-    onPromptsChange: (promptIds: string[]) => void;
+  selectedFiles: FileWithPrompts[];
+  availablePrompts: Prompt[];
+  onToggleFilePrompt: (fileIndex: number, promptId: string) => void;
 }
 
 export const FilePromptSelector: React.FC<FilePromptSelectorProps> = ({
-    fileName,
-    selectedPromptIds,
-    onPromptsChange,
+  selectedFiles,
+  availablePrompts,
+  onToggleFilePrompt,
 }) => {
-    const [prompts, setPrompts] = useState<Prompt[]>([]);
-    const [loading, setLoading] = useState(true);
+  if (selectedFiles.length === 0 || availablePrompts.length === 0) {
+    return null;
+  }
 
-    useEffect(() => {
-        loadPrompts();
-    }, []);
-
-    const loadPrompts = async () => {
-        try {
-            const data = await getPrompts();
-            setPrompts(data);
-        } catch (error) {
-            console.error('プロンプト読み込みエラー:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const togglePrompt = (promptId: string) => {
-        if (selectedPromptIds.includes(promptId)) {
-            onPromptsChange(selectedPromptIds.filter(id => id !== promptId));
-        } else {
-            onPromptsChange([...selectedPromptIds, promptId]);
-        }
-    };
-
-    if (loading) {
-        return <div className="text-xs text-gray-500">読み込み中...</div>;
-    }
-
-    return (
-        <div className="space-y-2">
-            <p className="text-sm font-medium text-gray-700">
-                {fileName} のプロンプトを選択:
+  return (
+    <div className="mt-6 space-y-4">
+      <h3 className="text-lg font-medium text-gray-900">
+        ファイルごとのプロンプト設定
+      </h3>
+      {selectedFiles.map((fileWithPrompts, fileIndex) => (
+        <div key={fileIndex} className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          <p className="text-sm font-medium text-gray-900 mb-3">
+            📄 {fileWithPrompts.file.name}
+          </p>
+          <div className="space-y-1">
+            {availablePrompts.map(prompt => (
+              <div
+                key={prompt.id}
+                className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100 p-2 rounded"
+                onClick={() => onToggleFilePrompt(fileIndex, prompt.id!)}
+              >
+                {fileWithPrompts.selectedPromptIds.includes(prompt.id!) ? (
+                  <CheckSquare className="w-4 h-4 text-blue-600" />
+                ) : (
+                  <Square className="w-4 h-4 text-gray-400" />
+                )}
+                <span className="text-sm text-gray-700">{prompt.name}</span>
+                <span className="text-xs text-gray-500">
+                  ({fileWithPrompts.selectedPromptIds.includes(prompt.id!) ? '選択中' : '未選択'})
+                </span>
+              </div>
+            ))}
+          </div>
+          {fileWithPrompts.selectedPromptIds.length === 0 && (
+            <p className="text-xs text-red-600 mt-2">
+              ⚠️ 最低1つのプロンプトを選択してください
             </p>
-            <div className="space-y-1">
-                {prompts.map((prompt) => (
-                    <label
-                        key={prompt.id}
-                        className="flex items-center space-x-2 cursor-pointer hover:bg-gray-50 p-2 rounded"
-                    >
-                        <input
-                            type="checkbox"
-                            checked={selectedPromptIds.includes(prompt.id!)}
-                            onChange={() => togglePrompt(prompt.id!)}
-                            className="hidden"
-                        />
-                        {selectedPromptIds.includes(prompt.id!) ? (
-                            <CheckSquare className="w-4 h-4 text-blue-600" />
-                        ) : (
-                            <Square className="w-4 h-4 text-gray-400" />
-                        )}
-                        <span className="text-sm text-gray-700">{prompt.name}</span>
-                        {prompt.isDefault && (
-                            <span className="text-xs text-blue-600">(デフォルト)</span>
-                        )}
-                    </label>
-                ))}
-            </div>
-            {selectedPromptIds.length === 0 && (
-                <p className="text-xs text-amber-600">
-                    ⚠️ 最低1つのプロンプトを選択してください
-                </p>
-            )}
+          )}
         </div>
-    );
+      ))}
+    </div>
+  );
 };
 
