@@ -6,10 +6,12 @@ import { getTranscriptions, Transcription, deleteTranscription } from '@/lib/fir
 
 interface DocumentListSidebarProps {
     onDocumentClick: (transcription: Transcription) => void;
+    updateTrigger?: number;
 }
 
 export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
     onDocumentClick,
+    updateTrigger,
 }) => {
     const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
     const [loading, setLoading] = useState(true);
@@ -45,6 +47,13 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         const interval = setInterval(() => loadTranscriptionsQuietly(), 5000);
         return () => clearInterval(interval);
     }, []);
+
+    // 外部からの更新トリガーを監視
+    useEffect(() => {
+        if (updateTrigger !== undefined && updateTrigger > 0) {
+            loadTranscriptionsQuietly();
+        }
+    }, [updateTrigger]);
 
     const downloadDocument = (transcription: Transcription, event: React.MouseEvent) => {
         event.stopPropagation(); // クリックイベントの伝播を防止

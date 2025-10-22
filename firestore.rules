@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ログイン中かどうかを判定
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // 作成時チェック: ゲストの場合
+    function isGuestCreate() {
+      return !isSignedIn()
+        && request.resource.data.ownerType == "guest"
+        && request.resource.data.ownerId == "GUEST";
+    }
+
+    // 作成時チェック: ユーザーの場合
+    function isUserCreate() {
+      return isSignedIn()
+        && request.resource.data.ownerType == "user"
+        && request.resource.data.ownerId == request.auth.uid;
+    }
+
+    // 更新時: 所有フィールドが変更されていないことを保証
+    function ownershipUnchanged() {
+      return resource.data.ownerType == request.resource.data.ownerType
+        && resource.data.ownerId == request.resource.data.ownerId;
+    }
+
+    // 読み取り/更新/削除判定（既存ドキュメントの所有に基づく）
+    function canAccessExisting() {
+      // 移行期間中: ownerType フィールドがない場合は一時的にゲスト扱い
+      let ownerType = resource.data.keys().hasAll(['ownerType']) ? resource.data.ownerType : 'guest';
+      let ownerId = resource.data.keys().hasAll(['ownerId']) ? resource.data.ownerId : 'GUEST';
+      
+      return (
+        ownerType == "guest" // ゲスト共有: 誰でもOK
+      ) || (
+        isSignedIn() // ユーザー専有: ログインユーザーは自分のdocのみ
+        && ownerType == "user"
+        && ownerId == request.auth.uid
+      );
+    }
+
+    // プロンプトコレクションのルール
+    match /prompts/{promptId} {
+      // 読み取り
+      allow get, list: if canAccessExisting();
+
+      // 作成
+      allow create: if isGuestCreate() || isUserCreate();
+
+      // 更新: デフォルトゲストプロンプトは編集不可
+      allow update: if canAccessExisting() 
+        && ownershipUnchanged()
+        && !(resource.data.keys().hasAll(['ownerType', 'isDefault']) 
+            && resource.data.ownerType == "guest" 
+            && resource.data.isDefault == true);
+
+      // 削除: デフォルトゲストプロンプトは削除不可
+      allow delete: if canAccessExisting()
+        && !(resource.data.keys().hasAll(['ownerType', 'isDefault'])
+            && resource.data.ownerType == "guest" 
+            && resource.data.isDefault == true);
+    }
+
+    // 生成文書コレクションのルール
+    match /transcriptions/{docId} {
+      // 読み取り
+      allow get, list: if canAccessExisting();
+
+      // 作成
+      allow create: if isGuestCreate() || isUserCreate();
+
+      // 更新
+      allow update: if canAccessExisting() && ownershipUnchanged();
+
+      // 削除
+      allow delete: if canAccessExisting();
+    }
+  }
+}
+

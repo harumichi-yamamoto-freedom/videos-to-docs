@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { FileText, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
-import { Prompt, getPrompts, deletePrompt } from '@/lib/prompts';
+import { FileText, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp, Lock } from 'lucide-react';
+import { Prompt, getPrompts, deletePrompt, initializeDefaultPrompts } from '@/lib/prompts';
+import { useAuth } from '@/hooks/useAuth';
 
 /**
  * プロンプト一覧サイドバーのProps
@@ -20,17 +21,31 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
     onPromptDeleted,
     updateTrigger,
 }) => {
+    const { user } = useAuth();
     const [prompts, setPrompts] = useState<Prompt[]>([]);
     const [loading, setLoading] = useState(true);
     const [isExpanded, setIsExpanded] = useState(false);
+    const [isInitializing, setIsInitializing] = useState(false);
 
     // 静かに更新（ローディング表示なし）
     const loadPromptsQuietly = async () => {
         try {
             const data = await getPrompts();
-            setPrompts(data);
+
+            // プロンプトが0件の場合、デフォルトプロンプトを自動生成
+            if (data.length === 0 && !isInitializing) {
+                setIsInitializing(true);
+                console.log('プロンプトが0件のため、デフォルトプロンプトを自動生成します...');
+                await initializeDefaultPrompts();
+                const newData = await getPrompts();
+                setPrompts(newData);
+                setIsInitializing(false);
+            } else {
+                setPrompts(data);
+            }
         } catch (error) {
             console.error('プロンプト読み込みエラー:', error);
+            setIsInitializing(false);
         }
     };
 
@@ -39,11 +54,24 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
         try {
             setLoading(true);
             const data = await getPrompts();
-            setPrompts(data);
+
+            // プロンプトが0件の場合、デフォルトプロンプトを自動生成
+            if (data.length === 0 && !isInitializing) {
+                setIsInitializing(true);
+                console.log('プロンプトが0件のため、デフォルトプロンプトを自動生成します...');
+                await initializeDefaultPrompts();
+                const newData = await getPrompts();
+                setPrompts(newData);
+                setIsInitializing(false);
+            } else {
+                setPrompts(data);
+            }
+
             // 最低0.5秒はローディング表示
             await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
             console.error('プロンプト読み込みエラー:', error);
+            setIsInitializing(false);
         } finally {
             setLoading(false);
         }
@@ -63,6 +91,12 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
     const handleDelete = async (prompt: Prompt, event: React.MouseEvent) => {
         event.stopPropagation();
 
+        // ゲストのデフォルトプロンプトは削除不可
+        if (!user && prompt.ownerType === 'guest' && prompt.isDefault) {
+            alert('デフォルトプロンプトは削除できません');
+            return;
+        }
+
         if (!confirm(`「${prompt.name}」を削除しますか？`)) return;
 
         try {
@@ -76,6 +110,12 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
             alert('削除に失敗しました');
             console.error(error);
         }
+    };
+
+    // プロンプトが削除可能かどうか
+    const canDeletePrompt = (prompt: Prompt): boolean => {
+        // ゲストのデフォルトプロンプトは削除不可
+        return !(prompt.ownerType === 'guest' && prompt.isDefault);
     };
 
     const toggleExpand = () => {
@@ -158,7 +198,8 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                                                     {prompt.name}
                                                 </h3>
                                                 {prompt.isDefault && (
-                                                    <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                                                    <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded flex items-center gap-1">
+                                                        {prompt.ownerType === 'guest' && <Lock className="w-3 h-3" />}
                                                         デフォルト
                                                     </span>
                                                 )}
@@ -167,13 +208,15 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                                                 {prompt.content}
                                             </p>
                                         </div>
-                                        <button
-                                            onClick={(e) => handleDelete(prompt, e)}
-                                            className="p-2 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                                            title="削除"
-                                        >
-                                            <Trash2 className="w-4 h-4 text-red-600" />
-                                        </button>
+                                        {canDeletePrompt(prompt) && (
+                                            <button
+                                                onClick={(e) => handleDelete(prompt, e)}
+                                                className="p-2 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                                title="削除"
+                                            >
+                                                <Trash2 className="w-4 h-4 text-red-600" />
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ))}

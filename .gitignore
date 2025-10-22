@@ -59,3 +59,9 @@ Thumbs.db
 /tmp
 /temp
 *.tmp
+
+# Firebase service account key
+serviceAccountKey.json
+
+# docs
+/docs

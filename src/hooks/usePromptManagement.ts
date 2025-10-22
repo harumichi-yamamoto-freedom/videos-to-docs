@@ -1,25 +1,47 @@
 import { useState, useEffect } from 'react';
-import { Prompt, getPrompts } from '@/lib/prompts';
+import { Prompt, getPrompts, initializeDefaultPrompts } from '@/lib/prompts';
+import { useAuth } from './useAuth';
 
 export const usePromptManagement = () => {
+    const { user, loading } = useAuth();
     const [availablePrompts, setAvailablePrompts] = useState<Prompt[]>([]);
     const [bulkSelectedPromptIds, setBulkSelectedPromptIds] = useState<string[]>([]);
+    const [isInitializing, setIsInitializing] = useState(false);
 
     useEffect(() => {
-        loadPrompts();
+        if (!loading) {
+            loadPrompts();
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [user, loading]);
 
     const loadPrompts = async () => {
         try {
             const prompts = await getPrompts();
-            setAvailablePrompts(prompts);
-            // デフォルトで最初のプロンプトを選択
-            if (prompts.length > 0 && bulkSelectedPromptIds.length === 0) {
-                setBulkSelectedPromptIds([prompts[0].id!]);
+
+            // プロンプトが0件の場合、デフォルトプロンプトを自動生成
+            if (prompts.length === 0 && !isInitializing) {
+                setIsInitializing(true);
+                console.log('プロンプトが0件のため、デフォルトプロンプトを自動生成します...');
+                await initializeDefaultPrompts();
+                // デフォルトプロンプト作成後、再度読み込み
+                const newPrompts = await getPrompts();
+                setAvailablePrompts(newPrompts);
+                // デフォルトで最初のプロンプトを選択
+                if (newPrompts.length > 0) {
+                    setBulkSelectedPromptIds([newPrompts[0].id!]);
+                }
+                setIsInitializing(false);
+            } else {
+                setAvailablePrompts(prompts);
+                // デフォルトで最初のプロンプトを選択
+                if (prompts.length > 0 && bulkSelectedPromptIds.length === 0) {
+                    setBulkSelectedPromptIds([prompts[0].id!]);
+                }
             }
         } catch (error) {
             console.error('プロンプト読み込みエラー:', error);
+            setIsInitializing(false);
         }
     };
 

@@ -8,14 +8,19 @@ import {
     deleteDoc,
     doc,
     updateDoc,
-    Timestamp,
+    where,
+    serverTimestamp,
 } from 'firebase/firestore';
+import { getCurrentUserId, getOwnerType } from './auth';
 
 export interface Prompt {
     id?: string;
     name: string;
     content: string;
     isDefault: boolean;
+    ownerType: 'guest' | 'user';
+    ownerId: string; // "GUEST" または Auth uid
+    createdBy: string; // "GUEST" または Auth uid
     createdAt: Date;
     updatedAt: Date;
 }
@@ -107,19 +112,26 @@ export const DEFAULT_PROMPTS = [
 
 /**
  * デフォルトプロンプトを初期化
- * プロンプトが一つも保存されていない場合のみ作成
+ * ユーザーが所有しているプロンプトが0個の場合、そのユーザー専有のデフォルトプロンプトを作成
+ * ゲストの場合もゲスト共有のデフォルトプロンプトを作成
  */
 export async function initializeDefaultPrompts(): Promise<void> {
     try {
         const existingPrompts = await getPrompts();
 
-        // プロンプトが一つも存在しない場合のみ、デフォルトプロンプトを作成
+        // 現在のユーザーが所有しているプロンプトが0個の場合のみ、デフォルトプロンプトを作成
         if (existingPrompts.length === 0) {
+            const userId = getCurrentUserId();
+            const ownerType = getOwnerType();
+
             for (const defaultPrompt of DEFAULT_PROMPTS) {
                 await addDoc(collection(db, 'prompts'), {
                     ...defaultPrompt,
-                    createdAt: Timestamp.now(),
-                    updatedAt: Timestamp.now(),
+                    ownerType,
+                    ownerId: userId,
+                    createdBy: userId,
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
                 });
             }
         }
@@ -137,12 +149,18 @@ export async function createPrompt(
     isDefault: boolean = false
 ): Promise<string> {
     try {
+        const userId = getCurrentUserId();
+        const ownerType = getOwnerType();
+
         const docRef = await addDoc(collection(db, 'prompts'), {
             name,
             content,
             isDefault,
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
+            ownerType,
+            ownerId: userId,
+            createdBy: userId,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
         });
         return docRef.id;
     } catch (error) {
@@ -152,25 +170,56 @@ export async function createPrompt(
 }
 
 /**
- * プロンプト一覧を取得
+ * プロンプト一覧を取得（現在のユーザーが所有しているプロンプトのみ）
+ * ゲストの場合: ownerType == "guest" のプロンプトを取得
+ * ログイン済みの場合: ownerId == auth.uid のプロンプトを取得
  */
 export async function getPrompts(): Promise<Prompt[]> {
     try {
-        const q = query(
-            collection(db, 'prompts'),
-            orderBy('createdAt', 'desc')
-        );
+        const userId = getCurrentUserId();
+        const ownerType = getOwnerType();
+
+        let q;
+        if (ownerType === 'guest') {
+            // ゲストの場合: ゲスト共有のプロンプトを取得
+            q = query(
+                collection(db, 'prompts'),
+                where('ownerType', '==', 'guest'),
+                orderBy('createdAt', 'desc')
+            );
+        } else {
+            // ログイン済みの場合: 自分のプロンプトのみ取得
+            q = query(
+                collection(db, 'prompts'),
+                where('ownerId', '==', userId),
+                orderBy('createdAt', 'desc')
+            );
+        }
 
         const querySnapshot = await getDocs(q);
         const prompts: Prompt[] = [];
 
-        querySnapshot.forEach((doc) => {
-            const data = doc.data();
+        querySnapshot.forEach((docSnapshot) => {
+            const data = docSnapshot.data();
+
+            // 移行期間中: フィールドがない場合はゲスト扱い
+            const ownerType = data.ownerType || 'guest';
+            const ownerId = data.ownerId || 'GUEST';
+            const createdBy = data.createdBy || 'GUEST';
+
+            // ログインユーザーの場合、ゲストデータを除外
+            if (getOwnerType() === 'user' && ownerType === 'guest') {
+                return; // スキップ
+            }
+
             prompts.push({
-                id: doc.id,
+                id: docSnapshot.id,
                 name: data.name,
                 content: data.content,
                 isDefault: data.isDefault || false,
+                ownerType: ownerType as 'guest' | 'user',
+                ownerId: ownerId,
+                createdBy: createdBy,
                 createdAt: data.createdAt.toDate(),
                 updatedAt: data.updatedAt.toDate(),
             });
@@ -185,6 +234,7 @@ export async function getPrompts(): Promise<Prompt[]> {
 
 /**
  * プロンプトを更新
+ * 注意: ownerType と ownerId は変更不可（Firestore Rules で保護）
  */
 export async function updatePrompt(
     promptId: string,
@@ -193,7 +243,7 @@ export async function updatePrompt(
     try {
         await updateDoc(doc(db, 'prompts', promptId), {
             ...updates,
-            updatedAt: Timestamp.now(),
+            updatedAt: serverTimestamp(),
         });
     } catch (error) {
         console.error('プロンプト更新エラー:', error);

@@ -9,7 +9,10 @@ import {
     Timestamp,
     deleteDoc,
     doc,
+    where,
+    serverTimestamp,
 } from 'firebase/firestore';
+import { getCurrentUserId, getOwnerType } from './auth';
 
 export interface TranscriptionDocument {
     id?: string;
@@ -17,6 +20,9 @@ export interface TranscriptionDocument {
     originalFileType: string; // 'video' or 'audio'
     transcription: string;
     promptName: string; // 使用したプロンプト名
+    ownerType: 'guest' | 'user';
+    ownerId: string; // "GUEST" または Auth uid
+    createdBy: string; // "GUEST" または Auth uid
     createdAt: Timestamp | Date; // Firestore Timestamp または Date
     bitrate?: string;
     sampleRate?: number;
@@ -43,6 +49,9 @@ export async function saveTranscription(
     sampleRate?: number
 ): Promise<string> {
     try {
+        const userId = getCurrentUserId();
+        const ownerType = getOwnerType();
+
         const docRef = await addDoc(collection(db, 'transcriptions'), {
             fileName,
             originalFileType,
@@ -50,7 +59,10 @@ export async function saveTranscription(
             promptName,
             bitrate,
             sampleRate,
-            createdAt: Timestamp.now(),
+            ownerType,
+            ownerId: userId,
+            createdBy: userId,
+            createdAt: serverTimestamp(),
         });
 
         return docRef.id;
@@ -62,26 +74,57 @@ export async function saveTranscription(
 
 /**
  * Firestoreから文書を取得（新しい順） - TranscriptionDocument形式
+ * 現在のユーザーが所有している文書のみ取得
  */
 export async function getTranscriptionDocuments(limitCount: number = 20): Promise<TranscriptionDocument[]> {
     try {
-        const q = query(
-            collection(db, 'transcriptions'),
-            orderBy('createdAt', 'desc'),
-            limit(limitCount)
-        );
+        const userId = getCurrentUserId();
+        const ownerType = getOwnerType();
+
+        let q;
+        if (ownerType === 'guest') {
+            // ゲストの場合: ゲスト共有の文書を取得
+            q = query(
+                collection(db, 'transcriptions'),
+                where('ownerType', '==', 'guest'),
+                orderBy('createdAt', 'desc'),
+                limit(limitCount)
+            );
+        } else {
+            // ログイン済みの場合: 自分の文書のみ取得
+            q = query(
+                collection(db, 'transcriptions'),
+                where('ownerId', '==', userId),
+                orderBy('createdAt', 'desc'),
+                limit(limitCount)
+            );
+        }
 
         const querySnapshot = await getDocs(q);
         const documents: TranscriptionDocument[] = [];
 
         querySnapshot.forEach((docSnapshot) => {
             const data = docSnapshot.data();
+
+            // 移行期間中: フィールドがない場合はゲスト扱い
+            const ownerType = data.ownerType || 'guest';
+            const ownerId = data.ownerId || 'GUEST';
+            const createdBy = data.createdBy || 'GUEST';
+
+            // ログインユーザーの場合、ゲストデータを除外
+            if (getOwnerType() === 'user' && ownerType === 'guest') {
+                return; // スキップ
+            }
+
             documents.push({
                 id: docSnapshot.id,
                 fileName: data.fileName,
                 originalFileType: data.originalFileType,
                 transcription: data.transcription,
                 promptName: data.promptName || '不明',
+                ownerType: ownerType as 'guest' | 'user',
+                ownerId: ownerId,
+                createdBy: createdBy,
                 bitrate: data.bitrate,
                 sampleRate: data.sampleRate,
                 createdAt: data.createdAt.toDate(),
@@ -97,20 +140,46 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
 
 /**
  * Firestoreから文書を取得（新しい順） - Transcription形式（簡略版）
+ * 現在のユーザーが所有している文書のみ取得
  */
 export async function getTranscriptions(limitCount: number = 100): Promise<Transcription[]> {
     try {
-        const q = query(
-            collection(db, 'transcriptions'),
-            orderBy('createdAt', 'desc'),
-            limit(limitCount)
-        );
+        const userId = getCurrentUserId();
+        const ownerType = getOwnerType();
+
+        let q;
+        if (ownerType === 'guest') {
+            // ゲストの場合: ゲスト共有の文書を取得
+            q = query(
+                collection(db, 'transcriptions'),
+                where('ownerType', '==', 'guest'),
+                orderBy('createdAt', 'desc'),
+                limit(limitCount)
+            );
+        } else {
+            // ログイン済みの場合: 自分の文書のみ取得
+            q = query(
+                collection(db, 'transcriptions'),
+                where('ownerId', '==', userId),
+                orderBy('createdAt', 'desc'),
+                limit(limitCount)
+            );
+        }
 
         const querySnapshot = await getDocs(q);
         const documents: Transcription[] = [];
 
         querySnapshot.forEach((docSnapshot) => {
             const data = docSnapshot.data();
+
+            // 移行期間中: フィールドがない場合はゲスト扱い
+            const ownerType = data.ownerType || 'guest';
+
+            // ログインユーザーの場合、ゲストデータを除外
+            if (getOwnerType() === 'user' && ownerType === 'guest') {
+                return; // スキップ
+            }
+
             documents.push({
                 id: docSnapshot.id,
                 fileName: data.fileName,

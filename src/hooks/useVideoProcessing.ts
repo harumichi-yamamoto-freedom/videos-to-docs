@@ -4,6 +4,7 @@ import { GeminiClient } from '@/lib/gemini';
 import { saveTranscription } from '@/lib/firestore';
 import { FileProcessingStatus, FileWithPrompts, DebugErrorMode } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
+import { validatePromptPermission } from '@/lib/promptPermissions';
 
 export const useVideoProcessing = (
     availablePrompts: Prompt[],
@@ -43,6 +44,16 @@ export const useVideoProcessing = (
             const selectedPrompts = availablePrompts.filter(p =>
                 file.selectedPromptIds.includes(p.id!)
             );
+
+            // プロンプト利用権限をチェック
+            for (const prompt of selectedPrompts) {
+                try {
+                    validatePromptPermission(prompt);
+                } catch (permissionError) {
+                    console.error('プロンプト利用権限エラー:', permissionError);
+                    throw permissionError;
+                }
+            }
 
             // 各プロンプトで文書生成（並列処理）
             await Promise.all(

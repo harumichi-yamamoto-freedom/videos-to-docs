@@ -19,8 +19,13 @@ import { DebugErrorMode } from '@/types/processing';
 import { Transcription } from '@/lib/firestore';
 import { Prompt } from '@/lib/prompts';
 import { Music, Sparkles } from 'lucide-react';
+import AuthButton from '@/components/AuthButton';
+import { useAuth } from '@/hooks/useAuth';
+import { useEffect } from 'react';
 
 export default function Home() {
+  const { user } = useAuth();
+
   // 固定値
   const bitrate = '192k';
   const sampleRate = 44100;
@@ -29,6 +34,7 @@ export default function Home() {
   const [selectedPrompt, setSelectedPrompt] = useState<Prompt | null>(null);
   const [showPromptCreateModal, setShowPromptCreateModal] = useState(false);
   const [promptUpdateTrigger, setPromptUpdateTrigger] = useState(0);
+  const [documentUpdateTrigger, setDocumentUpdateTrigger] = useState(0);
   const [debugErrorMode, setDebugErrorMode] = useState<DebugErrorMode>({
     ffmpegError: false,
     geminiError: false,
@@ -48,6 +54,31 @@ export default function Home() {
     clearFiles,
     cleanupDeletedPrompts,
   } = useFileManagement(bulkSelectedPromptIds);
+
+  // ログイン/ログアウト時の自動更新
+  useEffect(() => {
+    // 認証状態が変更されたら、すべてのデータを更新
+    const handleAuthChange = async () => {
+      console.log('認証状態が変更されました。データを更新します...');
+
+      // プロンプト一覧を更新
+      setPromptUpdateTrigger(prev => prev + 1);
+      await reloadPrompts();
+
+      // 文書一覧を更新
+      setDocumentUpdateTrigger(prev => prev + 1);
+
+      // ファイル選択とBulkPromptsをクリア
+      clearFiles();
+
+      // 処理中のステータスをクリア
+      setProcessingStatuses([]);
+      setIsProcessing(false);
+    };
+
+    handleAuthChange();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]); // userが変更されたら実行
 
   // ビデオ処理
   const {
@@ -178,19 +209,24 @@ export default function Home() {
     <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="container mx-auto px-4 py-8 max-w-7xl">
         {/* ヘッダー */}
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center space-x-3 mb-4">
-            <div className="p-3 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl shadow-lg">
-              <Music className="w-8 h-8 text-white" />
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-3 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl shadow-lg">
+                <Music className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-4xl font-bold text-gray-900 flex items-center gap-2">
+                  商談くんミニ（簡易版）
+                  <Sparkles className="w-6 h-6 text-yellow-500" />
+                </h1>
+                <p className="text-gray-600 text-left">
+                  動画・音声から自動で文書を生成
+                </p>
+              </div>
             </div>
-            <h1 className="text-4xl font-bold text-gray-900">
-              動画→文書生成
-            </h1>
-            <Sparkles className="w-6 h-6 text-yellow-500" />
+            <AuthButton />
           </div>
-          <p className="text-gray-600">
-            WebAssembly + Gemini AIで音声から自動文書生成
-          </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -208,7 +244,10 @@ export default function Home() {
 
             {/* 生成された文書一覧 */}
             <div className="h-[calc(100vh-12rem)] rounded-xl shadow-lg overflow-hidden">
-              <DocumentListSidebar onDocumentClick={handleDocumentClick} />
+              <DocumentListSidebar
+                onDocumentClick={handleDocumentClick}
+                updateTrigger={documentUpdateTrigger}
+              />
             </div>
           </div>
 
