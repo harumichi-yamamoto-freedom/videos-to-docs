@@ -75,18 +75,15 @@ export default function AuthButton() {
                     return;
                 }
 
-                // 削除を試みる
+                // セキュリティのため、必ず再認証を実行
+                console.log('🔐 セキュリティ確認のため、再認証を要求します');
                 setPendingDeletion(true);
-                await performDeletion();
+                setShowReauthModal(true);
+
             } catch (error: any) {
-                if (error.code === 'auth/requires-recent-login') {
-                    // 再認証が必要な場合、再認証モーダルを表示
-                    setShowReauthModal(true);
-                } else {
-                    alert('アカウントの削除に失敗しました:\n' + error.message);
-                    console.error('アカウント削除エラー:', error);
-                    setPendingDeletion(false);
-                }
+                alert('アカウント削除の準備中にエラーが発生しました:\n' + error.message);
+                console.error('削除準備エラー:', error);
+                setPendingDeletion(false);
             }
         };
 
@@ -110,16 +107,22 @@ export default function AuthButton() {
         };
 
         const handleReauthSuccess = async () => {
-            // 再認証成功後、すぐに削除を実行
+            // 再認証成功後、すぐに削除を実行（再認証直後なので確実）
             console.log('✅ 再認証成功。削除を実行します...');
 
+            // 短い待機（認証トークンの伝播を確実にする）
+            await new Promise(resolve => setTimeout(resolve, 500));
+
             try {
-                // 再認証直後なので、すぐに削除を実行
                 await performDeletion();
             } catch (error: any) {
-                console.error('❌ 再認証後も削除エラー:', error);
+                console.error('❌ 削除エラー:', error);
+
                 if (error.code === 'auth/requires-recent-login') {
-                    alert('再認証後もエラーが発生しました。\n\n申し訳ございませんが、以下の手順をお試しください：\n1. 一度ログアウト\n2. 再度ログイン\n3. ログイン直後にアカウント削除を実行');
+                    // 再認証直後でもこのエラーが出る場合、データは削除済み
+                    alert('⚠️ データは削除されましたが、アカウント削除で問題が発生しました。\n\nアカウントを完全に削除するには：\n1. ページをリロード\n2. 再度ログイン（データは既に削除済み）\n3. すぐにアカウント削除を実行');
+                } else {
+                    alert('エラーが発生しました:\n' + error.message);
                 }
                 setPendingDeletion(false);
             }

@@ -9,6 +9,7 @@ import {
     Timestamp,
     deleteDoc,
     doc,
+    updateDoc,
     where,
     serverTimestamp,
 } from 'firebase/firestore';
@@ -19,6 +20,7 @@ import { updateUserStats } from './userManagement';
 
 export interface TranscriptionDocument {
     id?: string;
+    title: string; // 文書タイトル（デフォルトはfileName）
     fileName: string;
     originalFileType: string; // 'video' or 'audio'
     transcription: string;
@@ -34,6 +36,7 @@ export interface TranscriptionDocument {
 // エイリアス（後方互換性のため）
 export interface Transcription {
     id?: string;
+    title: string; // 文書タイトル（デフォルトはfileName）
     fileName: string;
     text: string; // transcription のエイリアス
     promptName: string;
@@ -49,7 +52,8 @@ export async function saveTranscription(
     promptName: string,
     originalFileType: string,
     bitrate?: string,
-    sampleRate?: number
+    sampleRate?: number,
+    title?: string
 ): Promise<string> {
     try {
         const userId = getCurrentUserId();
@@ -66,6 +70,7 @@ export async function saveTranscription(
         }
 
         const docRef = await addDoc(collection(db, 'transcriptions'), {
+            title: title || fileName, // デフォルトはfileName
             fileName,
             originalFileType,
             transcription,
@@ -145,6 +150,7 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
 
             documents.push({
                 id: docSnapshot.id,
+                title: data.title || data.fileName, // 既存データの後方互換性
                 fileName: data.fileName,
                 originalFileType: data.originalFileType,
                 transcription: data.transcription,
@@ -212,6 +218,7 @@ export async function getTranscriptions(limitCount: number = 100): Promise<Trans
 
             documents.push({
                 id: docSnapshot.id,
+                title: data.title || data.fileName, // 既存データの後方互換性
                 fileName: data.fileName,
                 text: data.transcription, // transcription を text にマッピング
                 promptName: data.promptName || '不明',
@@ -223,6 +230,24 @@ export async function getTranscriptions(limitCount: number = 100): Promise<Trans
     } catch (error) {
         console.error('Firestore取得エラー:', error);
         throw new Error('文書の取得に失敗しました');
+    }
+}
+
+/**
+ * 文書のタイトルを更新
+ */
+export async function updateTranscriptionTitle(documentId: string, newTitle: string): Promise<void> {
+    try {
+        const docRef = doc(db, 'transcriptions', documentId);
+        await updateDoc(docRef, {
+            title: newTitle,
+        });
+
+        // 監査ログを記録
+        await logAudit('document_update', 'document', documentId, { title: newTitle });
+    } catch (error) {
+        console.error('Firestoreタイトル更新エラー:', error);
+        throw new Error('タイトルの更新に失敗しました');
     }
 }
 

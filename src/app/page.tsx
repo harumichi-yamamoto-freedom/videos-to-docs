@@ -192,7 +192,7 @@ export default function Home() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${selectedDocument.fileName}_${selectedDocument.promptName}.txt`;
+    a.download = `${selectedDocument.title}_${selectedDocument.promptName}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -202,15 +202,37 @@ export default function Home() {
   const handleDeleteDocument = async () => {
     if (!selectedDocument) return;
 
-    if (!confirm(`「${selectedDocument.fileName} - ${selectedDocument.promptName}」を削除しますか？`)) return;
+    if (!confirm(`「${selectedDocument.title}」を削除しますか？`)) return;
 
     try {
       const { deleteTranscription } = await import('@/lib/firestore');
       await deleteTranscription(selectedDocument.id!);
       setSelectedDocument(null);
+      setDocumentUpdateTrigger(prev => prev + 1);
     } catch (error) {
       alert('削除に失敗しました');
       console.error(error);
+    }
+  };
+
+  const handleTitleUpdate = async (newTitle: string) => {
+    if (!selectedDocument) return;
+
+    try {
+      const { updateTranscriptionTitle } = await import('@/lib/firestore');
+      await updateTranscriptionTitle(selectedDocument.id!, newTitle);
+
+      // 文書一覧を更新
+      setDocumentUpdateTrigger(prev => prev + 1);
+
+      // モーダル内のタイトルも更新
+      setSelectedDocument({
+        ...selectedDocument,
+        title: newTitle,
+      });
+    } catch (error) {
+      console.error('タイトル更新エラー:', error);
+      throw error;
     }
   };
 
@@ -349,10 +371,11 @@ export default function Home() {
         <DocumentModal
           isOpen={!!selectedDocument}
           onClose={handleCloseDocumentModal}
-          title={selectedDocument ? `${selectedDocument.fileName} - ${selectedDocument.promptName}` : ''}
+          title={selectedDocument?.title || ''}
           content={selectedDocument?.text || ''}
           onDownload={handleDownloadDocument}
           onDelete={handleDeleteDocument}
+          onTitleUpdate={handleTitleUpdate}
         />
 
         {/* プロンプト編集モーダル */}

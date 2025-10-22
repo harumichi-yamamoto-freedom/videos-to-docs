@@ -14,19 +14,23 @@ export const convertVideoToAudioSegments = async (
     debugErrorMode: DebugErrorMode,
     setProcessingStatuses: React.Dispatch<React.SetStateAction<FileProcessingStatus[]>>
 ): Promise<Blob | null> => {
+    // 共有入力ファイル名
+    const sharedInputFileName = `shared_input_${Date.now()}.${file.file.name.split('.').pop()}`;
+
     try {
         // 動画の長さを取得
         let totalDuration: number;
         try {
             totalDuration = await converter.getVideoDuration(file.file);
-        } catch {
+        } catch (durationError) {
+            const errorMessage = durationError instanceof Error ? durationError.message : '動画の長さを取得できませんでした';
             setProcessingStatuses(prev =>
                 prev.map((status, idx) =>
                     idx === fileIndex
                         ? {
                             ...status,
                             status: 'error',
-                            error: '動画の長さを取得できませんでした',
+                            error: errorMessage,
                             failedPhase: 'audio_conversion'
                         }
                         : status
@@ -62,6 +66,30 @@ export const convertVideoToAudioSegments = async (
                     : status
             )
         );
+
+        // 動画ファイルを一度だけFFmpegに書き込む（メモリ効率化）
+        console.log(`[ファイル${fileIndex}] 共有入力ファイル書き込み開始: ${sharedInputFileName}`);
+        try {
+            const { fetchFile } = await import('@ffmpeg/util');
+            const fileData = await fetchFile(file.file);
+            await (converter as any).ffmpeg.writeFile(sharedInputFileName, fileData);
+            console.log(`[ファイル${fileIndex}] 共有入力ファイル書き込み完了`);
+        } catch (writeError) {
+            console.error(`[ファイル${fileIndex}] 共有入力ファイル書き込みエラー:`, writeError);
+            setProcessingStatuses(prev =>
+                prev.map((status, idx) =>
+                    idx === fileIndex
+                        ? {
+                            ...status,
+                            status: 'error',
+                            error: `ファイル書き込み失敗: ${writeError instanceof Error ? writeError.message : '不明なエラー'}`,
+                            failedPhase: 'audio_conversion'
+                        }
+                        : status
+                )
+            );
+            return null;
+        }
 
         // 各区間を順次変換
         const audioSegments: Blob[] = [];
@@ -100,6 +128,7 @@ export const convertVideoToAudioSegments = async (
                     {
                         bitrate,
                         sampleRate,
+                        inputFileName: sharedInputFileName, // 共有ファイルを使用
                         onProgress: (progress) => {
                             // 各セグメントの進捗を更新
                             setProcessingStatuses(prev =>
@@ -148,6 +177,12 @@ export const convertVideoToAudioSegments = async (
                         return status;
                     })
                 );
+                // エラー時は共有ファイルを削除
+                try {
+                    await (converter as any).ffmpeg.deleteFile(sharedInputFileName);
+                } catch {
+                    // 削除エラーは無視
+                }
                 return null; // エラーが発生したら null を返す
             } else {
                 // 区間変換成功
@@ -179,6 +214,14 @@ export const convertVideoToAudioSegments = async (
                     })
                 );
             }
+        }
+
+        // 共有入力ファイルを削除
+        console.log(`[ファイル${fileIndex}] 共有入力ファイル削除: ${sharedInputFileName}`);
+        try {
+            await (converter as any).ffmpeg.deleteFile(sharedInputFileName);
+        } catch {
+            // 削除エラーは無視
         }
 
         // すべての区間が完了したか確認
@@ -217,6 +260,12 @@ export const convertVideoToAudioSegments = async (
         return concatResult.outputBlob;
     } catch (error) {
         console.error('音声変換エラー:', error);
+        // エラー時は共有ファイルを削除
+        try {
+            await (converter as any).ffmpeg.deleteFile(sharedInputFileName);
+        } catch {
+            // 削除エラーは無視
+        }
         setProcessingStatuses(prev =>
             prev.map((status, idx) =>
                 idx === fileIndex
@@ -251,6 +300,10 @@ export const resumeVideoConversion = async (
     console.log(`  - 完了済み区間数: ${status.completedSegmentIndices.length}`);
     console.log(`  - 残り区間数: ${status.segments.length - status.completedSegmentIndices.length}`);
 
+    // 共有入力ファイル名
+    const sharedInputFileName = `shared_input_resume_${Date.now()}.${file.file.name.split('.').pop()}`;
+    let sharedFileWritten = false;
+
     const audioSegments: Blob[] = [];
 
     console.log('🗂️ [再開] 完了済み区間のBlob収集中...');
@@ -264,185 +317,236 @@ export const resumeVideoConversion = async (
     }
     console.log(`📊 [再開] 完了済みBlob収集完了: ${audioSegments.filter(Boolean).length}個`);
 
-    console.log('🔁 [再開] 未完了の区間から変換再開...');
-    // 未完了の区間から再開
-    for (let segIdx = 0; segIdx < status.segments.length; segIdx++) {
-        const segment = status.segments[segIdx];
+    try {
+        console.log('🔁 [再開] 未完了の区間から変換再開...');
+        // 未完了の区間から再開
+        for (let segIdx = 0; segIdx < status.segments.length; segIdx++) {
+            const segment = status.segments[segIdx];
 
-        // 完了済みの区間はスキップ
-        if (segment.status === 'completed' && segment.audioBlob) {
-            continue;
-        }
+            // 完了済みの区間はスキップ
+            if (segment.status === 'completed' && segment.audioBlob) {
+                continue;
+            }
 
-        console.log(`🎬 [再開] 区間${segIdx + 1}/${status.segments.length}を変換中 (${segment.startTime}s - ${segment.endTime}s)`);
-
-        // 区間変換開始
-        setProcessingStatuses(prev =>
-            prev.map((s, idx) => {
-                if (idx === fileIndex) {
-                    const updatedSegments = [...s.segments];
-                    updatedSegments[segIdx] = { ...updatedSegments[segIdx], status: 'converting', error: undefined };
-                    return { ...s, segments: updatedSegments };
-                }
-                return s;
-            })
-        );
-
-        console.log(`🧪 [再開] デバッグモード確認: ffmpegError=${debugErrorMode.ffmpegError}, targetFile=${debugErrorMode.errorAtFileIndex}, targetSegment=${debugErrorMode.errorAtSegmentIndex}`);
-        // デバッグ用: 意図的にFFmpegエラーを発生させる
-        let segmentResult;
-        if (debugErrorMode.ffmpegError && fileIndex === debugErrorMode.errorAtFileIndex && segIdx === debugErrorMode.errorAtSegmentIndex) {
-            console.log(`💥 [再開] デバッグエラー発生: 区間${segIdx + 1}`);
-            segmentResult = {
-                success: false,
-                segmentIndex: segIdx,
-                startTime: segment.startTime,
-                endTime: segment.endTime,
-                error: `[デバッグ] 区間${segIdx + 1}で意図的に発生させたFFmpegエラー`
-            };
-        } else {
-            console.log(`🔨 [再開] convertSegmentToMp3呼び出し: 区間${segIdx + 1}`);
-            segmentResult = await converter.convertSegmentToMp3(
-                file.file,
-                segment.startTime,
-                segment.endTime,
-                segIdx,
-                {
-                    bitrate,
-                    sampleRate,
-                    onProgress: (progress) => {
-                        // 各セグメントの進捗を更新
-                        setProcessingStatuses(prev =>
-                            prev.map((s, idx) => {
-                                if (idx === fileIndex) {
-                                    const updatedSegments = [...s.segments];
-                                    updatedSegments[segIdx] = {
-                                        ...updatedSegments[segIdx],
-                                        progress: Math.round(progress.ratio * 100)
-                                    };
-                                    // 全体の進捗を再計算
-                                    const overallProgress = calculateOverallProgress(updatedSegments);
-                                    return {
-                                        ...s,
-                                        segments: updatedSegments,
-                                        audioConversionProgress: overallProgress
-                                    };
+            // 最初の未完了区間で共有ファイルを書き込む
+            if (!sharedFileWritten) {
+                console.log(`[再開] 共有入力ファイル書き込み開始: ${sharedInputFileName}`);
+                try {
+                    const { fetchFile } = await import('@ffmpeg/util');
+                    const fileData = await fetchFile(file.file);
+                    await (converter as any).ffmpeg.writeFile(sharedInputFileName, fileData);
+                    sharedFileWritten = true;
+                    console.log(`[再開] 共有入力ファイル書き込み完了`);
+                } catch (writeError) {
+                    console.error(`[再開] 共有入力ファイル書き込みエラー:`, writeError);
+                    setProcessingStatuses(prev =>
+                        prev.map((s, idx) =>
+                            idx === fileIndex
+                                ? {
+                                    ...s,
+                                    status: 'error',
+                                    error: `ファイル書き込み失敗: ${writeError instanceof Error ? writeError.message : '不明なエラー'}`,
+                                    failedPhase: 'audio_conversion',
+                                    isResuming: false
                                 }
-                                return s;
-                            })
-                        );
-                    },
+                                : s
+                        )
+                    );
+                    return null;
                 }
-            );
-            console.log(`✅ [再開] convertSegmentToMp3完了: 区間${segIdx + 1}, success=${segmentResult.success}`);
-        }
+            }
 
-        console.log(`🔍 [再開] 変換結果チェック: success=${segmentResult.success}, hasBlob=${!!segmentResult.outputBlob}`);
-        if (!segmentResult.success || !segmentResult.outputBlob) {
-            console.log(`❌ [再開] 区間${segIdx + 1}変換失敗 - エラーステータス設定`);
-            // 区間変換エラー
+            console.log(`🎬 [再開] 区間${segIdx + 1}/${status.segments.length}を変換中 (${segment.startTime}s - ${segment.endTime}s)`);
+
+            // 区間変換開始
             setProcessingStatuses(prev =>
                 prev.map((s, idx) => {
                     if (idx === fileIndex) {
                         const updatedSegments = [...s.segments];
-                        updatedSegments[segIdx] = {
-                            ...updatedSegments[segIdx],
-                            status: 'error',
-                            error: segmentResult.error || '変換失敗'
-                        };
-                        return {
-                            ...s,
-                            segments: updatedSegments,
-                            status: 'error',
-                            error: `区間${segIdx + 1}の変換に失敗しました`,
-                            failedPhase: 'audio_conversion',
-                            isResuming: false
-                        };
+                        updatedSegments[segIdx] = { ...updatedSegments[segIdx], status: 'converting', error: undefined };
+                        return { ...s, segments: updatedSegments };
                     }
                     return s;
                 })
             );
-            console.log(`🛑 [再開] ループ終了 - エラーのため中断`);
-            return null; // エラーが発生したら null を返す
-        } else {
-            console.log(`✅ [再開] 区間${segIdx + 1}変換成功 (Blobサイズ: ${segmentResult.outputBlob.size} bytes)`);
-            // 区間変換成功
-            audioSegments[segIdx] = segmentResult.outputBlob;
 
-            setProcessingStatuses(prev =>
-                prev.map((s, idx) => {
-                    if (idx === fileIndex) {
-                        const updatedSegments = [...s.segments];
-                        updatedSegments[segIdx] = {
-                            ...updatedSegments[segIdx],
-                            status: 'completed',
-                            progress: 100,
-                            audioBlob: segmentResult.outputBlob
-                        };
-                        const newCompletedIndices = [...s.completedSegmentIndices];
-                        if (!newCompletedIndices.includes(segIdx)) {
-                            newCompletedIndices.push(segIdx);
+            console.log(`🧪 [再開] デバッグモード確認: ffmpegError=${debugErrorMode.ffmpegError}, targetFile=${debugErrorMode.errorAtFileIndex}, targetSegment=${debugErrorMode.errorAtSegmentIndex}`);
+            // デバッグ用: 意図的にFFmpegエラーを発生させる
+            let segmentResult;
+            if (debugErrorMode.ffmpegError && fileIndex === debugErrorMode.errorAtFileIndex && segIdx === debugErrorMode.errorAtSegmentIndex) {
+                console.log(`💥 [再開] デバッグエラー発生: 区間${segIdx + 1}`);
+                segmentResult = {
+                    success: false,
+                    segmentIndex: segIdx,
+                    startTime: segment.startTime,
+                    endTime: segment.endTime,
+                    error: `[デバッグ] 区間${segIdx + 1}で意図的に発生させたFFmpegエラー`
+                };
+            } else {
+                console.log(`🔨 [再開] convertSegmentToMp3呼び出し: 区間${segIdx + 1}`);
+                segmentResult = await converter.convertSegmentToMp3(
+                    file.file,
+                    segment.startTime,
+                    segment.endTime,
+                    segIdx,
+                    {
+                        bitrate,
+                        sampleRate,
+                        inputFileName: sharedInputFileName, // 共有ファイルを使用
+                        onProgress: (progress) => {
+                            // 各セグメントの進捗を更新
+                            setProcessingStatuses(prev =>
+                                prev.map((s, idx) => {
+                                    if (idx === fileIndex) {
+                                        const updatedSegments = [...s.segments];
+                                        updatedSegments[segIdx] = {
+                                            ...updatedSegments[segIdx],
+                                            progress: Math.round(progress.ratio * 100)
+                                        };
+                                        // 全体の進捗を再計算
+                                        const overallProgress = calculateOverallProgress(updatedSegments);
+                                        return {
+                                            ...s,
+                                            segments: updatedSegments,
+                                            audioConversionProgress: overallProgress
+                                        };
+                                    }
+                                    return s;
+                                })
+                            );
+                        },
+                    }
+                );
+                console.log(`✅ [再開] convertSegmentToMp3完了: 区間${segIdx + 1}, success=${segmentResult.success}`);
+            }
+
+            console.log(`🔍 [再開] 変換結果チェック: success=${segmentResult.success}, hasBlob=${!!segmentResult.outputBlob}`);
+            if (!segmentResult.success || !segmentResult.outputBlob) {
+                console.log(`❌ [再開] 区間${segIdx + 1}変換失敗 - エラーステータス設定`);
+                // 区間変換エラー
+                setProcessingStatuses(prev =>
+                    prev.map((s, idx) => {
+                        if (idx === fileIndex) {
+                            const updatedSegments = [...s.segments];
+                            updatedSegments[segIdx] = {
+                                ...updatedSegments[segIdx],
+                                status: 'error',
+                                error: segmentResult.error || '変換失敗'
+                            };
+                            return {
+                                ...s,
+                                segments: updatedSegments,
+                                status: 'error',
+                                error: `区間${segIdx + 1}の変換に失敗しました`,
+                                failedPhase: 'audio_conversion',
+                                isResuming: false
+                            };
                         }
+                        return s;
+                    })
+                );
+                console.log(`🛑 [再開] ループ終了 - エラーのため中断`);
+                return null; // エラーが発生したら null を返す
+            } else {
+                console.log(`✅ [再開] 区間${segIdx + 1}変換成功 (Blobサイズ: ${segmentResult.outputBlob.size} bytes)`);
+                // 区間変換成功
+                audioSegments[segIdx] = segmentResult.outputBlob;
 
-                        // 全体の進捗を再計算
-                        const overallProgress = calculateOverallProgress(updatedSegments);
+                setProcessingStatuses(prev =>
+                    prev.map((s, idx) => {
+                        if (idx === fileIndex) {
+                            const updatedSegments = [...s.segments];
+                            updatedSegments[segIdx] = {
+                                ...updatedSegments[segIdx],
+                                status: 'completed',
+                                progress: 100,
+                                audioBlob: segmentResult.outputBlob
+                            };
+                            const newCompletedIndices = [...s.completedSegmentIndices];
+                            if (!newCompletedIndices.includes(segIdx)) {
+                                newCompletedIndices.push(segIdx);
+                            }
 
-                        return {
-                            ...s,
-                            segments: updatedSegments,
-                            completedSegmentIndices: newCompletedIndices,
-                            audioConversionProgress: overallProgress
-                        };
-                    }
-                    return s;
-                })
-            );
+                            // 全体の進捗を再計算
+                            const overallProgress = calculateOverallProgress(updatedSegments);
+
+                            return {
+                                ...s,
+                                segments: updatedSegments,
+                                completedSegmentIndices: newCompletedIndices,
+                                audioConversionProgress: overallProgress
+                            };
+                        }
+                        return s;
+                    })
+                );
+            }
         }
-    }
 
-    console.log('🏁 [再開] 区間ループ終了');
-    // すべての区間が完了したか確認
-    const allSegmentsCompleted = audioSegments.filter(Boolean).length === status.segments.length;
-    console.log(`📊 [再開] 完了確認: ${audioSegments.filter(Boolean).length}/${status.segments.length} 区間`);
+        // 共有入力ファイルを削除
+        if (sharedFileWritten) {
+            console.log(`[再開] 共有入力ファイル削除: ${sharedInputFileName}`);
+            try {
+                await (converter as any).ffmpeg.deleteFile(sharedInputFileName);
+            } catch {
+                // 削除エラーは無視
+            }
+        }
 
-    if (!allSegmentsCompleted) {
-        console.log(`⚠️ [再開] 未完了 - 処理中断 (完了: ${audioSegments.filter(Boolean).length}, 必要: ${status.segments.length})`);
-        return null;
-    }
+        console.log('🏁 [再開] 区間ループ終了');
+        // すべての区間が完了したか確認
+        const allSegmentsCompleted = audioSegments.filter(Boolean).length === status.segments.length;
+        console.log(`📊 [再開] 完了確認: ${audioSegments.filter(Boolean).length}/${status.segments.length} 区間`);
 
-    console.log('🎉 [再開] すべての区間完了 - 音声結合フェーズへ');
-    // 音声結合フェーズ
-    setProcessingStatuses(prev =>
-        prev.map((s, idx) =>
-            idx === fileIndex
-                ? { ...s, phase: 'audio_concat' }
-                : s
-        )
-    );
+        if (!allSegmentsCompleted) {
+            console.log(`⚠️ [再開] 未完了 - 処理中断 (完了: ${audioSegments.filter(Boolean).length}, 必要: ${status.segments.length})`);
+            return null;
+        }
 
-    console.log(`🔗 [再開] 音声結合開始: ${audioSegments.length}個のセグメント`);
-    const concatResult = await converter.concatenateAudioSegments(audioSegments);
-    console.log(`✅ [再開] 音声結合完了: success=${concatResult.success}`);
-
-    if (!concatResult.success || !concatResult.outputBlob) {
-        console.log(`❌ [再開] 音声結合失敗: ${concatResult.error}`);
+        console.log('🎉 [再開] すべての区間完了 - 音声結合フェーズへ');
+        // 音声結合フェーズ
         setProcessingStatuses(prev =>
             prev.map((s, idx) =>
                 idx === fileIndex
-                    ? {
-                        ...s,
-                        status: 'error',
-                        error: concatResult.error || '音声結合に失敗しました',
-                        failedPhase: 'audio_conversion',
-                        isResuming: false
-                    }
+                    ? { ...s, phase: 'audio_concat' }
                     : s
             )
         );
-        return null;
-    }
 
-    console.log(`🎊 [再開] 音声結合成功 (Blobサイズ: ${concatResult.outputBlob.size} bytes) - 文書生成へ`);
-    return concatResult.outputBlob;
+        console.log(`🔗 [再開] 音声結合開始: ${audioSegments.length}個のセグメント`);
+        const concatResult = await converter.concatenateAudioSegments(audioSegments);
+        console.log(`✅ [再開] 音声結合完了: success=${concatResult.success}`);
+
+        if (!concatResult.success || !concatResult.outputBlob) {
+            console.log(`❌ [再開] 音声結合失敗: ${concatResult.error}`);
+            setProcessingStatuses(prev =>
+                prev.map((s, idx) =>
+                    idx === fileIndex
+                        ? {
+                            ...s,
+                            status: 'error',
+                            error: concatResult.error || '音声結合に失敗しました',
+                            failedPhase: 'audio_conversion',
+                            isResuming: false
+                        }
+                        : s
+                )
+            );
+            return null;
+        }
+
+        console.log(`🎊 [再開] 音声結合成功 (Blobサイズ: ${concatResult.outputBlob.size} bytes) - 文書生成へ`);
+        return concatResult.outputBlob;
+    } catch (error) {
+        // エラー時は共有ファイルを削除
+        if (sharedFileWritten) {
+            try {
+                await (converter as any).ffmpeg.deleteFile(sharedInputFileName);
+            } catch {
+                // 削除エラーは無視
+            }
+        }
+        throw error;
+    }
 };
 

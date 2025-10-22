@@ -123,32 +123,53 @@ export function getOwnerType(): 'user' | 'guest' {
 
 /**
  * アカウントを削除（ユーザー本人のみ）
- * Firebase Authentication のアカウントと Firestore の関連データをすべて削除
+ * 重要: Firestoreデータを先に削除してから、Authenticationアカウントを削除
+ * （順序を逆にすると、認証が切れてFirestoreデータを削除できなくなる）
  */
 export async function deleteAccount(): Promise<void> {
+    // 最新のユーザーオブジェクトを取得（再認証後の状態を確実に反映）
     const user = auth.currentUser;
     if (!user) {
         throw new Error('ログインしていません');
     }
 
-    try {
-        console.log('🔐 認証トークンをリフレッシュ中...');
-        // 認証トークンを強制リフレッシュ（再認証後のトークン更新を確実にする）
-        await user.getIdToken(true);
-        console.log('✅ トークンリフレッシュ完了');
+    const uid = user.uid;
+    const email = user.email || undefined;
 
-        // Firestoreの関連データを削除
+    try {
+        console.log('🔐 認証状態を確認中...');
+        // 最新の認証トークンを取得
+        const token = await user.getIdToken(true);
+        console.log('✅ 認証トークン取得完了:', token ? 'OK' : 'NG');
+
+        // ステップ1: Firestoreの関連データを削除（認証が有効なうちに）
         console.log('🗑️ Firestoreデータ削除中...');
         const { deleteUserData } = await import('./accountDeletion');
-        await deleteUserData(user.uid, user.email || undefined);
+        await deleteUserData(uid, email);
         console.log('✅ Firestoreデータ削除完了');
 
-        // Firebase Authentication のアカウントを削除
+        // ステップ2: Firebase Authentication のアカウントを削除
+        // （Firestoreデータを削除した後なので、認証が切れても問題ない）
         console.log('🗑️ Authenticationアカウント削除中...');
-        await user.delete();
+
+        // auth.currentUser を再取得（最新の認証状態を確実に使用）
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+            throw new Error('ユーザーが見つかりません');
+        }
+
+        await currentUser.delete();
+
         console.log('✅ Authenticationアカウント削除完了');
-    } catch (error) {
-        console.error('アカウント削除エラー:', error);
+    } catch (error: any) {
+        console.error('❌ アカウント削除エラー:', error);
+
+        // Firestoreデータは削除済みだが、Authenticationの削除に失敗した場合
+        if (error.code === 'auth/requires-recent-login') {
+            console.error('⚠️ Firestoreデータは削除されましたが、Authenticationアカウントの削除に失敗しました');
+            console.error('💡 再度ログインして、もう一度アカウント削除を実行してください');
+        }
+
         throw error;
     }
 }

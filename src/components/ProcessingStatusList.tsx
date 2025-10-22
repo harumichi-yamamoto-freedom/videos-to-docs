@@ -30,11 +30,6 @@ export const ProcessingStatusList: React.FC<ProcessingStatusListProps> = ({
                                 <p className="text-sm font-medium text-gray-900 truncate">
                                     {status.fileName}
                                 </p>
-                                {status.error && (
-                                    <p className="text-xs text-red-600 mt-1">
-                                        エラー: {status.error}
-                                    </p>
-                                )}
                             </div>
                         </div>
 
@@ -100,12 +95,17 @@ export const ProcessingStatusList: React.FC<ProcessingStatusListProps> = ({
                             {/* エラー */}
                             {status.status === 'error' && !status.isResuming && (
                                 <div className="flex items-center justify-between">
-                                    <div>
+                                    <div className="flex-1">
                                         <p className="text-sm font-medium text-red-800 mb-1">
                                             ❌ エラーが発生しました
                                             {status.failedPhase === 'audio_conversion' && ' (音声変換)'}
                                             {status.failedPhase === 'text_generation' && ' (文書生成)'}
                                         </p>
+                                        {status.error && (
+                                            <p className="text-xs text-red-600 mb-1">
+                                                {status.error}
+                                            </p>
+                                        )}
                                         {status.completedSegmentIndices.length > 0 && (
                                             <p className="text-xs text-green-600 mb-1">
                                                 ✓ 完了した区間: {status.completedSegmentIndices.length}/{status.segments.length} ({status.audioConversionProgress}%)

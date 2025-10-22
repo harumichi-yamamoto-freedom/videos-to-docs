@@ -45,7 +45,7 @@ export class VideoConverter {
     }
 
     /**
-     * 動画の長さ（秒）を取得
+     * 動画の長さ（秒）と音声ストリームの有無を取得
      */
     async getVideoDuration(videoFile: File): Promise<number> {
         if (!this.isLoaded) {
@@ -59,6 +59,7 @@ export class VideoConverter {
 
             // FFmpegのログを収集
             let duration = 0;
+            let hasAudioStream = false;
             const logHandler = ({ message }: { message: string }) => {
                 // "Duration: 00:01:23.45" のような形式を探す
                 const durationMatch = message.match(/Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
@@ -67,6 +68,12 @@ export class VideoConverter {
                     const minutes = parseInt(durationMatch[2]);
                     const seconds = parseInt(durationMatch[3]);
                     duration = hours * 3600 + minutes * 60 + seconds;
+                }
+
+                // 音声ストリームがあるかチェック
+                // "Stream #0:1(und): Audio: aac ..." のようなパターンを探す
+                if (message.includes('Stream') && message.includes('Audio:')) {
+                    hasAudioStream = true;
                 }
             };
 
@@ -92,6 +99,10 @@ export class VideoConverter {
                 throw new Error('動画の長さを取得できませんでした');
             }
 
+            if (!hasAudioStream) {
+                throw new Error('この動画には音声トラックが含まれていません。音声付きの動画をアップロードしてください。');
+            }
+
             return duration;
         } catch (error) {
             console.error('動画長さ取得エラー:', error);
@@ -100,7 +111,7 @@ export class VideoConverter {
     }
 
     /**
-     * 動画の指定区間を音声に変換
+     * 動画の指定区間を音声に変換（入力ファイル名を指定）
      */
     async convertSegmentToMp3(
         videoFile: File,
@@ -111,20 +122,56 @@ export class VideoConverter {
             bitrate?: string;
             sampleRate?: number;
             onProgress?: (progress: ConversionProgress) => void;
+            inputFileName?: string; // 既に書き込み済みのファイル名（オプション）
         } = {}
     ): Promise<SegmentConversionResult> {
         if (!this.isLoaded) {
             await this.load();
         }
 
-        const { bitrate = '192k', sampleRate = 44100, onProgress } = options;
+        const { bitrate = '192k', sampleRate = 44100, onProgress, inputFileName: providedInputFileName } = options;
 
-        const inputFileName = `input_seg${segmentIndex}_${Date.now()}.${videoFile.name.split('.').pop()}`;
+        // 入力ファイル名が提供されていない場合は新しく作成
+        const inputFileName = providedInputFileName || `input_seg${segmentIndex}_${Date.now()}.${videoFile.name.split('.').pop()}`;
         const outputFileName = `output_seg${segmentIndex}_${Date.now()}.mp3`;
+        const shouldWriteFile = !providedInputFileName; // 入力ファイル名が提供されていない場合のみ書き込み
+        const shouldDeleteInputFile = shouldWriteFile; // 自分で書き込んだ場合のみ削除
+
+        // FFmpegログの収集
+        let ffmpegLogs: string[] = [];
+        const logHandler = ({ message }: { message: string }) => {
+            ffmpegLogs.push(message);
+        };
 
         try {
-            // ファイルをFFmpegに書き込み
-            await this.ffmpeg.writeFile(inputFileName, await fetchFile(videoFile));
+            console.log(`[区間${segmentIndex}] 変換開始:`, {
+                fileName: videoFile.name,
+                fileSize: videoFile.size,
+                startTime,
+                endTime,
+                inputFileName,
+                outputFileName,
+                shouldWriteFile
+            });
+
+            // ログハンドラーを設定
+            this.ffmpeg.on('log', logHandler);
+
+            // ファイルをFFmpegに書き込み（必要な場合のみ）
+            if (shouldWriteFile) {
+                console.log(`[区間${segmentIndex}] ファイル書き込み開始 (${videoFile.size} bytes)`);
+                try {
+                    const fileData = await fetchFile(videoFile);
+                    console.log(`[区間${segmentIndex}] fetchFile完了 (${fileData.byteLength} bytes)`);
+                    await this.ffmpeg.writeFile(inputFileName, fileData);
+                    console.log(`[区間${segmentIndex}] writeFile完了`);
+                } catch (writeError) {
+                    console.error(`[区間${segmentIndex}] ファイル書き込みエラー:`, writeError);
+                    throw new Error(`ファイル書き込み失敗: ${writeError instanceof Error ? writeError.message : '不明なエラー'}`);
+                }
+            } else {
+                console.log(`[区間${segmentIndex}] ファイル書き込みスキップ（既存ファイル使用: ${inputFileName}）`);
+            }
 
             // 進捗監視のハンドラーを定義
             const progressHandler = ({ progress }: { progress: number }) => {
@@ -137,6 +184,7 @@ export class VideoConverter {
             this.ffmpeg.on('progress', progressHandler);
 
             try {
+                console.log(`[区間${segmentIndex}] FFmpeg exec開始`);
                 // 区間を指定してMP3に変換
                 await this.ffmpeg.exec([
                     '-ss', startTime.toString(),
@@ -149,21 +197,41 @@ export class VideoConverter {
                     '-y', // 出力ファイルを上書き
                     outputFileName
                 ]);
+                console.log(`[区間${segmentIndex}] FFmpeg exec完了`);
+            } catch (execError) {
+                console.error(`[区間${segmentIndex}] FFmpeg実行エラー:`, execError);
+                console.error(`[区間${segmentIndex}] FFmpegログ:`, ffmpegLogs.slice(-10)); // 最後の10行のみ
+
+                // 音声トラックがない場合の特別なエラーメッセージ
+                const hasNoStreamError = ffmpegLogs.some(log =>
+                    log.includes('Output file #0 does not contain any stream') ||
+                    log.includes('does not contain any stream')
+                );
+
+                if (hasNoStreamError) {
+                    throw new Error('この動画には音声トラックが含まれていません。音声付きの動画をアップロードしてください。');
+                }
+
+                throw new Error(`FFmpeg実行失敗: ${execError instanceof Error ? execError.message : '不明なエラー'}`);
             } finally {
                 // 進捗監視を解除
                 this.ffmpeg.off('progress', progressHandler);
             }
 
             // 出力ファイルを読み取り
+            console.log(`[区間${segmentIndex}] 出力ファイル読み取り開始`);
             const data = await this.ffmpeg.readFile(outputFileName);
             const uint8Array = new Uint8Array(data as Uint8Array);
             const outputBlob = new Blob([uint8Array], { type: 'audio/mpeg' });
+            console.log(`[区間${segmentIndex}] 出力Blob作成完了 (${outputBlob.size} bytes)`);
 
             // 一時ファイルを削除
-            try {
-                await this.ffmpeg.deleteFile(inputFileName);
-            } catch {
-                // 削除エラーは無視
+            if (shouldDeleteInputFile) {
+                try {
+                    await this.ffmpeg.deleteFile(inputFileName);
+                } catch {
+                    // 削除エラーは無視
+                }
             }
             try {
                 await this.ffmpeg.deleteFile(outputFileName);
@@ -180,12 +248,15 @@ export class VideoConverter {
             };
         } catch (error) {
             console.error(`区間${segmentIndex}の変換エラー:`, error);
+            console.error(`[区間${segmentIndex}] FFmpegログ (全体):`, ffmpegLogs.slice(-20)); // 最後の20行
 
             // エラー時もクリーンアップを試みる
-            try {
-                await this.ffmpeg.deleteFile(inputFileName);
-            } catch {
-                // 削除エラーは無視
+            if (shouldDeleteInputFile) {
+                try {
+                    await this.ffmpeg.deleteFile(inputFileName);
+                } catch {
+                    // 削除エラーは無視
+                }
             }
             try {
                 await this.ffmpeg.deleteFile(outputFileName);
@@ -200,6 +271,9 @@ export class VideoConverter {
                 endTime,
                 error: error instanceof Error ? error.message : '不明なエラーが発生しました'
             };
+        } finally {
+            // ログハンドラーを解除
+            this.ffmpeg.off('log', logHandler);
         }
     }
 
