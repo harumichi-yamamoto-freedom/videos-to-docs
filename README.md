@@ -4,6 +4,25 @@ WebAssembly (FFmpeg.wasm) とGemini AIを使用して、ブラウザ内で動画
 
 ## ✨ 主な機能
 
+### 🔐 認証・ユーザー管理
+- **ゲストモード**: ログイン不要で即座に利用開始
+  - ゲスト共有のプロンプトと文書
+  - デフォルトプロンプトが自動生成
+- **ユーザーモード**: アカウント作成でデータを個別管理
+  - 自分専用のプロンプトと文書
+  - ログイン時に自動的にデフォルトプロンプト生成
+  - 他のユーザーやゲストのデータは非表示
+- **認証方法**: 
+  - メールアドレス＋パスワード
+  - Googleアカウント
+- **アカウント管理**:
+  - パスワード変更
+  - アカウント削除（すべてのデータを完全削除）
+- **管理者機能** (`superuser`):
+  - 監査ログ閲覧
+  - システム設定（サイズ上限変更）
+  - ユーザー一覧
+
 ### 🎵 動画・音声変換
 - **完全クライアントサイド処理**: すべての変換処理がブラウザ内で完結
 - **プライバシー保護**: ファイルがサーバーにアップロードされることはありません
@@ -50,7 +69,8 @@ WebAssembly (FFmpeg.wasm) とGemini AIを使用して、ブラウザ内で動画
 - **スタイリング**: Tailwind CSS v4
 - **動画変換**: FFmpeg.wasm (WebAssembly) - ブラウザ内で動画から音声を抽出
 - **AI処理**: Google Gemini 2.5 Flash - 音声認識と文書生成
-- **データベース**: Firebase Firestore - 文書とプロンプトの永続化
+- **認証**: Firebase Authentication - メール/パスワード、Google認証
+- **データベース**: Firebase Firestore - 文書・プロンプト・ユーザー管理
 - **アイコン**: Lucide React
 - **デプロイ**: Vercel対応
 
@@ -76,26 +96,91 @@ cd videos-to-docs
 npm install
 ```
 
-### 3. 環境変数の設定
+### 3. Firebase プロジェクトの作成と設定
 
-プロジェクトルートに `.env.local` ファイルを作成し、以下の環境変数を設定してください：
+#### 3.1 Firebase プロジェクトを作成
+
+1. [Firebase Console](https://console.firebase.google.com/) にアクセス
+2. 「プロジェクトを追加」をクリック
+3. プロジェクト名を入力して作成
+
+#### 3.2 Firestore Database を有効化
+
+1. Firebase Console の左メニューから「**Firestore Database**」を選択
+2. 「**データベースの作成**」をクリック
+3. セキュリティルールを「**本番環境モード**」で開始
+4. リージョンを選択（**asia-northeast1** 推奨）
+
+#### 3.3 Firebase Authentication を有効化
+
+1. Firebase Console の左メニューから「**Authentication**」を選択
+2. 「**始める**」をクリック
+3. 「**ログイン方法**」タブで以下を有効化：
+   - ✅ **メール/パスワード**
+   - ✅ **Google**（オプション）
+
+#### 3.4 ウェブアプリを追加
+
+1. プロジェクト設定（⚙️アイコン）を開く
+2. 「**マイアプリ**」セクションで「**ウェブ**」を選択
+3. アプリのニックネームを入力
+4. 表示される設定情報（API Key等）をメモ
+
+### 4. Gemini API キーの取得
+
+1. [Google AI Studio](https://aistudio.google.com/app/apikey) にアクセス
+2. Googleアカウントでログイン
+3. 「**Create API Key**」をクリック
+4. 既存のGoogle Cloud プロジェクトを選択、または新規作成
+5. 生成されたAPIキーをコピー
+
+### 5. 環境変数の設定
+
+プロジェクトルートに `.env.local` ファイルを作成：
 
 ```bash
-# Firebase設定
-NEXT_PUBLIC_FIREBASE_API_KEY=your_firebase_api_key
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project_id.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project_id.appspot.com
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_messaging_sender_id
-NEXT_PUBLIC_FIREBASE_APP_ID=your_firebase_app_id
+# Firebase設定（ステップ3.4で取得）
+NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789
+NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789:web:abc123def456
 
-# Gemini API設定
-NEXT_PUBLIC_GEMINI_API_KEY=your_gemini_api_key
+# Gemini API設定（ステップ4で取得）
+NEXT_PUBLIC_GEMINI_API_KEY=AIzaSy...
 ```
 
-詳しい設定手順は [ENV_SETUP.md](./ENV_SETUP.md) を参照してください。
+⚠️ **重要**: `.env.local` は `.gitignore` に含まれており、Gitにコミットされません。
 
-### 4. 開発サーバーの起動
+### 6. Firestore セキュリティルールの設定
+
+Firebase Console で Firestore のセキュリティルールを設定：
+
+1. [Firestore ルール](https://console.firebase.google.com/project/your-project/firestore/rules) を開く
+2. プロジェクトの `firestore.rules` ファイルの内容をコピー
+3. Firebase Console にペースト
+4. 「**公開**」をクリック
+
+**主な機能**:
+- ゲストモード: 未ログインユーザーは共有データを使用
+- ユーザーモード: ログインユーザーは専用データを所有
+- 管理者機能: `superuser` ユーザーのみアクセス可能
+
+### 7. Firestore インデックスの作成
+
+アプリを使用すると、Firestore から必要なインデックスのエラーが表示されます。
+エラーメッセージのリンクをクリックして、以下のインデックスを自動作成してください：
+
+**必要なインデックス**:
+- `prompts`: `ownerType` + `createdAt`
+- `prompts`: `ownerId` + `createdAt`
+- `transcriptions`: `ownerType` + `createdAt`
+- `transcriptions`: `ownerId` + `createdAt`
+- `auditLogs`: `timestamp`
+- `users`: `createdAt`
+
+### 8. 開発サーバーの起動
 
 ```bash
 npm run dev
@@ -103,23 +188,83 @@ npm run dev
 
 ブラウザで [http://localhost:3000](http://localhost:3000) を開きます。
 
+### 9. 初回管理者の作成（オプション）
+
+管理者機能を使用する場合は、以下の手順で初回管理者を作成します：
+
+#### ステップ1: サービスアカウントキーを取得
+
+1. [Firebase Console](https://console.firebase.google.com/) > プロジェクト設定 > **サービスアカウント**
+2. 「**新しい秘密鍵の生成**」をクリック
+3. ダウンロードした JSON ファイルをプロジェクトルートに配置
+4. ファイル名を `serviceAccountKey.json` に変更
+
+#### ステップ2: firebase-admin をインストール
+
+```bash
+npm install -D tsx firebase-admin
+```
+
+#### ステップ3: アカウントを作成してUIDを確認
+
+1. アプリでアカウントを作成
+2. [Firebase Console](https://console.firebase.google.com/) > **Authentication**
+3. 作成したユーザーの **UID** をコピー
+
+#### ステップ4: 管理者権限を付与
+
+```bash
+npx tsx scripts/create-admin.ts YOUR_USER_UID
+```
+
+**例**:
+```bash
+npx tsx scripts/create-admin.ts ylSoKJnLhQPgxcjdodQSOyqO5ym1
+```
+
+#### ステップ5: 管理者画面にアクセス
+
+1. アプリにログイン
+2. ヘッダーに「🛡️ 管理者画面」ボタンが表示される
+3. クリックして `/admin` にアクセス
+
+**管理者機能**:
+- 📊 監査ログ閲覧（全操作履歴）
+- ⚙️ システム設定（サイズ上限変更）
+- 👥 ユーザー一覧
+
 ## 📖 使い方
+
+### 初回起動時
+
+1. **ゲストとして開始**: ログイン不要で即座に利用可能
+   - ゲスト共有のデフォルトプロンプトが自動生成される
+2. **アカウント作成（オプション）**: データを個別管理したい場合
+   - 右上の「ログイン / アカウント作成」をクリック
+   - メールアドレスまたはGoogleアカウントで登録
+   - ログイン後、自分専用のデフォルトプロンプトが自動生成される
 
 ### 基本的な流れ
 
-1. **プロンプト設定**（初回のみ）: 
-   - 「プロンプト管理を開く」で使用するプロンプトを確認・編集
-   - デフォルトプロンプト4種類が用意済み（編集・削除も可能）
-2. **デフォルトプロンプトを選択**: ファイル追加前に使用するプロンプトを選択
-3. **ファイルを選択**: 動画または音声ファイルをドラッグ&ドロップ、またはクリックして選択
+1. **プロンプト選択**: 
+   - 左サイドバーでプロンプト一覧を確認
+   - デフォルトプロンプト4種類から選択、または新規作成
+2. **ファイルを選択**: 動画または音声ファイルをドラッグ&ドロップ
    - 動画ファイル: 音声変換 → 文書生成
    - 音声ファイル: 文書生成のみ（高速）
-4. **ファイルごとのプロンプト調整**: 必要に応じて各ファイルのプロンプトをカスタマイズ
-5. **設定を調整**: ビットレートとサンプルレート を選択（動画ファイルの場合のみ）
-6. **変換・文書生成開始**: ボタンをクリックして処理を開始
+3. **プロンプト選択**: ファイルごとに使用するプロンプトを選択（複数選択可能）
+4. **処理開始**: 「変換・文書生成開始」ボタンをクリック
    - 音声変換: 直列処理（一度に1ファイル）
    - 文書生成: 並列処理（複数ファイル・複数プロンプトを同時実行）
-7. **文書を確認**: 「生成された文書」セクションで生成された文書を確認（更新ボタンで最新化）
+5. **文書を確認**: 左下の「生成された文書」で確認・ダウンロード・削除
+
+### アカウント管理
+
+ログイン後、右上のメールアドレスをクリックすると以下が可能：
+
+- **パスワード変更**（メール認証の場合）
+- **ログアウト**
+- **アカウント削除**（すべてのデータを完全削除）
 
 ### エラー発生時の再開機能
 
@@ -214,23 +359,51 @@ npm run dev
 
 ```
 src/
-├── app/              # Next.js App Router
-│   ├── page.tsx      # メインページ（並列処理・再開機能・デバッグモード）
-│   ├── layout.tsx    # レイアウト
-│   └── globals.css   # グローバルスタイル
-├── components/       # Reactコンポーネント
-│   ├── FileDropZone.tsx           # ファイルドロップエリア（動画・音声対応）
-│   ├── ConversionSettings.tsx     # 変換設定パネル
-│   ├── ConversionProgress.tsx     # 処理進捗表示
-│   ├── PromptManager.tsx          # プロンプト管理UI（CRUD操作）
-│   ├── FilePromptSelector.tsx     # ファイル別プロンプト選択
-│   └── TranscriptionList.tsx      # 文書一覧表示（更新・削除）
-└── lib/              # ユーティリティ・ロジック
-    ├── ffmpeg.ts     # FFmpeg.wasm処理（進捗ハンドラー管理）
-    ├── gemini.ts     # Gemini API クライアント（ネットワークエラー検出）
-    ├── prompts.ts    # プロンプト管理（Firestore連携）
-    ├── firebase.ts   # Firebase初期化
-    └── firestore.ts  # Firestore操作（文書・プロンプト）
+├── app/                       # Next.js App Router
+│   ├── page.tsx               # メインページ
+│   ├── admin/
+│   │   └── page.tsx           # 管理者画面
+│   ├── layout.tsx             # レイアウト
+│   └── globals.css            # グローバルスタイル
+├── components/                # Reactコンポーネント
+│   ├── FileDropZone.tsx       # ファイルドロップエリア
+│   ├── PromptListSidebar.tsx  # プロンプト一覧
+│   ├── DocumentListSidebar.tsx # 文書一覧
+│   ├── AuthButton.tsx         # 認証ボタン（ドロップダウン）
+│   ├── AuthModal.tsx          # ログイン/サインアップモーダル
+│   ├── PasswordChangeModal.tsx # パスワード変更
+│   ├── ReauthModal.tsx        # 再認証モーダル
+│   └── admin/                 # 管理者用コンポーネント
+│       ├── AuditLogPanel.tsx  # 監査ログパネル
+│       ├── SettingsPanel.tsx  # 設定パネル
+│       └── UsersPanel.tsx     # ユーザー一覧パネル
+├── hooks/                     # カスタムフック
+│   ├── useAuth.ts             # 認証状態管理
+│   ├── useAdmin.ts            # 管理者権限チェック
+│   ├── usePromptManagement.ts # プロンプト管理
+│   └── useVideoProcessing.ts  # 動画処理
+└── lib/                       # ユーティリティ・ロジック
+    ├── firebase.ts            # Firebase初期化
+    ├── auth.ts                # 認証機能
+    ├── firestore.ts           # Firestore操作（文書）
+    ├── prompts.ts             # プロンプト管理
+    ├── userManagement.ts      # ユーザー管理
+    ├── auditLog.ts            # 監査ログ
+    ├── adminSettings.ts       # 管理者設定
+    ├── accountDeletion.ts     # アカウント削除
+    ├── promptPermissions.ts   # プロンプト権限
+    ├── ffmpeg.ts              # FFmpeg.wasm処理
+    └── gemini.ts              # Gemini API クライアント
+
+scripts/                       # 管理スクリプト
+├── create-admin.ts            # 初回管理者作成
+└── migrate-existing-data.ts   # データ移行
+
+docs/                          # ドキュメント
+├── admin-setup-guide.md       # 管理者セットアップ
+└── account-deletion-guide.md  # アカウント削除ガイド
+
+firestore.rules                # Firestore セキュリティルール
 ```
 
 ## 🛠️ ビルド
@@ -249,14 +422,35 @@ npm run start
 
 ## 🔒 セキュリティとプライバシー
 
+### データの保護
 - **完全クライアントサイド変換**: すべての動画・音声変換処理はブラウザ内で実行され、サーバーにアップロードされません
 - **音声データの扱い**: 
   - 音声ファイル（変換後のMP3）のみGemini APIに送信されます
   - 元の動画ファイルはサーバーに送信されません
   - Gemini APIは文書生成後、音声データを保持しません
+
+### アクセス制御
+- **Firestore Security Rules**: データベースレベルでアクセス制御
+  - ゲスト共有データ: 全員が読み書き可能
+  - ユーザー専有データ: 本人のみ読み書き可能
+  - 所有者情報（`ownerType`, `ownerId`）: 更新で変更不可
+  - ゲスト共有のデフォルトプロンプト: 編集・削除不可
+- **プロンプト利用権限**: 文書生成前に利用権限を自動チェック
+- **管理者機能**: `superuser` フィールドによる管理者識別
+  - 監査ログ閲覧（管理者のみ）
+  - システム設定変更（管理者のみ）
+  - ユーザー一覧表示（管理者のみ）
+
+### 監査とセキュリティ機能
+- **監査ログ**: すべての重要操作を自動記録
+  - プロンプト・文書の作成/更新/削除
+  - ユーザーのログイン/ログアウト/アカウント削除
+  - 管理者操作
+- **サイズ制限**: プロンプトと文書のサイズ上限（管理者が変更可能）
+  - プロンプト: 50KB（デフォルト）
+  - 文書: 500KB（デフォルト）
+- **再認証**: アカウント削除などの重要操作は再認証が必要
 - **環境変数の保護**: `.env.local` ファイルはGitにコミットされません
-- **Firestore**: 本番環境では適切なセキュリティルールを設定してください
-- **ネットワークエラー検出**: WiFi切断などのネットワーク障害を検出し、適切に処理
 
 ## 🔧 トラブルシューティング
 
@@ -277,6 +471,30 @@ npm run start
 | `Gemini APIキーが無効です` | APIキーの設定ミス | `.env.local`のAPIキーを確認 |
 | `音声変換に失敗しました` | 動画ファイルの形式が非対応 | 別の形式の動画ファイルを試す |
 | `プロンプトが一つも選択されていません` | プロンプト未選択 | 最低1つのプロンプトを選択 |
+| `Missing or insufficient permissions` | Firestore Rules未設定 | Firebase ConsoleでRulesをデプロイ |
+| `プロンプトのサイズが上限を超えています` | プロンプトが大きすぎる | プロンプトを短くするか、管理者が上限を変更 |
+| `auth/requires-recent-login` | アカウント削除時 | 再認証モーダルでパスワード入力 |
+
+### 認証関連のトラブルシューティング
+
+#### ユーザーデータが作成されない
+1. ブラウザのコンソール（F12）でエラーを確認
+2. Firestore Rules がデプロイされているか確認
+3. アカウントを作成後、一度ログアウト→再ログイン
+
+#### ログイン後もゲストデータが表示される
+1. ブラウザのハードリフレッシュ（Cmd+Shift+R または Ctrl+Shift+R）
+2. 一度ログアウト→再ログイン
+3. Firestore でデータに `ownerType`, `ownerId` フィールドがあるか確認
+
+#### 管理者画面にアクセスできない
+1. Firebase Console > Firestore > `users/{uid}` で `superuser: true` を確認
+2. 一度ログアウト→再ログイン
+3. ブラウザのキャッシュをクリア
+
+#### アカウント削除後にエラーが出る
+1. 正常な動作です（削除されたユーザーのデータを読み込もうとしている）
+2. ブラウザをリロードすれば解消されます
 
 ### パフォーマンス最適化のヒント
 
@@ -286,6 +504,16 @@ npm run start
 
 ## 🆕 最近のアップデート
 
+### v3.0.0 - 認証・管理者機能
+- ✅ Firebase Authentication 統合（メール/パスワード、Google）
+- ✅ ゲストモード・ユーザーモードの実装
+- ✅ ユーザー専用データの分離
+- ✅ 監査ログシステム（全操作履歴を記録）
+- ✅ サイズ制限機能（プロンプト50KB、文書500KB）
+- ✅ 管理者機能（監査ログ閲覧、設定変更、ユーザー一覧）
+- ✅ アカウント管理（パスワード変更、完全削除）
+- ✅ Firestore Security Rules による厳格なアクセス制御
+
 ### v2.0.0 - エラーリカバリーと音声ファイル対応
 - ✅ 音声ファイル（MP3, WAV, M4A, AAC, OGG, FLAC）の直接選択に対応
 - ✅ ファイルごとの個別再開機能を実装
@@ -293,8 +521,6 @@ npm run start
 - ✅ 音声変換済みデータのキャッシュによる高速再開
 - ✅ ネットワークエラー検出の改善
 - ✅ デバッグモードの追加（開発環境のみ）
-- ✅ デフォルトプロンプトの編集・削除を可能に
-- ✅ 文書一覧の更新ボタンを常時表示
 
 ### v1.0.0 - 初期リリース
 - 動画からMP3への変換
@@ -306,11 +532,18 @@ npm run start
 
 MIT
 
+## 📚 ドキュメント
+
+- **セットアップガイド**: このREADME（上記）
+- **管理者セットアップ**: `docs/admin-setup-guide.md`
+- **アカウント削除ガイド**: `docs/account-deletion-guide.md`
+- **スクリプト使用方法**: `scripts/README.md`
+
 ## 🙏 謝辞
 
 - [FFmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm) - ブラウザでのFFmpeg実行
 - [Google Gemini](https://ai.google.dev/) - AI文書生成
-- [Firebase](https://firebase.google.com/) - クラウドデータベース
+- [Firebase](https://firebase.google.com/) - 認証とクラウドデータベース
 - [Next.js](https://nextjs.org/) - Reactフレームワーク
 - [Tailwind CSS](https://tailwindcss.com/) - ユーティリティファーストCSS
 - [Lucide](https://lucide.dev/) - 美しいアイコンセット
