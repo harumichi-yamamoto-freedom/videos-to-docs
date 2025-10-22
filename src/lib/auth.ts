@@ -161,11 +161,12 @@ export async function deleteAccount(): Promise<void> {
         await currentUser.delete();
 
         console.log('✅ Authenticationアカウント削除完了');
-    } catch (error: any) {
+    } catch (error) {
+        const firebaseError = error as { code?: string; message?: string };
         console.error('❌ アカウント削除エラー:', error);
 
         // Firestoreデータは削除済みだが、Authenticationの削除に失敗した場合
-        if (error.code === 'auth/requires-recent-login') {
+        if (firebaseError.code === 'auth/requires-recent-login') {
             console.error('⚠️ Firestoreデータは削除されましたが、Authenticationアカウントの削除に失敗しました');
             console.error('💡 再度ログインして、もう一度アカウント削除を実行してください');
         }

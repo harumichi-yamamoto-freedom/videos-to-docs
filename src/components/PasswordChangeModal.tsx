@@ -56,13 +56,14 @@ export default function PasswordChangeModal({ isOpen, onClose }: PasswordChangeM
             setNewPassword('');
             setConfirmPassword('');
             onClose();
-        } catch (err: any) {
-            if (err.code === 'auth/wrong-password') {
+        } catch (err) {
+            const firebaseError = err as { code?: string; message?: string };
+            if (firebaseError.code === 'auth/wrong-password') {
                 setError('現在のパスワードが正しくありません');
-            } else if (err.code === 'auth/weak-password') {
+            } else if (firebaseError.code === 'auth/weak-password') {
                 setError('パスワードが弱すぎます');
             } else {
-                setError(err.message || 'パスワードの変更に失敗しました');
+                setError(firebaseError.message || 'パスワードの変更に失敗しました');
             }
         } finally {
             setLoading(false);

@@ -184,8 +184,8 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                                     key={transcription.id}
                                     onClick={() => !isEditing && onDocumentClick(transcription)}
                                     className={`bg-white rounded-xl p-4 shadow-sm transition-all group border border-gray-100 ${isEditing
-                                            ? 'border-purple-300 shadow-md'
-                                            : 'hover:shadow-md cursor-pointer hover:border-purple-200'
+                                        ? 'border-purple-300 shadow-md'
+                                        : 'hover:shadow-md cursor-pointer hover:border-purple-200'
                                         }`}
                                 >
                                     <div className="flex items-start justify-between">
@@ -201,8 +201,8 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                                                         placeholder="タイトルを入力"
                                                         autoFocus
                                                         onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') handleSaveTitle(transcription, e as any);
-                                                            if (e.key === 'Escape') handleCancelEdit(e as any);
+                                                            if (e.key === 'Enter') handleSaveTitle(transcription, e as unknown as React.MouseEvent);
+                                                            if (e.key === 'Escape') handleCancelEdit(e as unknown as React.MouseEvent);
                                                         }}
                                                         disabled={isSaving}
                                                     />

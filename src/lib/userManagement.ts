@@ -31,7 +31,7 @@ export async function createOrUpdateUserProfile(
 
         if (userSnap.exists()) {
             // 既存ユーザーの場合、最終ログイン日時のみ更新
-            const updateData: any = {
+            const updateData: Record<string, string | object> = {
                 lastLoginAt: serverTimestamp(),
             };
 
@@ -45,7 +45,7 @@ export async function createOrUpdateUserProfile(
             await setDoc(userRef, updateData, { merge: true });
         } else {
             // 新規ユーザーの場合
-            const userData: any = {
+            const userData: Record<string, string | number | boolean | object> = {
                 uid,
                 email,
                 superuser,

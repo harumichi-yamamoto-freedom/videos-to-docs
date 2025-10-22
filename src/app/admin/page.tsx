@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAdmin } from '@/hooks/useAdmin';
-import { Shield, FileText, Settings, Users, BarChart } from 'lucide-react';
+import { Shield, Settings, Users, BarChart } from 'lucide-react';
 import AuditLogPanel from '@/components/admin/AuditLogPanel';
 import SettingsPanel from '@/components/admin/SettingsPanel';
 import UsersPanel from '@/components/admin/UsersPanel';
@@ -67,8 +67,8 @@ export default function AdminPage() {
                         <button
                             onClick={() => setActiveTab('audit')}
                             className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors ${activeTab === 'audit'
-                                    ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
-                                    : 'text-gray-600 hover:bg-gray-50'
+                                ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
+                                : 'text-gray-600 hover:bg-gray-50'
                                 }`}
                         >
                             <BarChart className="w-5 h-5" />
@@ -78,8 +78,8 @@ export default function AdminPage() {
                         <button
                             onClick={() => setActiveTab('settings')}
                             className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors ${activeTab === 'settings'
-                                    ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
-                                    : 'text-gray-600 hover:bg-gray-50'
+                                ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
+                                : 'text-gray-600 hover:bg-gray-50'
                                 }`}
                         >
                             <Settings className="w-5 h-5" />
@@ -89,8 +89,8 @@ export default function AdminPage() {
                         <button
                             onClick={() => setActiveTab('users')}
                             className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors ${activeTab === 'users'
-                                    ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
-                                    : 'text-gray-600 hover:bg-gray-50'
+                                ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
+                                : 'text-gray-600 hover:bg-gray-50'
                                 }`}
                         >
                             <Users className="w-5 h-5" />

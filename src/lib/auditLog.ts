@@ -28,7 +28,7 @@ export interface AuditLog {
     action: AuditAction;
     resourceType: string; // 'prompt', 'document', 'user', 'settings'
     resourceId?: string;
-    details?: Record<string, any>;
+    details?: Record<string, string | number | boolean>;
     ipAddress?: string;
     userAgent?: string;
     timestamp: Date | Timestamp;
@@ -41,7 +41,7 @@ export async function logAudit(
     action: AuditAction,
     resourceType: string,
     resourceId?: string,
-    details?: Record<string, any>
+    details?: Record<string, string | number | boolean>
 ): Promise<void> {
     try {
         const userId = getCurrentUserId();
@@ -51,7 +51,7 @@ export async function logAudit(
         const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : undefined;
 
         // Firestoreに保存するデータ（undefinedは除外）
-        const logData: any = {
+        const logData: Record<string, string | number | boolean | object> = {
             userId,
             action,
             resourceType,

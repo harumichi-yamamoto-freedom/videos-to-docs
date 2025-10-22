@@ -11,6 +11,7 @@ export default function AuditLogPanel() {
 
     useEffect(() => {
         loadLogs();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [limitCount]);
 
     const loadLogs = async () => {
@@ -29,14 +30,19 @@ export default function AuditLogPanel() {
     const exportLogs = () => {
         const csv = [
             ['タイムスタンプ', 'ユーザーID', 'メール', 'アクション', 'リソースタイプ', 'リソースID'].join(','),
-            ...logs.map(log => [
-                new Date(log.timestamp).toLocaleString('ja-JP'),
-                log.userId,
-                log.userEmail || '',
-                log.action,
-                log.resourceType,
-                log.resourceId || ''
-            ].join(','))
+            ...logs.map(log => {
+                const timestamp = log.timestamp instanceof Date
+                    ? log.timestamp
+                    : log.timestamp.toDate();
+                return [
+                    timestamp.toLocaleString('ja-JP'),
+                    log.userId,
+                    log.userEmail || '',
+                    log.action,
+                    log.resourceType,
+                    log.resourceId || ''
+                ].join(',');
+            })
         ].join('\n');
 
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -118,26 +124,31 @@ export default function AuditLogPanel() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
-                            {logs.map((log) => (
-                                <tr key={log.id} className="hover:bg-gray-50">
-                                    <td className="px-4 py-3 text-sm text-gray-900">
-                                        {new Date(log.timestamp).toLocaleString('ja-JP')}
-                                    </td>
-                                    <td className="px-4 py-3 text-sm text-gray-600">
-                                        <div>{log.userEmail || log.userId}</div>
-                                        <div className="text-xs text-gray-400">{log.userId}</div>
-                                    </td>
-                                    <td className="px-4 py-3 text-sm">
-                                        <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
-                                            {getActionLabel(log.action)}
-                                        </span>
-                                    </td>
-                                    <td className="px-4 py-3 text-sm text-gray-600">
-                                        {log.resourceType}
-                                        {log.resourceId && <span className="text-xs text-gray-400 ml-2">({log.resourceId.slice(0, 8)}...)</span>}
-                                    </td>
-                                </tr>
-                            ))}
+                            {logs.map((log) => {
+                                const timestamp = log.timestamp instanceof Date
+                                    ? log.timestamp
+                                    : log.timestamp.toDate();
+                                return (
+                                    <tr key={log.id} className="hover:bg-gray-50">
+                                        <td className="px-4 py-3 text-sm text-gray-900">
+                                            {timestamp.toLocaleString('ja-JP')}
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-gray-600">
+                                            <div>{log.userEmail || log.userId}</div>
+                                            <div className="text-xs text-gray-400">{log.userId}</div>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm">
+                                            <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
+                                                {getActionLabel(log.action)}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-sm text-gray-600">
+                                            {log.resourceType}
+                                            {log.resourceId && <span className="text-xs text-gray-400 ml-2">({log.resourceId.slice(0, 8)}...)</span>}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                     {logs.length === 0 && (

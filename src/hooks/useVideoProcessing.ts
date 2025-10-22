@@ -131,6 +131,7 @@ export const useVideoProcessing = (
                 )
             );
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [availablePrompts, debugErrorMode]);
 
     // 文書生成処理（再開用 - 未完了のプロンプトのみ処理）
@@ -249,6 +250,7 @@ export const useVideoProcessing = (
                 )
             );
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [availablePrompts, debugErrorMode]);
 
     return {

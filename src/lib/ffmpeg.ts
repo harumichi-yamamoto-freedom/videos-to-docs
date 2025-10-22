@@ -138,7 +138,7 @@ export class VideoConverter {
         const shouldDeleteInputFile = shouldWriteFile; // 自分で書き込んだ場合のみ削除
 
         // FFmpegログの収集
-        let ffmpegLogs: string[] = [];
+        const ffmpegLogs: string[] = [];
         const logHandler = ({ message }: { message: string }) => {
             ffmpegLogs.push(message);
         };

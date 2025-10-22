@@ -79,6 +79,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
 
     useEffect(() => {
         loadPrompts();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // 外部からの更新トリガーを監視
@@ -86,6 +87,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
         if (updateTrigger !== undefined && updateTrigger > 0) {
             loadPromptsQuietly();
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [updateTrigger]);
 
     const handleDelete = async (prompt: Prompt, event: React.MouseEvent) => {

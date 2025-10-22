@@ -40,11 +40,12 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
             console.log('✅ メール認証での再認証が成功しました');
             onClose();
             onSuccess();
-        } catch (err: any) {
-            if (err.code === 'auth/wrong-password') {
+        } catch (err) {
+            const firebaseError = err as { code?: string; message?: string };
+            if (firebaseError.code === 'auth/wrong-password') {
                 setError('パスワードが正しくありません');
             } else {
-                setError(err.message || '再認証に失敗しました');
+                setError(firebaseError.message || '再認証に失敗しました');
             }
         } finally {
             setLoading(false);
@@ -62,8 +63,9 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
             console.log('✅ Google認証での再認証が成功しました');
             onClose();
             onSuccess();
-        } catch (err: any) {
-            setError(err.message || 'Google再認証に失敗しました');
+        } catch (err) {
+            const firebaseError = err as { code?: string; message?: string };
+            setError(firebaseError.message || 'Google再認証に失敗しました');
         } finally {
             setLoading(false);
         }

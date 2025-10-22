@@ -15,7 +15,6 @@ export default function AuthButton() {
     const [showPasswordModal, setShowPasswordModal] = useState(false);
     const [showReauthModal, setShowReauthModal] = useState(false);
     const [showDropdown, setShowDropdown] = useState(false);
-    const [pendingDeletion, setPendingDeletion] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
     // ドロップダウンの外側クリックで閉じる
@@ -77,13 +76,12 @@ export default function AuthButton() {
 
                 // セキュリティのため、必ず再認証を実行
                 console.log('🔐 セキュリティ確認のため、再認証を要求します');
-                setPendingDeletion(true);
                 setShowReauthModal(true);
 
-            } catch (error: any) {
-                alert('アカウント削除の準備中にエラーが発生しました:\n' + error.message);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'アカウント削除の準備中にエラーが発生しました';
+                alert('アカウント削除の準備中にエラーが発生しました:\n' + message);
                 console.error('削除準備エラー:', error);
-                setPendingDeletion(false);
             }
         };
 
@@ -93,15 +91,15 @@ export default function AuthButton() {
                 await deleteAccount();
                 console.log('✅ アカウント削除成功');
                 alert('アカウントとすべてのデータを削除しました');
-                setPendingDeletion(false);
-            } catch (error: any) {
+            } catch (error) {
                 console.error('❌ アカウント削除エラー:', error);
-                if (error.code === 'auth/requires-recent-login') {
+                const firebaseError = error as { code?: string; message?: string };
+                if (firebaseError.code === 'auth/requires-recent-login') {
                     console.log('⚠️ 再認証が必要です');
                     throw error; // 再認証が必要なエラーは上位に伝播
                 }
-                alert('アカウントの削除に失敗しました:\n' + error.message);
-                setPendingDeletion(false);
+                const message = firebaseError.message || 'アカウントの削除に失敗しました';
+                alert('アカウントの削除に失敗しました:\n' + message);
                 throw error;
             }
         };
@@ -115,16 +113,17 @@ export default function AuthButton() {
 
             try {
                 await performDeletion();
-            } catch (error: any) {
+            } catch (error) {
                 console.error('❌ 削除エラー:', error);
+                const firebaseError = error as { code?: string; message?: string };
 
-                if (error.code === 'auth/requires-recent-login') {
+                if (firebaseError.code === 'auth/requires-recent-login') {
                     // 再認証直後でもこのエラーが出る場合、データは削除済み
                     alert('⚠️ データは削除されましたが、アカウント削除で問題が発生しました。\n\nアカウントを完全に削除するには：\n1. ページをリロード\n2. 再度ログイン（データは既に削除済み）\n3. すぐにアカウント削除を実行');
                 } else {
-                    alert('エラーが発生しました:\n' + error.message);
+                    const message = firebaseError.message || 'エラーが発生しました';
+                    alert('エラーが発生しました:\n' + message);
                 }
-                setPendingDeletion(false);
             }
         };
 
@@ -180,10 +179,7 @@ export default function AuthButton() {
 
                 <ReauthModal
                     isOpen={showReauthModal}
-                    onClose={() => {
-                        setShowReauthModal(false);
-                        setPendingDeletion(false);
-                    }}
+                    onClose={() => setShowReauthModal(false)}
                     onSuccess={handleReauthSuccess}
                 />
             </div>

@@ -3,7 +3,7 @@
  */
 
 import { db } from './firebase';
-import { collection, query, where, getDocs, deleteDoc, doc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { logAudit } from './auditLog';
 
 /**
