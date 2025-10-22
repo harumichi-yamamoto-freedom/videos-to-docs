@@ -35,7 +35,11 @@ export default function SettingsPanel() {
             setSaving(true);
             const userId = getCurrentUserId();
             await updateAdminSettings(settings, userId);
-            await logAudit('admin_settings_update', 'settings', 'config', settings);
+            // 監査ログに必要な情報だけを抽出
+            await logAudit('admin_settings_update', 'settings', 'config', {
+                maxPromptSize: settings.maxPromptSize,
+                maxDocumentSize: settings.maxDocumentSize,
+            });
             alert('設定を保存しました');
         } catch (error) {
             console.error('設定保存エラー:', error);
