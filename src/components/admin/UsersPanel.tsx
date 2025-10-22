@@ -70,31 +70,42 @@ export default function UsersPanel() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200">
-                                {users.map((user) => (
-                                    <tr key={user.uid} className="hover:bg-gray-50">
-                                        <td className="px-4 py-3 text-sm text-gray-900">{user.email}</td>
-                                        <td className="px-4 py-3 text-sm text-gray-600">{user.displayName || '-'}</td>
-                                        <td className="px-4 py-3 text-sm">
-                                            {user.superuser ? (
-                                                <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs font-medium">
-                                                    管理者
-                                                </span>
-                                            ) : (
-                                                <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs">
-                                                    一般
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-3 text-sm text-gray-600">{user.promptCount || 0}</td>
-                                        <td className="px-4 py-3 text-sm text-gray-600">{user.documentCount || 0}</td>
-                                        <td className="px-4 py-3 text-sm text-gray-600">
-                                            {new Date(user.createdAt).toLocaleDateString('ja-JP')}
-                                        </td>
-                                        <td className="px-4 py-3 text-sm text-gray-600">
-                                            {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleDateString('ja-JP') : '-'}
-                                        </td>
-                                    </tr>
-                                ))}
+                                {users.map((user) => {
+                                    const createdAt = user.createdAt instanceof Date
+                                        ? user.createdAt
+                                        : user.createdAt.toDate();
+                                    const lastLoginAt = user.lastLoginAt
+                                        ? (user.lastLoginAt instanceof Date
+                                            ? user.lastLoginAt
+                                            : user.lastLoginAt.toDate())
+                                        : null;
+
+                                    return (
+                                        <tr key={user.uid} className="hover:bg-gray-50">
+                                            <td className="px-4 py-3 text-sm text-gray-900">{user.email}</td>
+                                            <td className="px-4 py-3 text-sm text-gray-600">{user.displayName || '-'}</td>
+                                            <td className="px-4 py-3 text-sm">
+                                                {user.superuser ? (
+                                                    <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs font-medium">
+                                                        管理者
+                                                    </span>
+                                                ) : (
+                                                    <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs">
+                                                        一般
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-600">{user.promptCount || 0}</td>
+                                            <td className="px-4 py-3 text-sm text-gray-600">{user.documentCount || 0}</td>
+                                            <td className="px-4 py-3 text-sm text-gray-600">
+                                                {createdAt.toLocaleDateString('ja-JP')}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-600">
+                                                {lastLoginAt ? lastLoginAt.toLocaleDateString('ja-JP') : '-'}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                         {users.length === 0 && (
