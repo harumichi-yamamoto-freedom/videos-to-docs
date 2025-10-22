@@ -59,6 +59,7 @@ export default function AuditLogPanel() {
             'prompt_update': 'プロンプト更新',
             'prompt_delete': 'プロンプト削除',
             'document_create': '文書作成',
+            'document_update': '文書更新',
             'document_delete': '文書削除',
             'user_login': 'ログイン',
             'user_logout': 'ログアウト',

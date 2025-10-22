@@ -12,6 +12,7 @@ export type AuditAction =
     | 'prompt_update'
     | 'prompt_delete'
     | 'document_create'
+    | 'document_update'
     | 'document_delete'
     | 'user_login'
     | 'user_logout'
