@@ -77,7 +77,7 @@ export async function signOutNow(): Promise<void> {
 
     // 監査ログを記録（ログアウト前に記録）
     if (user) {
-        await logAudit('user_logout', 'user', user.uid, { userEmail: user.email || undefined });
+        await logAudit('user_logout', 'user', user.uid, { userEmail: user.email || '' });
     }
 
     await signOut(auth);
