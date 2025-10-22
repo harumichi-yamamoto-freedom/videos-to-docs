@@ -12,6 +12,9 @@ import {
     serverTimestamp,
 } from 'firebase/firestore';
 import { getCurrentUserId, getOwnerType } from './auth';
+import { logAudit } from './auditLog';
+import { validatePromptSize } from './adminSettings';
+import { updateUserStats } from './userManagement';
 
 export interface Prompt {
     id?: string;
@@ -141,6 +144,41 @@ export async function initializeDefaultPrompts(): Promise<void> {
 }
 
 /**
+ * 特定のユーザー用のデフォルトプロンプトを作成
+ * アカウント作成時に1回だけ呼ばれる
+ */
+export async function createDefaultPromptsForUser(userId: string, ownerType: 'user' | 'guest'): Promise<void> {
+    try {
+        // 既にプロンプトが存在するかチェック
+        const q = query(
+            collection(db, 'prompts'),
+            where('ownerId', '==', userId)
+        );
+        const existingPrompts = await getDocs(q);
+
+        if (existingPrompts.empty) {
+            console.log(`ユーザー ${userId} のデフォルトプロンプトを作成中...`);
+
+            for (const defaultPrompt of DEFAULT_PROMPTS) {
+                await addDoc(collection(db, 'prompts'), {
+                    ...defaultPrompt,
+                    ownerType,
+                    ownerId: userId,
+                    createdBy: userId,
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                });
+            }
+
+            console.log(`✅ ユーザー ${userId} のデフォルトプロンプト作成完了`);
+        }
+    } catch (error) {
+        console.error('デフォルトプロンプト作成エラー:', error);
+        // エラーが発生してもアカウント作成は続行
+    }
+}
+
+/**
  * プロンプトを作成
  */
 export async function createPrompt(
@@ -152,6 +190,16 @@ export async function createPrompt(
         const userId = getCurrentUserId();
         const ownerType = getOwnerType();
 
+        // サイズチェック
+        const sizeValidation = await validatePromptSize(content);
+        if (!sizeValidation.valid) {
+            throw new Error(
+                `プロンプトのサイズが上限を超えています。` +
+                `（現在: ${(sizeValidation.size / 1024).toFixed(2)}KB / ` +
+                `上限: ${(sizeValidation.maxSize / 1024).toFixed(2)}KB）`
+            );
+        }
+
         const docRef = await addDoc(collection(db, 'prompts'), {
             name,
             content,
@@ -162,9 +210,21 @@ export async function createPrompt(
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
         });
+
+        // 監査ログを記録
+        await logAudit('prompt_create', 'prompt', docRef.id, { name, ownerType });
+
+        // ユーザー統計を更新
+        if (ownerType === 'user') {
+            await updateUserStats(userId, 1, 0);
+        }
+
         return docRef.id;
     } catch (error) {
         console.error('プロンプト作成エラー:', error);
+        if (error instanceof Error) {
+            throw error;
+        }
         throw new Error('プロンプトの作成に失敗しました');
     }
 }
@@ -212,6 +272,10 @@ export async function getPrompts(): Promise<Prompt[]> {
                 return; // スキップ
             }
 
+            // タイムスタンプがnullの場合のフォールバック
+            const createdAt = data.createdAt ? data.createdAt.toDate() : new Date();
+            const updatedAt = data.updatedAt ? data.updatedAt.toDate() : new Date();
+
             prompts.push({
                 id: docSnapshot.id,
                 name: data.name,
@@ -220,8 +284,8 @@ export async function getPrompts(): Promise<Prompt[]> {
                 ownerType: ownerType as 'guest' | 'user',
                 ownerId: ownerId,
                 createdBy: createdBy,
-                createdAt: data.createdAt.toDate(),
-                updatedAt: data.updatedAt.toDate(),
+                createdAt,
+                updatedAt,
             });
         });
 
@@ -241,12 +305,30 @@ export async function updatePrompt(
     updates: { name?: string; content?: string }
 ): Promise<void> {
     try {
+        // コンテンツが更新される場合、サイズチェック
+        if (updates.content) {
+            const sizeValidation = await validatePromptSize(updates.content);
+            if (!sizeValidation.valid) {
+                throw new Error(
+                    `プロンプトのサイズが上限を超えています。` +
+                    `（現在: ${(sizeValidation.size / 1024).toFixed(2)}KB / ` +
+                    `上限: ${(sizeValidation.maxSize / 1024).toFixed(2)}KB）`
+                );
+            }
+        }
+
         await updateDoc(doc(db, 'prompts', promptId), {
             ...updates,
             updatedAt: serverTimestamp(),
         });
+
+        // 監査ログを記録
+        await logAudit('prompt_update', 'prompt', promptId, updates);
     } catch (error) {
         console.error('プロンプト更新エラー:', error);
+        if (error instanceof Error) {
+            throw error;
+        }
         throw new Error('プロンプトの更新に失敗しました');
     }
 }
@@ -256,7 +338,18 @@ export async function updatePrompt(
  */
 export async function deletePrompt(promptId: string): Promise<void> {
     try {
+        const userId = getCurrentUserId();
+        const ownerType = getOwnerType();
+
         await deleteDoc(doc(db, 'prompts', promptId));
+
+        // 監査ログを記録
+        await logAudit('prompt_delete', 'prompt', promptId);
+
+        // ユーザー統計を更新
+        if (ownerType === 'user') {
+            await updateUserStats(userId, -1, 0);
+        }
     } catch (error) {
         console.error('プロンプト削除エラー:', error);
         throw new Error('プロンプトの削除に失敗しました');

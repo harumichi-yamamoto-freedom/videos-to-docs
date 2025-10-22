@@ -77,6 +77,51 @@ service cloud.firestore {
       // 削除
       allow delete: if canAccessExisting();
     }
+
+    // users コレクション
+    match /users/{userId} {
+      // 自分のプロファイルは読み取り可能
+      allow get: if request.auth != null && request.auth.uid == userId;
+      
+      // 管理者はすべてのユーザーを読み取り可能
+      allow list: if request.auth != null 
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.superuser == true;
+      
+      // ユーザープロファイルの作成（自分のみ）
+      allow create: if request.auth != null && request.auth.uid == userId;
+      
+      // ユーザープロファイルの更新（自分のみ、superuserフィールドは変更不可）
+      allow update: if request.auth != null 
+        && request.auth.uid == userId
+        && (!request.resource.data.keys().hasAll(['superuser']) || 
+            resource.data.superuser == request.resource.data.superuser);
+      
+      // 削除: 自分のプロファイルのみ削除可能
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // adminSettings コレクション
+    match /adminSettings/{doc} {
+      // 読み取り: 全員可能（設定を参照するため）
+      allow read: if true;
+      
+      // 書き込み: 管理者のみ可能
+      allow write: if request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.superuser == true;
+    }
+
+    // auditLogs コレクション
+    match /auditLogs/{logId} {
+      // 誰でも書き込み可能（システムログ記録用）
+      allow create: if true;
+      
+      // 管理者のみ読み取り可能
+      allow read: if request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.superuser == true;
+    }
   }
 }
 

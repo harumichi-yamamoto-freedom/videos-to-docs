@@ -18,13 +18,17 @@ import { useProcessingWorkflow } from '@/hooks/useProcessingWorkflow';
 import { DebugErrorMode } from '@/types/processing';
 import { Transcription } from '@/lib/firestore';
 import { Prompt } from '@/lib/prompts';
-import { Music, Sparkles } from 'lucide-react';
+import { Music, Sparkles, Shield } from 'lucide-react';
 import AuthButton from '@/components/AuthButton';
 import { useAuth } from '@/hooks/useAuth';
+import { useAdmin } from '@/hooks/useAdmin';
 import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
   const { user } = useAuth();
+  const { isAdmin } = useAdmin();
+  const router = useRouter();
 
   // 固定値
   const bitrate = '192k';
@@ -80,6 +84,11 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]); // userが変更されたら実行
 
+  // 文書一覧を更新するコールバック
+  const handleDocumentSaved = () => {
+    setDocumentUpdateTrigger(prev => prev + 1);
+  };
+
   // ビデオ処理
   const {
     processingStatuses,
@@ -93,7 +102,7 @@ export default function Home() {
     audioConversionQueueRef,
     processTranscription,
     processTranscriptionResume,
-  } = useVideoProcessing(availablePrompts, debugErrorMode);
+  } = useVideoProcessing(availablePrompts, debugErrorMode, handleDocumentSaved);
 
   // 処理ワークフロー
   const { handleStartProcessing, handleResumeFile } = useProcessingWorkflow({
@@ -225,7 +234,18 @@ export default function Home() {
                 </p>
               </div>
             </div>
-            <AuthButton />
+            <div className="flex items-center gap-3">
+              {isAdmin && (
+                <button
+                  onClick={() => router.push('/admin')}
+                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all shadow-md hover:shadow-lg flex items-center gap-2"
+                >
+                  <Shield className="w-4 h-4" />
+                  管理者画面
+                </button>
+              )}
+              <AuthButton />
+            </div>
           </div>
         </div>
 

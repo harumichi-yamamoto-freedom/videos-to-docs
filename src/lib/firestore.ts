@@ -13,6 +13,9 @@ import {
     serverTimestamp,
 } from 'firebase/firestore';
 import { getCurrentUserId, getOwnerType } from './auth';
+import { logAudit } from './auditLog';
+import { validateDocumentSize } from './adminSettings';
+import { updateUserStats } from './userManagement';
 
 export interface TranscriptionDocument {
     id?: string;
@@ -52,6 +55,16 @@ export async function saveTranscription(
         const userId = getCurrentUserId();
         const ownerType = getOwnerType();
 
+        // サイズチェック
+        const sizeValidation = await validateDocumentSize(transcription);
+        if (!sizeValidation.valid) {
+            throw new Error(
+                `文書のサイズが上限を超えています。` +
+                `（現在: ${(sizeValidation.size / 1024).toFixed(2)}KB / ` +
+                `上限: ${(sizeValidation.maxSize / 1024).toFixed(2)}KB）`
+            );
+        }
+
         const docRef = await addDoc(collection(db, 'transcriptions'), {
             fileName,
             originalFileType,
@@ -65,9 +78,20 @@ export async function saveTranscription(
             createdAt: serverTimestamp(),
         });
 
+        // 監査ログを記録
+        await logAudit('document_create', 'document', docRef.id, { fileName, promptName, ownerType });
+
+        // ユーザー統計を更新
+        if (ownerType === 'user') {
+            await updateUserStats(userId, 0, 1);
+        }
+
         return docRef.id;
     } catch (error) {
         console.error('Firestore保存エラー:', error);
+        if (error instanceof Error) {
+            throw error;
+        }
         throw new Error('文書の保存に失敗しました');
     }
 }
@@ -116,6 +140,9 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
                 return; // スキップ
             }
 
+            // タイムスタンプがnullの場合のフォールバック
+            const createdAt = data.createdAt ? data.createdAt.toDate() : new Date();
+
             documents.push({
                 id: docSnapshot.id,
                 fileName: data.fileName,
@@ -127,7 +154,7 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
                 createdBy: createdBy,
                 bitrate: data.bitrate,
                 sampleRate: data.sampleRate,
-                createdAt: data.createdAt.toDate(),
+                createdAt,
             });
         });
 
@@ -180,12 +207,15 @@ export async function getTranscriptions(limitCount: number = 100): Promise<Trans
                 return; // スキップ
             }
 
+            // タイムスタンプがnullの場合のフォールバック
+            const createdAt = data.createdAt ? data.createdAt : new Date();
+
             documents.push({
                 id: docSnapshot.id,
                 fileName: data.fileName,
                 text: data.transcription, // transcription を text にマッピング
                 promptName: data.promptName || '不明',
-                createdAt: data.createdAt,
+                createdAt,
             });
         });
 
@@ -201,7 +231,18 @@ export async function getTranscriptions(limitCount: number = 100): Promise<Trans
  */
 export async function deleteTranscription(documentId: string): Promise<void> {
     try {
+        const userId = getCurrentUserId();
+        const ownerType = getOwnerType();
+
         await deleteDoc(doc(db, 'transcriptions', documentId));
+
+        // 監査ログを記録
+        await logAudit('document_delete', 'document', documentId);
+
+        // ユーザー統計を更新
+        if (ownerType === 'user') {
+            await updateUserStats(userId, 0, -1);
+        }
     } catch (error) {
         console.error('Firestore削除エラー:', error);
         throw new Error('文書の削除に失敗しました');

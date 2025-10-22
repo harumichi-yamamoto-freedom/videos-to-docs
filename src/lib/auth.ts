@@ -8,13 +8,26 @@ import {
     User,
 } from 'firebase/auth';
 import { auth } from './firebase';
+import { createOrUpdateUserProfile } from './userManagement';
+import { logAudit } from './auditLog';
 
 /**
  * メールアドレスとパスワードでサインアップ
  */
 export async function signUp(email: string, password: string): Promise<User> {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    return userCredential.user;
+    const user = userCredential.user;
+
+    // ユーザープロファイルを作成（エラーがあってもサインアップは成功）
+    try {
+        await createOrUpdateUserProfile(user.uid, user.email || email, user.displayName || undefined);
+        await logAudit('user_signup', 'user', user.uid, { userEmail: user.email || email });
+    } catch (error) {
+        console.error('⚠️ プロファイル作成エラー（認証は成功）:', error);
+        // useAuth フックが後で再試行するため、ここでは無視
+    }
+
+    return user;
 }
 
 /**
@@ -22,7 +35,18 @@ export async function signUp(email: string, password: string): Promise<User> {
  */
 export async function signIn(email: string, password: string): Promise<User> {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    return userCredential.user;
+    const user = userCredential.user;
+
+    // ユーザープロファイルを更新（エラーがあってもログインは成功）
+    try {
+        await createOrUpdateUserProfile(user.uid, user.email || email, user.displayName || undefined);
+        await logAudit('user_login', 'user', user.uid, { userEmail: user.email || email });
+    } catch (error) {
+        console.error('⚠️ プロファイル更新エラー（認証は成功）:', error);
+        // useAuth フックが後で再試行するため、ここでは無視
+    }
+
+    return user;
 }
 
 /**
@@ -31,22 +55,40 @@ export async function signIn(email: string, password: string): Promise<User> {
 export async function signInWithGoogle(): Promise<User> {
     const provider = new GoogleAuthProvider();
     const userCredential = await signInWithPopup(auth, provider);
-    return userCredential.user;
+    const user = userCredential.user;
+
+    // ユーザープロファイルを作成または更新（エラーがあってもログインは成功）
+    try {
+        await createOrUpdateUserProfile(user.uid, user.email || '', user.displayName || undefined);
+        await logAudit('user_login', 'user', user.uid, { userEmail: user.email || '', provider: 'google' });
+    } catch (error) {
+        console.error('⚠️ プロファイル作成エラー（認証は成功）:', error);
+        // useAuth フックが後で再試行するため、ここでは無視
+    }
+
+    return user;
 }
 
 /**
  * サインアウト
  */
 export async function signOutNow(): Promise<void> {
+    const user = auth.currentUser;
+
+    // 監査ログを記録（ログアウト前に記録）
+    if (user) {
+        await logAudit('user_logout', 'user', user.uid, { userEmail: user.email || undefined });
+    }
+
     await signOut(auth);
 }
 
 /**
  * 認証状態の変更を購読
  */
-export function subscribeAuth(callback: (user: User | null) => void): () => void {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-        callback(user);
+export function subscribeAuth(callback: (user: User | null) => Promise<void> | void): () => void {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+        await callback(user);
     });
     return unsubscribe;
 }
@@ -77,5 +119,37 @@ export function getCurrentUserId(): string {
  */
 export function getOwnerType(): 'user' | 'guest' {
     return auth.currentUser ? 'user' : 'guest';
+}
+
+/**
+ * アカウントを削除（ユーザー本人のみ）
+ * Firebase Authentication のアカウントと Firestore の関連データをすべて削除
+ */
+export async function deleteAccount(): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) {
+        throw new Error('ログインしていません');
+    }
+
+    try {
+        console.log('🔐 認証トークンをリフレッシュ中...');
+        // 認証トークンを強制リフレッシュ（再認証後のトークン更新を確実にする）
+        await user.getIdToken(true);
+        console.log('✅ トークンリフレッシュ完了');
+
+        // Firestoreの関連データを削除
+        console.log('🗑️ Firestoreデータ削除中...');
+        const { deleteUserData } = await import('./accountDeletion');
+        await deleteUserData(user.uid, user.email || undefined);
+        console.log('✅ Firestoreデータ削除完了');
+
+        // Firebase Authentication のアカウントを削除
+        console.log('🗑️ Authenticationアカウント削除中...');
+        await user.delete();
+        console.log('✅ Authenticationアカウント削除完了');
+    } catch (error) {
+        console.error('アカウント削除エラー:', error);
+        throw error;
+    }
 }
 

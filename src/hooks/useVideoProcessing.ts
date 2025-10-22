@@ -8,7 +8,8 @@ import { validatePromptPermission } from '@/lib/promptPermissions';
 
 export const useVideoProcessing = (
     availablePrompts: Prompt[],
-    debugErrorMode: DebugErrorMode
+    debugErrorMode: DebugErrorMode,
+    onDocumentSaved?: () => void
 ) => {
     const [processingStatuses, setProcessingStatuses] = useState<FileProcessingStatus[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -75,6 +76,11 @@ export const useVideoProcessing = (
                                 bitrate,
                                 sampleRate
                             );
+
+                            // 文書一覧を更新
+                            if (onDocumentSaved) {
+                                onDocumentSaved();
+                            }
 
                             // 進捗を更新（完了したプロンプトIDを記録）
                             setProcessingStatuses(prev =>
@@ -188,6 +194,11 @@ export const useVideoProcessing = (
                                 bitrate,
                                 sampleRate
                             );
+
+                            // 文書一覧を更新
+                            if (onDocumentSaved) {
+                                onDocumentSaved();
+                            }
 
                             // 進捗を更新（完了したプロンプトIDを記録）
                             setProcessingStatuses(prev =>
