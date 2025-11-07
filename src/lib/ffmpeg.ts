@@ -111,6 +111,82 @@ export class VideoConverter {
     }
 
     /**
+     * 動画の長さを取得し、ファイルを共有ファイルとして保持（後続処理で再利用可能）
+     * @param videoFile 動画ファイル
+     * @param sharedFileName 共有ファイルとして保存する名前
+     * @returns 動画の長さと共有ファイル名
+     */
+    async getVideoDurationWithSharedFile(
+        videoFile: File,
+        sharedFileName: string
+    ): Promise<{ duration: number; sharedFileName: string }> {
+        if (!this.isLoaded) {
+            await this.load();
+        }
+
+        try {
+            // ファイルをFFmpegに書き込み（共有ファイルとして保持）
+            await this.ffmpeg.writeFile(sharedFileName, await fetchFile(videoFile));
+
+            // FFmpegのログを収集
+            let duration = 0;
+            let hasAudioStream = false;
+            const logHandler = ({ message }: { message: string }) => {
+                // "Duration: 00:01:23.45" のような形式を探す
+                const durationMatch = message.match(/Duration: (\d{2}):(\d{2}):(\d{2})\.(\d{2})/);
+                if (durationMatch) {
+                    const hours = parseInt(durationMatch[1]);
+                    const minutes = parseInt(durationMatch[2]);
+                    const seconds = parseInt(durationMatch[3]);
+                    duration = hours * 3600 + minutes * 60 + seconds;
+                }
+
+                // 音声ストリームがあるかチェック
+                if (message.includes('Stream') && message.includes('Audio:')) {
+                    hasAudioStream = true;
+                }
+            };
+
+            this.ffmpeg.on('log', logHandler);
+
+            try {
+                // -i オプションで動画情報を取得
+                await this.ffmpeg.exec(['-i', sharedFileName]);
+            } catch {
+                // このコマンドはエラーになるのが正常（出力ファイルを指定していないため）
+            } finally {
+                this.ffmpeg.off('log', logHandler);
+            }
+
+            if (duration === 0) {
+                throw new Error('動画の長さを取得できませんでした');
+            }
+
+            if (!hasAudioStream) {
+                // エラー時は共有ファイルを削除
+                try {
+                    await this.ffmpeg.deleteFile(sharedFileName);
+                } catch {
+                    // 削除エラーは無視
+                }
+                throw new Error('この動画には音声トラックが含まれていません。音声付きの動画をアップロードしてください。');
+            }
+
+            // 共有ファイルは削除せずに返す（後続処理で使用）
+            return { duration, sharedFileName };
+        } catch (error) {
+            console.error('動画情報取得エラー:', error);
+            // エラー時は共有ファイルを削除
+            try {
+                await this.ffmpeg.deleteFile(sharedFileName);
+            } catch {
+                // 削除エラーは無視
+            }
+            throw error;
+        }
+    }
+
+    /**
      * 動画の指定区間を音声に変換（入力ファイル名を指定）
      */
     async convertSegmentToMp3(

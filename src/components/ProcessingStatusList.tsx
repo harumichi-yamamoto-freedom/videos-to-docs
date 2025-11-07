@@ -35,6 +35,16 @@ export const ProcessingStatusList: React.FC<ProcessingStatusListProps> = ({
 
                         {/* 進捗表示 */}
                         <div className="space-y-2">
+                            {/* 動画解析 */}
+                            {status.phase === 'video_analysis' && (
+                                <div className="flex items-center space-x-3">
+                                    <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
+                                    <p className="text-sm font-medium text-indigo-800">
+                                        動画情報を解析中...
+                                    </p>
+                                </div>
+                            )}
+
                             {/* 音声変換 */}
                             {status.phase === 'audio_conversion' && (
                                 <div>

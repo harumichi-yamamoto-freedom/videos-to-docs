@@ -3,6 +3,22 @@ import { FileWithPrompts, FileProcessingStatus, SegmentStatus, DebugErrorMode } 
 import { calculateOverallProgress } from '@/utils/progressCalculator';
 
 /**
+ * 動画区間処理の設定
+ * メモリ制限対策: 区間数が多いとFFmpeg WASMメモリが累積的に不足するため、
+ * 最大区間数を制限し、必要に応じて区間長を自動調整します。
+ */
+export const VIDEO_SEGMENT_CONFIG = {
+    /** 推奨される1区間の長さ（秒）*/
+    PREFERRED_SEGMENT_DURATION: 30,
+
+    /** 最大区間数（この値を超える場合は区間を自動延長）
+     * 目安: 各区間処理で約15MBのメモリが累積
+     * 60区間 × 15MB = 900MB の累積（1GB動画 + 900MB = WASM 2GB制限内で安全）
+     */
+    MAX_SEGMENT_COUNT: 60,
+} as const;
+
+/**
  * 区間ベースで動画を音声に変換
  */
 export const convertVideoToAudioSegments = async (
@@ -18,10 +34,21 @@ export const convertVideoToAudioSegments = async (
     const sharedInputFileName = `shared_input_${Date.now()}.${file.file.name.split('.').pop()}`;
 
     try {
-        // 動画の長さを取得
+        // 動画解析フェーズ開始
+        setProcessingStatuses(prev =>
+            prev.map((status, idx) =>
+                idx === fileIndex
+                    ? { ...status, phase: 'video_analysis' }
+                    : status
+            )
+        );
+
+        // 動画の長さを取得（同時に共有ファイルも作成して再利用）
         let totalDuration: number;
         try {
-            totalDuration = await converter.getVideoDuration(file.file);
+            const result = await converter.getVideoDurationWithSharedFile(file.file, sharedInputFileName);
+            totalDuration = result.duration;
+            console.log(`[ファイル${fileIndex}] 動画情報取得完了: ${totalDuration}秒（共有ファイル: ${sharedInputFileName}）`);
         } catch (durationError) {
             const errorMessage = durationError instanceof Error ? durationError.message : '動画の長さを取得できませんでした';
             setProcessingStatuses(prev =>
@@ -39,14 +66,35 @@ export const convertVideoToAudioSegments = async (
             return null;
         }
 
+        // 区間数とメモリを最適化: 区間数が多すぎる場合は区間を自動延長
+        const { PREFERRED_SEGMENT_DURATION, MAX_SEGMENT_COUNT } = VIDEO_SEGMENT_CONFIG;
+        let actualSegmentDuration: number;
+        const estimatedSegmentCount = Math.ceil(totalDuration / PREFERRED_SEGMENT_DURATION);
+
+        if (estimatedSegmentCount > MAX_SEGMENT_COUNT) {
+            // 区間数が上限を超える場合、区間を長くして区間数を削減
+            actualSegmentDuration = Math.ceil(totalDuration / MAX_SEGMENT_COUNT);
+            console.log(
+                `[ファイル${fileIndex}] 区間数最適化: ` +
+                `${estimatedSegmentCount}区間 → ${MAX_SEGMENT_COUNT}区間以内 ` +
+                `(区間長: ${PREFERRED_SEGMENT_DURATION}秒 → ${actualSegmentDuration}秒)`
+            );
+        } else {
+            // 上限以内なら推奨値をそのまま使用
+            actualSegmentDuration = PREFERRED_SEGMENT_DURATION;
+            console.log(
+                `[ファイル${fileIndex}] 区間設定: ` +
+                `約${estimatedSegmentCount}区間、区間長: ${actualSegmentDuration}秒`
+            );
+        }
+
         // 区間を作成
-        const segmentDuration = 30; // 30秒ごと
         const segments: SegmentStatus[] = [];
         let currentTime = 0;
         let segmentIndex = 0;
 
         while (currentTime < totalDuration) {
-            const endTime = Math.min(currentTime + segmentDuration, totalDuration);
+            const endTime = Math.min(currentTime + actualSegmentDuration, totalDuration);
             segments.push({
                 segmentIndex,
                 startTime: currentTime,
@@ -58,40 +106,22 @@ export const convertVideoToAudioSegments = async (
             segmentIndex++;
         }
 
-        // ステータスを更新
+        console.log(
+            `[ファイル${fileIndex}] 区間生成完了: ${segments.length}区間 ` +
+            `(動画長: ${totalDuration}秒、区間長: ${actualSegmentDuration}秒)`
+        );
+
+        // ステータスを更新して音声変換フェーズへ
         setProcessingStatuses(prev =>
             prev.map((status, idx) =>
                 idx === fileIndex
-                    ? { ...status, totalDuration, segments, segmentDuration }
+                    ? { ...status, totalDuration, segments, segmentDuration: actualSegmentDuration, phase: 'audio_conversion' }
                     : status
             )
         );
 
-        // 動画ファイルを一度だけFFmpegに書き込む（メモリ効率化）
-        console.log(`[ファイル${fileIndex}] 共有入力ファイル書き込み開始: ${sharedInputFileName}`);
-        try {
-            const { fetchFile } = await import('@ffmpeg/util');
-            const fileData = await fetchFile(file.file);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (converter as any).ffmpeg.writeFile(sharedInputFileName, fileData);
-            console.log(`[ファイル${fileIndex}] 共有入力ファイル書き込み完了`);
-        } catch (writeError) {
-            const errorMessage = writeError instanceof Error ? writeError.message : '不明なエラー';
-            console.error(`[ファイル${fileIndex}] 共有入力ファイル書き込みエラー:`, writeError);
-            setProcessingStatuses(prev =>
-                prev.map((status, idx) =>
-                    idx === fileIndex
-                        ? {
-                            ...status,
-                            status: 'error',
-                            error: `ファイル書き込み失敗: ${errorMessage}`,
-                            failedPhase: 'audio_conversion'
-                        }
-                        : status
-                )
-            );
-            return null;
-        }
+        // 共有ファイルは既にgetVideoDurationWithSharedFileで作成済みなのでスキップ
+        console.log(`[ファイル${fileIndex}] 共有入力ファイル再利用: ${sharedInputFileName}（書き込みスキップ）`);
 
         // 各区間を順次変換
         const audioSegments: Blob[] = [];
