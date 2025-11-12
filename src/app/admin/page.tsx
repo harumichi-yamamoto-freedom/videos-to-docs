@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAdmin } from '@/hooks/useAdmin';
 import { Shield, Settings, Users, BarChart } from 'lucide-react';
@@ -10,10 +10,15 @@ import UsersPanel from '@/components/admin/UsersPanel';
 
 type Tab = 'audit' | 'settings' | 'users';
 
+export interface SettingsPanelRef {
+    hasUnsavedChanges: () => boolean;
+}
+
 export default function AdminPage() {
     const router = useRouter();
     const { isAdmin, loading } = useAdmin();
     const [activeTab, setActiveTab] = useState<Tab>('audit');
+    const settingsPanelRef = useRef<SettingsPanelRef>(null);
 
     useEffect(() => {
         if (!loading && !isAdmin) {
@@ -21,6 +26,37 @@ export default function AdminPage() {
             router.push('/');
         }
     }, [isAdmin, loading, router]);
+
+    // ページ離脱時の警告
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (activeTab === 'settings' && settingsPanelRef.current?.hasUnsavedChanges()) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [activeTab]);
+
+    const handleTabChange = (tab: Tab) => {
+        if (activeTab === 'settings' && settingsPanelRef.current?.hasUnsavedChanges()) {
+            if (!confirm('保存されていない変更があります。破棄して移動しますか？')) {
+                return;
+            }
+        }
+        setActiveTab(tab);
+    };
+
+    const handleGoHome = () => {
+        if (activeTab === 'settings' && settingsPanelRef.current?.hasUnsavedChanges()) {
+            if (!confirm('保存されていない変更があります。破棄してホームに戻りますか？')) {
+                return;
+            }
+        }
+        router.push('/');
+    };
 
     if (loading) {
         return (
@@ -53,7 +89,7 @@ export default function AdminPage() {
                             </div>
                         </div>
                         <button
-                            onClick={() => router.push('/')}
+                            onClick={handleGoHome}
                             className="px-4 py-2 bg-white hover:bg-gray-50 rounded-lg border border-gray-300 transition-colors"
                         >
                             ホームに戻る
@@ -65,7 +101,7 @@ export default function AdminPage() {
                 <div className="bg-white rounded-xl shadow-lg mb-6 overflow-hidden">
                     <div className="flex border-b border-gray-200">
                         <button
-                            onClick={() => setActiveTab('audit')}
+                            onClick={() => handleTabChange('audit')}
                             className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors ${activeTab === 'audit'
                                 ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
                                 : 'text-gray-600 hover:bg-gray-50'
@@ -76,7 +112,7 @@ export default function AdminPage() {
                         </button>
 
                         <button
-                            onClick={() => setActiveTab('settings')}
+                            onClick={() => handleTabChange('settings')}
                             className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors ${activeTab === 'settings'
                                 ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
                                 : 'text-gray-600 hover:bg-gray-50'
@@ -87,7 +123,7 @@ export default function AdminPage() {
                         </button>
 
                         <button
-                            onClick={() => setActiveTab('users')}
+                            onClick={() => handleTabChange('users')}
                             className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors ${activeTab === 'users'
                                 ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
                                 : 'text-gray-600 hover:bg-gray-50'
@@ -102,7 +138,7 @@ export default function AdminPage() {
                 {/* タブコンテンツ */}
                 <div className="bg-white rounded-xl shadow-lg p-6">
                     {activeTab === 'audit' && <AuditLogPanel />}
-                    {activeTab === 'settings' && <SettingsPanel />}
+                    {activeTab === 'settings' && <SettingsPanel ref={settingsPanelRef} />}
                     {activeTab === 'users' && <UsersPanel />}
                 </div>
             </div>

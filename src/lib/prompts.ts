@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { getCurrentUserId, getOwnerType } from './auth';
 import { logAudit } from './auditLog';
-import { validatePromptSize } from './adminSettings';
+import { validatePromptSize, getDefaultPrompts } from './adminSettings';
 import { updateUserStats } from './userManagement';
 
 export interface Prompt {
@@ -28,90 +28,7 @@ export interface Prompt {
     updatedAt: Date;
 }
 
-/**
- * デフォルトプロンプト一覧
- */
-export const DEFAULT_PROMPTS = [
-    {
-        name: '詳細な文字起こし',
-        content: `以下の音声ファイルの内容を分析し、以下の形式でMarkdown文書を作成してください：
-
-# タイトル
-（音声の主題を簡潔に）
-
-## 要約
-（内容の要約を3-5文で）
-
-## 詳細な内容
-（話されている内容を詳しく記述）
-
-## キーポイント
-- （重要なポイント1）
-- （重要なポイント2）
-- （重要なポイント3）
-
-音声が日本語の場合は日本語で、英語の場合は英語で文書を作成してください。`,
-        isDefault: true,
-    },
-    {
-        name: '議事録形式',
-        content: `以下の音声ファイルを議事録形式で書き起こしてください：
-
-# 会議タイトル
-
-## 日時・参加者
-（推測できる範囲で記載）
-
-## 議題
-（話し合われた主要なトピック）
-
-## 決定事項
-- （決まったこと1）
-- （決まったこと2）
-
-## アクションアイテム
-- [ ] （誰が何をするか1）
-- [ ] （誰が何をするか2）
-
-## その他のメモ
-（補足情報）`,
-        isDefault: true,
-    },
-    {
-        name: '要約のみ',
-        content: `以下の音声ファイルの内容を簡潔に要約してください：
-
-## 要約
-（3-5文で内容を要約）
-
-## キーワード
-（重要なキーワードを5個まで列挙）`,
-        isDefault: true,
-    },
-    {
-        name: '学習ノート形式',
-        content: `以下の音声ファイルを学習ノート形式でまとめてください：
-
-# タイトル
-
-## 学んだこと
-（主要な学習内容）
-
-## 重要な概念
-1. **概念1**: 説明
-2. **概念2**: 説明
-
-## 例・具体例
-（説明されている例）
-
-## 質問・疑問点
-（理解を深めるための質問）
-
-## まとめ
-（全体のまとめ）`,
-        isDefault: true,
-    },
-];
+// デフォルトプロンプトは adminSettings から取得するようになりました
 
 /**
  * デフォルトプロンプトを初期化
@@ -127,9 +44,14 @@ export async function initializeDefaultPrompts(): Promise<void> {
             const userId = getCurrentUserId();
             const ownerType = getOwnerType();
 
-            for (const defaultPrompt of DEFAULT_PROMPTS) {
+            // DBからデフォルトプロンプトテンプレートを取得
+            const defaultPromptTemplates = await getDefaultPrompts();
+
+            for (const template of defaultPromptTemplates) {
                 await addDoc(collection(db, 'prompts'), {
-                    ...defaultPrompt,
+                    name: template.name,
+                    content: template.content,
+                    isDefault: true,
                     ownerType,
                     ownerId: userId,
                     createdBy: userId,
@@ -159,9 +81,14 @@ export async function createDefaultPromptsForUser(userId: string, ownerType: 'us
         if (existingPrompts.empty) {
             console.log(`ユーザー ${userId} のデフォルトプロンプトを作成中...`);
 
-            for (const defaultPrompt of DEFAULT_PROMPTS) {
+            // DBからデフォルトプロンプトテンプレートを取得
+            const defaultPromptTemplates = await getDefaultPrompts();
+
+            for (const template of defaultPromptTemplates) {
                 await addDoc(collection(db, 'prompts'), {
-                    ...defaultPrompt,
+                    name: template.name,
+                    content: template.content,
+                    isDefault: true,
                     ownerType,
                     ownerId: userId,
                     createdBy: userId,
