@@ -33,7 +33,7 @@ export async function signUp(email: string, password: string, displayName?: stri
         );
         await logAudit('user_signup', 'user', user.uid, {
             userEmail: user.email || email,
-            displayName: user.displayName || trimmedDisplayName,
+            displayName: user.displayName || trimmedDisplayName || '',
         });
     } catch (error) {
         console.error('⚠️ プロファイル作成エラー（認証は成功）:', error);

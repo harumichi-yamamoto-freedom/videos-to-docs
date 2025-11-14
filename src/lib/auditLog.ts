@@ -19,6 +19,7 @@ export type AuditAction =
     | 'user_signup'
     | 'user_delete'
     | 'user_password_change'
+    | 'user_display_name_update'
     | 'admin_settings_update'
     | 'admin_user_view';
 
