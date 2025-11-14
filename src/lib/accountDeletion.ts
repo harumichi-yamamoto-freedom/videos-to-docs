@@ -48,7 +48,31 @@ export async function deleteUserData(userId: string, userEmail?: string): Promis
         });
         console.log(`   ✅ ${transcriptionsSnapshot.size}件の文書を削除予定`);
 
-        // 3. ユーザープロファイルを削除
+        // 3. リレーションシップを削除
+        console.log('🤝 リレーションシップを削除中...');
+        const relationshipsCol = collection(db, 'relationships');
+        const relationshipIds = new Set<string>();
+
+        const supervisorQuery = query(relationshipsCol, where('supervisorId', '==', userId));
+        const supervisorSnapshot = await getDocs(supervisorQuery);
+        supervisorSnapshot.forEach((docSnap) => {
+            if (relationshipIds.has(docSnap.id)) return;
+            relationshipIds.add(docSnap.id);
+            batch.delete(docSnap.ref);
+            totalDeleted++;
+        });
+
+        const subordinateQuery = query(relationshipsCol, where('subordinateId', '==', userId));
+        const subordinateSnapshot = await getDocs(subordinateQuery);
+        subordinateSnapshot.forEach((docSnap) => {
+            if (relationshipIds.has(docSnap.id)) return;
+            relationshipIds.add(docSnap.id);
+            batch.delete(docSnap.ref);
+            totalDeleted++;
+        });
+        console.log(`   ✅ ${relationshipIds.size}件のリレーションシップを削除予定`);
+
+        // 4. ユーザープロファイルを削除
         console.log('👤 ユーザープロファイルを削除中...');
         const userRef = doc(db, 'users', userId);
         batch.delete(userRef);
