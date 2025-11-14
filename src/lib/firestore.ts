@@ -233,6 +233,39 @@ export async function getTranscriptions(limitCount: number = 100): Promise<Trans
     }
 }
 
+export async function getTranscriptionsByOwnerId(ownerId: string, limitCount: number = 100): Promise<Transcription[]> {
+    try {
+        const q = query(
+            collection(db, 'transcriptions'),
+            where('ownerId', '==', ownerId),
+            orderBy('createdAt', 'desc'),
+            limit(limitCount)
+        );
+
+        const querySnapshot = await getDocs(q);
+        const documents: Transcription[] = [];
+
+        querySnapshot.forEach((docSnapshot) => {
+            const data = docSnapshot.data();
+            const createdAt = data.createdAt ? data.createdAt.toDate() : new Date();
+
+            documents.push({
+                id: docSnapshot.id,
+                title: data.title || data.fileName,
+                fileName: data.fileName,
+                text: data.transcription,
+                promptName: data.promptName || '不明',
+                createdAt,
+            });
+        });
+
+        return documents;
+    } catch (error) {
+        console.error('指定ユーザーの文書取得エラー:', error);
+        throw new Error('指定したユーザーの文書取得に失敗しました');
+    }
+}
+
 /**
  * 文書のタイトルを更新
  */
