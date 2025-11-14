@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
 import { createPrompt } from '@/lib/prompts';
+import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS, getGeminiModelLabel } from '@/constants/geminiModels';
 
 interface PromptCreateModalProps {
     isOpen: boolean;
@@ -17,7 +18,10 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
 }) => {
     const [name, setName] = useState('');
     const [content, setContent] = useState('');
+    const [model, setModel] = useState(DEFAULT_GEMINI_MODEL);
     const [saving, setSaving] = useState(false);
+
+    const selectedModelOption = GEMINI_MODEL_OPTIONS.find(option => option.value === model);
 
     if (!isOpen) return null;
 
@@ -29,9 +33,10 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
 
         try {
             setSaving(true);
-            await createPrompt(name, content, false);
+            await createPrompt(name, content, false, model);
             setName('');
             setContent('');
+            setModel(DEFAULT_GEMINI_MODEL);
             onSave();
             onClose();
         } catch (error) {
@@ -45,6 +50,7 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
     const handleClose = () => {
         setName('');
         setContent('');
+        setModel(DEFAULT_GEMINI_MODEL);
         onClose();
     };
 
@@ -100,6 +106,27 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
                                 placeholder="プロンプト内容を入力"
                             />
+                        </div>
+
+                        {/* Geminiモデル */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                使用するGeminiモデル
+                            </label>
+                            <select
+                                value={model}
+                                onChange={(e) => setModel(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                            >
+                                {GEMINI_MODEL_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">
+                                {selectedModelOption?.description || `${getGeminiModelLabel(model)} を使用します`}
+                            </p>
                         </div>
                     </div>
                 </div>

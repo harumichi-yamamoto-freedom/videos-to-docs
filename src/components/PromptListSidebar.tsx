@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { FileText, RefreshCw, Plus, Trash2, ChevronDown, ChevronUp, Lock } from 'lucide-react';
+import { FileText, RefreshCw, Plus, Trash2, Lock } from 'lucide-react';
 import { Prompt, getPrompts, deletePrompt, initializeDefaultPrompts } from '@/lib/prompts';
 import { useAuth } from '@/hooks/useAuth';
+import { getGeminiModelLabel } from '@/constants/geminiModels';
 
 /**
  * プロンプト一覧サイドバーのProps
@@ -24,7 +25,6 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
     const { user } = useAuth();
     const [prompts, setPrompts] = useState<Prompt[]>([]);
     const [loading, setLoading] = useState(true);
-    const [isExpanded, setIsExpanded] = useState(false);
     const [isInitializing, setIsInitializing] = useState(false);
 
     // 静かに更新（ローディング表示なし）
@@ -120,10 +120,6 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
         return !(prompt.ownerType === 'guest' && prompt.isDefault);
     };
 
-    const toggleExpand = () => {
-        setIsExpanded(!isExpanded);
-    };
-
     return (
         <div className="h-full flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
             {/* ヘッダー */}
@@ -151,17 +147,6 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                         >
                             <RefreshCw className={`w-5 h-5 text-blue-600 ${loading ? 'animate-spin' : ''}`} />
                         </button>
-                        <button
-                            onClick={toggleExpand}
-                            className="p-2 hover:bg-blue-50 rounded-lg transition-colors"
-                            title={isExpanded ? '折りたたむ' : '展開'}
-                        >
-                            {isExpanded ? (
-                                <ChevronUp className="w-5 h-5 text-blue-600" />
-                            ) : (
-                                <ChevronDown className="w-5 h-5 text-blue-600" />
-                            )}
-                        </button>
                     </div>
                 </div>
                 <p className="text-xs text-gray-600">
@@ -169,9 +154,8 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                 </p>
             </div>
 
-            {/* 展開時のコンテンツ */}
-            {isExpanded && (
-                <div className="flex-1 overflow-y-auto p-4">
+            {/* コンテンツ */}
+            <div className="flex-1 overflow-y-auto p-4">
                     {/* プロンプトリスト */}
                     {loading ? (
                         <div className="flex items-center justify-center h-32">
@@ -209,6 +193,9 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                                             <p className="text-xs text-gray-500 mt-2 line-clamp-2">
                                                 {prompt.content}
                                             </p>
+                                                <p className="text-[11px] text-gray-500 mt-1">
+                                                    Geminiモデル: {getGeminiModelLabel(prompt.model)}
+                                                </p>
                                         </div>
                                         {canDeletePrompt(prompt) && (
                                             <button
@@ -225,7 +212,6 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                         </div>
                     )}
                 </div>
-            )}
         </div>
     );
 };

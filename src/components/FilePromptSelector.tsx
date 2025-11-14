@@ -4,6 +4,7 @@ import React from 'react';
 import { CheckSquare, Square } from 'lucide-react';
 import { FileWithPrompts } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
+import { getGeminiModelLabel } from '@/constants/geminiModels';
 
 interface FilePromptSelectorProps {
   selectedFiles: FileWithPrompts[];
@@ -42,8 +43,13 @@ export const FilePromptSelector: React.FC<FilePromptSelectorProps> = ({
                 ) : (
                   <Square className="w-4 h-4 text-gray-400" />
                 )}
-                <span className="text-sm text-gray-700">{prompt.name}</span>
-                <span className="text-xs text-gray-500">
+                <div className="flex flex-col">
+                  <span className="text-sm text-gray-700">{prompt.name}</span>
+                  <span className="text-[11px] text-gray-500">
+                    {getGeminiModelLabel(prompt.model)}
+                  </span>
+                </div>
+                <span className="text-xs text-gray-500 ml-auto">
                   ({fileWithPrompts.selectedPromptIds.includes(prompt.id!) ? '選択中' : '未選択'})
                 </span>
               </div>

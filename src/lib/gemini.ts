@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
+import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
 
 export interface TranscriptionResult {
     success: boolean;
@@ -8,9 +9,10 @@ export interface TranscriptionResult {
 
 export class GeminiClient {
     private genAI: GoogleGenerativeAI;
-    private model: GenerativeModel;
+    private modelCache = new Map<string, GenerativeModel>();
+    private defaultModel: string;
 
-    constructor() {
+    constructor(defaultModel: string = DEFAULT_GEMINI_MODEL) {
         const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 
         if (!apiKey) {
@@ -18,19 +20,29 @@ export class GeminiClient {
         }
 
         this.genAI = new GoogleGenerativeAI(apiKey);
-        // Gemini 2.5 Flash（音声・動画対応、高速・効率的）を使用
-        this.model = this.genAI.getGenerativeModel({
-            model: 'gemini-2.5-flash'
-        });
+        this.defaultModel = defaultModel;
+    }
+
+    private getModelInstance(modelName?: string): GenerativeModel {
+        const targetModel = (modelName || this.defaultModel || DEFAULT_GEMINI_MODEL).trim();
+        if (!this.modelCache.has(targetModel)) {
+            this.modelCache.set(
+                targetModel,
+                this.genAI.getGenerativeModel({ model: targetModel })
+            );
+        }
+        return this.modelCache.get(targetModel)!;
     }
 
     /**
      * 音声ファイルから文字起こしと文書生成を行う
+     * @param modelName 使用するGeminiモデル。未指定の場合は既定モデル。
      */
     async transcribeAudio(
         audioBlob: Blob,
         fileName: string,
-        customPrompt?: string
+        customPrompt?: string,
+        modelName?: string
     ): Promise<TranscriptionResult> {
         try {
             // BlobをBase64に変換
@@ -58,7 +70,8 @@ export class GeminiClient {
 `.trim();
 
             // Gemini APIにリクエスト
-            const result = await this.model.generateContent([
+            const model = this.getModelInstance(modelName);
+            const result = await model.generateContent([
                 { text: prompt },
                 {
                     inlineData: {
@@ -95,7 +108,7 @@ export class GeminiClient {
                 else if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('API key not valid')) {
                     errorMessage = 'Gemini APIキーが無効です。.env.localファイルを確認してください。';
                 } else if (errorMessage.includes('not found') || errorMessage.includes('404')) {
-                    errorMessage = '指定されたモデルが見つかりません。Gemini APIキーが正しく設定されているか確認してください。';
+                    errorMessage = `指定されたモデルが見つかりません（${modelName || this.defaultModel}）。Gemini APIキーとモデル名を確認してください。`;
                 } else if (errorMessage.includes('PERMISSION_DENIED')) {
                     errorMessage = 'Gemini APIへのアクセスが拒否されました。APIキーの権限を確認してください。';
                 }

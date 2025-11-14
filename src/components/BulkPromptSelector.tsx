@@ -3,6 +3,7 @@
 import React from 'react';
 import { CheckSquare, Square } from 'lucide-react';
 import { Prompt } from '@/lib/prompts';
+import { getGeminiModelLabel } from '@/constants/geminiModels';
 
 interface BulkPromptSelectorProps {
     availablePrompts: Prompt[];
@@ -36,7 +37,12 @@ export const BulkPromptSelector: React.FC<BulkPromptSelectorProps> = ({
                         ) : (
                             <Square className="w-4 h-4 text-gray-400" />
                         )}
-                        <span className="text-sm text-gray-700">{prompt.name}</span>
+                        <div className="flex flex-col">
+                            <span className="text-sm text-gray-700">{prompt.name}</span>
+                            <span className="text-[11px] text-gray-500">
+                                {getGeminiModelLabel(prompt.model)}
+                            </span>
+                        </div>
                     </div>
                 ))}
             </div>

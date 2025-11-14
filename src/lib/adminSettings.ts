@@ -4,10 +4,12 @@
 
 import { db } from './firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
 
 export interface DefaultPromptTemplate {
     name: string;
     content: string;
+    model?: string;
 }
 
 export interface AdminSettings {
@@ -57,16 +59,19 @@ export const INITIAL_DEFAULT_PROMPTS: DefaultPromptTemplate[] = [
 ...
 
 出力は正しく作成された資料のみを表示し、その他の説明や追加情報は不要です`,
+        model: DEFAULT_GEMINI_MODEL,
     },
     {
         name: '希望条件',
         content: `あなたは世界最高のコンサルタントとして、打ち合わせのトランスクリプトから重複なく、漏れなく情報を収集し、顧客の希望条件をまとめてください。
 利用者は住宅・不動産業界のプロフェッショナルです。その為ディティールにこだわって最高のアウトプットを作成する必要があります。
 書式はマークダウン形式で出力してください。`,
+        model: DEFAULT_GEMINI_MODEL,
     },
     {
         name: 'お客様情報',
         content: `お客様情報を一覧で出力して`,
+        model: DEFAULT_GEMINI_MODEL,
     },
     {
         name: 'ヒヤッとアラートサンプル',
@@ -150,6 +155,7 @@ export const INITIAL_DEFAULT_PROMPTS: DefaultPromptTemplate[] = [
 - 憶測は避け、必ず"会話上の根拠（抜粋）"に紐づける。
 - 守秘に配慮し、個人を特定できる情報や不要な評価語は書かない。
 `,
+        model: DEFAULT_GEMINI_MODEL,
     },
 ];
 

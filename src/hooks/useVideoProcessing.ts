@@ -63,7 +63,8 @@ export const useVideoProcessing = (
                         const transcriptionResult = await geminiClientRef.current!.transcribeAudio(
                             audioBlob,
                             file.file.name,
-                            prompt.content
+                            prompt.content,
+                            prompt.model
                         );
 
                         if (transcriptionResult.success && transcriptionResult.text) {
@@ -182,7 +183,8 @@ export const useVideoProcessing = (
                         const transcriptionResult = await geminiClientRef.current!.transcribeAudio(
                             audioBlob,
                             file.file.name,
-                            prompt.content
+                            prompt.content,
+                            prompt.model
                         );
 
                         if (transcriptionResult.success && transcriptionResult.text) {

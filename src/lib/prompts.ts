@@ -10,16 +10,19 @@ import {
     updateDoc,
     where,
     serverTimestamp,
+    limit,
 } from 'firebase/firestore';
 import { getCurrentUserId, getOwnerType } from './auth';
 import { logAudit } from './auditLog';
 import { validatePromptSize, getDefaultPrompts } from './adminSettings';
 import { updateUserStats } from './userManagement';
+import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
 
 export interface Prompt {
     id?: string;
     name: string;
     content: string;
+    model: string;
     isDefault: boolean;
     ownerType: 'guest' | 'user';
     ownerId: string; // "GUEST" または Auth uid
@@ -51,6 +54,7 @@ export async function initializeDefaultPrompts(): Promise<void> {
                 await addDoc(collection(db, 'prompts'), {
                     name: template.name,
                     content: template.content,
+                    model: template.model || DEFAULT_GEMINI_MODEL,
                     isDefault: true,
                     ownerType,
                     ownerId: userId,
@@ -88,6 +92,7 @@ export async function createDefaultPromptsForUser(userId: string, ownerType: 'us
                 await addDoc(collection(db, 'prompts'), {
                     name: template.name,
                     content: template.content,
+                    model: template.model || DEFAULT_GEMINI_MODEL,
                     isDefault: true,
                     ownerType,
                     ownerId: userId,
@@ -111,7 +116,8 @@ export async function createDefaultPromptsForUser(userId: string, ownerType: 'us
 export async function createPrompt(
     name: string,
     content: string,
-    isDefault: boolean = false
+    isDefault: boolean = false,
+    model: string = DEFAULT_GEMINI_MODEL
 ): Promise<string> {
     try {
         const userId = getCurrentUserId();
@@ -130,6 +136,7 @@ export async function createPrompt(
         const docRef = await addDoc(collection(db, 'prompts'), {
             name,
             content,
+            model,
             isDefault,
             ownerType,
             ownerId: userId,
@@ -207,6 +214,7 @@ export async function getPrompts(): Promise<Prompt[]> {
                 id: docSnapshot.id,
                 name: data.name,
                 content: data.content,
+                model: data.model || DEFAULT_GEMINI_MODEL,
                 isDefault: data.isDefault || false,
                 ownerType: ownerType as 'guest' | 'user',
                 ownerId: ownerId,
@@ -223,13 +231,51 @@ export async function getPrompts(): Promise<Prompt[]> {
     }
 }
 
+export async function getPromptsByOwnerId(ownerId: string, limitCount: number = 100): Promise<Prompt[]> {
+    try {
+        const q = query(
+            collection(db, 'prompts'),
+            where('ownerId', '==', ownerId),
+            orderBy('createdAt', 'desc'),
+            limit(limitCount)
+        );
+
+        const querySnapshot = await getDocs(q);
+        const prompts: Prompt[] = [];
+
+        querySnapshot.forEach((docSnapshot) => {
+            const data = docSnapshot.data();
+            const createdAt = data.createdAt ? data.createdAt.toDate() : new Date();
+            const updatedAt = data.updatedAt ? data.updatedAt.toDate() : new Date();
+
+            prompts.push({
+                id: docSnapshot.id,
+                name: data.name,
+                content: data.content,
+                model: data.model || DEFAULT_GEMINI_MODEL,
+                isDefault: data.isDefault || false,
+                ownerType: data.ownerType || 'user',
+                ownerId: data.ownerId || ownerId,
+                createdBy: data.createdBy || ownerId,
+                createdAt,
+                updatedAt,
+            });
+        });
+
+        return prompts;
+    } catch (error) {
+        console.error('指定ユーザーのプロンプト取得エラー:', error);
+        throw new Error('指定したユーザーのプロンプト取得に失敗しました');
+    }
+}
+
 /**
  * プロンプトを更新
  * 注意: ownerType と ownerId は変更不可（Firestore Rules で保護）
  */
 export async function updatePrompt(
     promptId: string,
-    updates: { name?: string; content?: string }
+    updates: { name?: string; content?: string; model?: string }
 ): Promise<void> {
     try {
         // コンテンツが更新される場合、サイズチェック
@@ -317,6 +363,7 @@ export async function syncGuestDefaultPrompts(): Promise<void> {
             return addDoc(collection(db, 'prompts'), {
                 name: template.name,
                 content: template.content,
+                model: template.model || DEFAULT_GEMINI_MODEL,
                 isDefault: true,
                 ownerType: 'guest',
                 ownerId: 'GUEST',
