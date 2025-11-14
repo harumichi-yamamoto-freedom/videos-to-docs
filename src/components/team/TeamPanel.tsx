@@ -13,14 +13,18 @@ import {
     approveRelationship,
     rejectRelationship,
     removeSubordinate,
+    cancelRelationshipAsSubordinate,
 } from '@/lib/relationships';
 import { Inbox, Loader2 } from 'lucide-react';
 import { ContentEditModal } from '@/components/ContentEditModal';
+import { createLogger } from '@/lib/logger';
 
 interface TeamPanelProps {
     user: User | null;
     view: 'subordinates' | 'supervisors';
 }
+
+const teamPanelLogger = createLogger('TeamPanel');
 
 export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
     const [subordinates, setSubordinates] = useState<Relationship[]>([]);
@@ -71,7 +75,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
                     }
                 }
             } catch (error) {
-                console.error('チーム情報取得エラー:', error);
+                teamPanelLogger.error('チーム情報の取得に失敗', error, { userId: user?.uid });
                 alert('チーム情報の取得に失敗しました');
             } finally {
                 setIsLoadingRelationships(false);
@@ -98,7 +102,9 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
                 setSubordinatePrompts(prompts);
                 setSubordinateDocuments(docs);
             } catch (error) {
-                console.error('部下データ取得エラー:', error);
+                teamPanelLogger.error('部下データの取得に失敗', error, {
+                    subordinateId: selectedSubordinate.subordinateId,
+                });
                 alert('部下のデータ取得に失敗しました');
             } finally {
                 setIsLoadingDetails(false);
@@ -114,7 +120,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
             await approveRelationship(relationshipId, user.uid);
             setRefreshKey((prev) => prev + 1);
         } catch (error) {
-            console.error('承認エラー:', error);
+            teamPanelLogger.error('部下申請の承認に失敗', error, { relationshipId });
             alert('申請の承認に失敗しました');
         }
     };
@@ -126,7 +132,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
             await rejectRelationship(relationshipId, user.uid);
             setRefreshKey((prev) => prev + 1);
         } catch (error) {
-            console.error('拒否エラー:', error);
+            teamPanelLogger.error('部下申請の拒否に失敗', error, { relationshipId });
             alert('申請の拒否に失敗しました');
         }
     };
@@ -138,8 +144,32 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
             await removeSubordinate(relationshipId, user.uid);
             setRefreshKey((prev) => prev + 1);
         } catch (error) {
-            console.error('部下削除エラー:', error);
+            teamPanelLogger.error('部下リレーションの削除に失敗', error, { relationshipId });
             alert('部下の削除に失敗しました');
+        }
+    };
+
+    const handleRemoveSupervisor = async (relationshipId: string) => {
+        if (!user?.uid) return;
+        if (!confirm('この上司との関係を解除しますか？')) return;
+        try {
+            await cancelRelationshipAsSubordinate(relationshipId, user.uid);
+            setRefreshKey((prev) => prev + 1);
+        } catch (error) {
+            teamPanelLogger.error('上司リレーションの削除に失敗', error, { relationshipId });
+            alert('上司の削除に失敗しました');
+        }
+    };
+
+    const handleCancelSupervisorRequest = async (relationshipId: string) => {
+        if (!user?.uid) return;
+        if (!confirm('この申請を取り消しますか？')) return;
+        try {
+            await cancelRelationshipAsSubordinate(relationshipId, user.uid);
+            setRefreshKey((prev) => prev + 1);
+        } catch (error) {
+            teamPanelLogger.error('上司申請の取り消しに失敗', error, { relationshipId });
+            alert('申請の取り消しに失敗しました');
         }
     };
 
@@ -159,7 +189,10 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
             setSupervisorEmailInput('');
             setRefreshKey((prev) => prev + 1);
         } catch (error) {
-            console.error('上司申請エラー:', error);
+            teamPanelLogger.error('上司申請の送信に失敗', error, {
+                userId: user.uid,
+                supervisorEmail: supervisorEmailInput.trim(),
+            });
             const message = error instanceof Error ? error.message : '上司申請に失敗しました';
             alert(message);
         } finally {
@@ -206,7 +239,7 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
                                     {subordinates.map((rel) => (
                                         <div
                                             key={rel.id}
-                                            className={`p-3 rounded-lg border transition-all cursor-pointer ${selectedSubordinate?.id === rel.id
+                                            className={`group p-3 rounded-lg border transition-all cursor-pointer ${selectedSubordinate?.id === rel.id
                                                 ? 'border-blue-500 bg-blue-50'
                                                 : 'border-gray-200 bg-white hover:border-blue-200'
                                                 }`}
@@ -219,15 +252,17 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
                                                     </p>
                                                     <p className="text-xs text-gray-500">{rel.subordinateEmail}</p>
                                                 </div>
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleRemoveSubordinate(rel.id);
-                                                    }}
-                                                    className="text-xs text-red-500 hover:text-red-600"
-                                                >
-                                                    削除
-                                                </button>
+                                                <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleRemoveSubordinate(rel.id);
+                                                        }}
+                                                        className="px-4 py-2 text-sm font-semibold text-red-600 border border-red-200 rounded-lg bg-red-50 hover:bg-red-100 transition-colors"
+                                                    >
+                                                        解除
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     ))}
@@ -394,11 +429,23 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
                         ) : (
                             <div className="space-y-3">
                                 {supervisors.map((rel) => (
-                                    <div key={rel.id} className="p-3 rounded-lg border border-gray-200 bg-gray-50">
-                                        <p className="text-sm font-semibold text-gray-900">
-                                            {rel.supervisorName || rel.supervisorEmail}
-                                        </p>
-                                        <p className="text-xs text-gray-500">{rel.supervisorEmail}</p>
+                                    <div key={rel.id} className="group p-3 rounded-lg border border-gray-200 bg-white">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div>
+                                                <p className="text-sm font-semibold text-gray-900">
+                                                    {rel.supervisorName || rel.supervisorEmail}
+                                                </p>
+                                                <p className="text-xs text-gray-500">{rel.supervisorEmail}</p>
+                                            </div>
+                                            <div className="flex items-center">
+                                                <button
+                                                    onClick={() => handleRemoveSupervisor(rel.id)}
+                                                    className="px-4 py-2 text-sm font-semibold text-red-600 border border-red-200 rounded-lg bg-red-50 hover:bg-red-100 transition-colors"
+                                                >
+                                                    解除
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -420,10 +467,20 @@ export const TeamPanel: React.FC<TeamPanelProps> = ({ user, view }) => {
                             <div className="space-y-3">
                                 {supervisorRequests.map((rel) => (
                                     <div key={rel.id} className="p-3 rounded-lg border border-gray-200 bg-white">
-                                        <p className="text-sm font-semibold text-gray-900">
-                                            {rel.supervisorName || rel.supervisorEmail}
-                                        </p>
-                                        <p className="text-xs text-gray-500">承認待ち</p>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div>
+                                                <p className="text-sm font-semibold text-gray-900">
+                                                    {rel.supervisorName || rel.supervisorEmail}
+                                                </p>
+                                                <p className="text-xs text-gray-500">承認待ち</p>
+                                            </div>
+                                            <button
+                                                onClick={() => handleCancelSupervisorRequest(rel.id)}
+                                                className="px-4 py-2 text-sm font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg shadow-sm"
+                                            >
+                                                申請取消
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>

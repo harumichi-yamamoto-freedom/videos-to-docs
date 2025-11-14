@@ -7,16 +7,19 @@ import { useAdmin } from '@/hooks/useAdmin';
 import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User, Edit3 } from 'lucide-react';
 import { signOutNow, deleteAccount } from '@/lib/auth';
 import { getUserDeletionInfo } from '@/lib/accountDeletion';
+import { createLogger } from '@/lib/logger';
 import AuthModal from './AuthModal';
 import PasswordChangeModal from './PasswordChangeModal';
 import ReauthModal from './ReauthModal';
 import DisplayNameModal from './DisplayNameModal';
-import { fetchSubordinateRelationships } from '@/lib/relationships';
+import { subscribeToPendingSubordinateRelationships } from '@/lib/relationships';
 
 type Tab = 'home' | 'documents' | 'team' | 'admin';
 type TeamView = 'subordinates' | 'supervisors';
 const isValidTeamView = (view: string | null): view is TeamView =>
     view === 'subordinates' || view === 'supervisors';
+
+const appHeaderLogger = createLogger('AppHeader');
 
 export const AppHeader: React.FC = () => {
     const { user, loading: authLoading } = useAuth();
@@ -54,24 +57,21 @@ export const AppHeader: React.FC = () => {
     const pendingBadgeDisplay = pendingSubordinateCount > 99 ? '99+' : pendingSubordinateCount;
 
     useEffect(() => {
-        let isMounted = true;
-        const loadPending = async () => {
-            if (!user?.uid) {
-                if (isMounted) setPendingSubordinateCount(0);
-                return;
+        if (!user?.uid) {
+            setPendingSubordinateCount(0);
+            return;
+        }
+        const unsubscribe = subscribeToPendingSubordinateRelationships(
+            user.uid,
+            (relationships) => {
+                setPendingSubordinateCount(relationships.length);
+            },
+            (error) => {
+                appHeaderLogger.error('未処理の部下申請購読に失敗', error, { userId: user.uid });
             }
-            try {
-                const pending = await fetchSubordinateRelationships(user.uid, 'pending');
-                if (isMounted) {
-                    setPendingSubordinateCount(pending.length);
-                }
-            } catch (error) {
-                console.error('未処理の部下申請取得エラー:', error);
-            }
-        };
-        loadPending();
+        );
         return () => {
-            isMounted = false;
+            unsubscribe();
         };
     }, [user?.uid]);
 
@@ -143,7 +143,7 @@ export const AppHeader: React.FC = () => {
         } catch (error) {
             const message = error instanceof Error ? error.message : 'アカウント削除の準備中にエラーが発生しました';
             alert('アカウント削除の準備中にエラーが発生しました:\n' + message);
-            console.error('削除準備エラー:', error);
+            appHeaderLogger.error('アカウント削除準備に失敗', error, { userId: user?.uid });
         }
     };
 
@@ -152,7 +152,7 @@ export const AppHeader: React.FC = () => {
             await deleteAccount();
             alert('アカウントとすべてのデータを削除しました');
         } catch (error) {
-            console.error('アカウント削除エラー:', error);
+            appHeaderLogger.error('アカウント削除に失敗', error, { userId: user?.uid });
             const firebaseError = error as { code?: string; message?: string };
             if (firebaseError.code === 'auth/requires-recent-login') {
                 throw error;
@@ -168,7 +168,7 @@ export const AppHeader: React.FC = () => {
         try {
             await performDeletion();
         } catch (error) {
-            console.error('削除エラー:', error);
+            appHeaderLogger.error('再認証後の削除に失敗', error, { userId: user?.uid });
             const firebaseError = error as { code?: string; message?: string };
             if (firebaseError.code === 'auth/requires-recent-login') {
                 alert('⚠️ データは削除されましたが、アカウント削除で問題が発生しました。\n\nアカウントを完全に削除するには：\n1. ページをリロード\n2. 再度ログイン（データは既に削除済み）\n3. すぐにアカウント削除を実行');
