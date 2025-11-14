@@ -5,6 +5,7 @@ import {
     GoogleAuthProvider,
     signOut,
     onAuthStateChanged,
+    updateProfile,
     User,
 } from 'firebase/auth';
 import { auth } from './firebase';
@@ -14,14 +15,26 @@ import { logAudit } from './auditLog';
 /**
  * メールアドレスとパスワードでサインアップ
  */
-export async function signUp(email: string, password: string): Promise<User> {
+export async function signUp(email: string, password: string, displayName?: string): Promise<User> {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
+    const trimmedDisplayName = displayName?.trim();
+
+    if (trimmedDisplayName) {
+        await updateProfile(user, { displayName: trimmedDisplayName });
+    }
 
     // ユーザープロファイルを作成（エラーがあってもサインアップは成功）
     try {
-        await createOrUpdateUserProfile(user.uid, user.email || email, user.displayName || undefined);
-        await logAudit('user_signup', 'user', user.uid, { userEmail: user.email || email });
+        await createOrUpdateUserProfile(
+            user.uid,
+            user.email || email,
+            user.displayName || trimmedDisplayName || undefined
+        );
+        await logAudit('user_signup', 'user', user.uid, {
+            userEmail: user.email || email,
+            displayName: user.displayName || trimmedDisplayName,
+        });
     } catch (error) {
         console.error('⚠️ プロファイル作成エラー（認証は成功）:', error);
         // useAuth フックが後で再試行するため、ここでは無視
@@ -173,5 +186,29 @@ export async function deleteAccount(): Promise<void> {
 
         throw error;
     }
+}
+
+/**
+ * 表示名を更新
+ */
+export async function updateUserDisplayName(newDisplayName: string): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) {
+        throw new Error('ログインしていません');
+    }
+
+    const trimmed = newDisplayName.trim();
+    if (!trimmed) {
+        throw new Error('表示名を入力してください');
+    }
+
+    await updateProfile(user, { displayName: trimmed });
+    await user.reload();
+
+    await createOrUpdateUserProfile(user.uid, user.email || '', trimmed);
+    await logAudit('user_display_name_update', 'user', user.uid, {
+        userEmail: user.email || '',
+        displayName: trimmed,
+    });
 }
 

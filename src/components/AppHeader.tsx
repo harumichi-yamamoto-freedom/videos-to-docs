@@ -4,12 +4,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { useAdmin } from '@/hooks/useAdmin';
-import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User } from 'lucide-react';
+import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User, Edit3 } from 'lucide-react';
 import { signOutNow, deleteAccount } from '@/lib/auth';
 import { getUserDeletionInfo } from '@/lib/accountDeletion';
 import AuthModal from './AuthModal';
 import PasswordChangeModal from './PasswordChangeModal';
 import ReauthModal from './ReauthModal';
+import DisplayNameModal from './DisplayNameModal';
 import { fetchSubordinateRelationships } from '@/lib/relationships';
 
 type Tab = 'home' | 'documents' | 'team' | 'admin';
@@ -27,6 +28,7 @@ export const AppHeader: React.FC = () => {
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [showPasswordModal, setShowPasswordModal] = useState(false);
     const [showReauthModal, setShowReauthModal] = useState(false);
+    const [showDisplayNameModal, setShowDisplayNameModal] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
     const [showTeamMenu, setShowTeamMenu] = useState(false);
@@ -288,13 +290,30 @@ export const AppHeader: React.FC = () => {
                                 >
                                     <User className="w-4 h-4 text-gray-600" />
                                     <span className="text-gray-700">
-                                        {user.email || 'ログイン中'}
+                                        {user.displayName || user.email || 'ログイン中'}
                                     </span>
                                     <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
                                 </button>
 
                                 {showDropdown && (
-                                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 py-1 z-50">
+                                    <div className="absolute right-0 mt-2 w-60 bg-white rounded-lg shadow-xl border border-gray-200 py-1 z-50">
+                                        <div className="px-4 py-3 border-b border-gray-100">
+                                            <p className="text-xs text-gray-500">表示名</p>
+                                            <p className="text-sm font-semibold text-gray-900">
+                                                {user.displayName || '未設定'}
+                                            </p>
+                                            <p className="text-xs text-gray-500 mt-1 break-all">{user.email}</p>
+                                        </div>
+                                        <button
+                                            onClick={() => {
+                                                setShowDropdown(false);
+                                                setShowDisplayNameModal(true);
+                                            }}
+                                            className="w-full px-4 py-2 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm text-gray-700"
+                                        >
+                                            <Edit3 className="w-4 h-4 text-gray-600" />
+                                            表示名を編集
+                                        </button>
                                         {isEmailProvider && (
                                             <button
                                                 onClick={handlePasswordChange}
@@ -331,6 +350,10 @@ export const AppHeader: React.FC = () => {
                                     isOpen={showReauthModal}
                                     onClose={() => setShowReauthModal(false)}
                                     onSuccess={handleReauthSuccess}
+                                />
+                                <DisplayNameModal
+                                    isOpen={showDisplayNameModal}
+                                    onClose={() => setShowDisplayNameModal(false)}
                                 />
                             </div>
                         ) : (

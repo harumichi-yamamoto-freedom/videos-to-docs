@@ -13,6 +13,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
     const [mode, setMode] = useState<'signin' | 'signup'>('signin');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [displayName, setDisplayName] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
@@ -27,10 +28,17 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
             if (mode === 'signin') {
                 await signIn(email, password);
             } else {
-                await signUp(email, password);
+                const trimmedDisplayName = displayName.trim();
+                if (!trimmedDisplayName) {
+                    setError('表示名を入力してください');
+                    setLoading(false);
+                    return;
+                }
+                await signUp(email, password, trimmedDisplayName);
             }
             onSuccess?.();
             onClose();
+            setDisplayName('');
         } catch (err) {
             setError(err instanceof Error ? err.message : '認証に失敗しました');
         } finally {
@@ -75,6 +83,22 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
                 )}
 
                 <form onSubmit={handleEmailAuth} className="space-y-4">
+                    {mode === 'signup' && (
+                        <div>
+                            <label className="block text-sm font-medium mb-1">
+                                表示名
+                            </label>
+                            <input
+                                type="text"
+                                value={displayName}
+                                onChange={(e) => setDisplayName(e.target.value)}
+                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                maxLength={50}
+                                placeholder="例: 山田 太郎"
+                                required={mode === 'signup'}
+                            />
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-medium mb-1">
                             メールアドレス
