@@ -3,10 +3,12 @@ import {
     collection,
     addDoc,
     getDocs,
+    getDoc,
     query,
     orderBy,
     deleteDoc,
     doc,
+    setDoc,
     updateDoc,
     where,
     serverTimestamp,
@@ -20,6 +22,61 @@ import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
 import { createLogger } from './logger';
 
 const promptsLogger = createLogger('prompts');
+
+function createDeterministicHash(value: string): string {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+        hash = (hash << 5) - hash + value.charCodeAt(i);
+        hash |= 0; // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(16).padStart(8, '0');
+}
+
+function generateDefaultPromptId(ownerId: string, templateName: string): string {
+    const hash = createDeterministicHash(`${ownerId}:${templateName}`);
+    return `default_${ownerId}_${hash}`;
+}
+
+async function ensureDefaultPromptExists(
+    template: { name: string; content: string; model?: string },
+    ownerId: string,
+    ownerType: 'guest' | 'user',
+    createdBy: string
+): Promise<void> {
+    const docId = generateDefaultPromptId(ownerId, template.name);
+    const promptRef = doc(db, 'prompts', docId);
+    const existingDoc = await getDoc(promptRef);
+
+    if (existingDoc.exists()) {
+        return;
+    }
+
+    await setDoc(promptRef, {
+        name: template.name,
+        content: template.content,
+        model: template.model || DEFAULT_GEMINI_MODEL,
+        isDefault: true,
+        ownerType,
+        ownerId,
+        createdBy,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+    });
+}
+
+async function ensureDefaultPromptsForOwner(
+    ownerId: string,
+    ownerType: 'guest' | 'user',
+    createdBy: string,
+    templates?: { name: string; content: string; model?: string }[]
+): Promise<void> {
+    const defaultPromptTemplates = templates ?? (await getDefaultPrompts());
+    await Promise.all(
+        defaultPromptTemplates.map((template) =>
+            ensureDefaultPromptExists(template, ownerId, ownerType, createdBy)
+        )
+    );
+}
 
 export interface Prompt {
     id?: string;
@@ -50,22 +107,7 @@ export async function initializeDefaultPrompts(): Promise<void> {
             const userId = getCurrentUserId();
             const ownerType = getOwnerType();
 
-            // DBからデフォルトプロンプトテンプレートを取得
-            const defaultPromptTemplates = await getDefaultPrompts();
-
-            for (const template of defaultPromptTemplates) {
-                await addDoc(collection(db, 'prompts'), {
-                    name: template.name,
-                    content: template.content,
-                    model: template.model || DEFAULT_GEMINI_MODEL,
-                    isDefault: true,
-                    ownerType,
-                    ownerId: userId,
-                    createdBy: userId,
-                    createdAt: serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                });
-            }
+            await ensureDefaultPromptsForOwner(userId, ownerType, userId);
         }
     } catch (error) {
         promptsLogger.error('デフォルトプロンプトの初期化に失敗', error);
@@ -88,22 +130,7 @@ export async function createDefaultPromptsForUser(userId: string, ownerType: 'us
         if (existingPrompts.empty) {
             promptsLogger.info('ユーザー固有のデフォルトプロンプト作成を開始', { userId });
 
-            // DBからデフォルトプロンプトテンプレートを取得
-            const defaultPromptTemplates = await getDefaultPrompts();
-
-            for (const template of defaultPromptTemplates) {
-                await addDoc(collection(db, 'prompts'), {
-                    name: template.name,
-                    content: template.content,
-                    model: template.model || DEFAULT_GEMINI_MODEL,
-                    isDefault: true,
-                    ownerType,
-                    ownerId: userId,
-                    createdBy: userId,
-                    createdAt: serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                });
-            }
+            await ensureDefaultPromptsForOwner(userId, ownerType, userId);
 
             promptsLogger.info('ユーザー固有のデフォルトプロンプト作成が完了', { userId });
         }
@@ -365,20 +392,7 @@ export async function syncGuestDefaultPrompts(): Promise<void> {
         }
 
         // 管理者設定のデフォルトプロンプトから新規作成
-        const createPromises = defaultPromptTemplates.map((template) => {
-            return addDoc(collection(db, 'prompts'), {
-                name: template.name,
-                content: template.content,
-                model: template.model || DEFAULT_GEMINI_MODEL,
-                isDefault: true,
-                ownerType: 'guest',
-                ownerId: 'GUEST',
-                createdBy: 'GUEST',
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-            });
-        });
-        await Promise.all(createPromises);
+        await ensureDefaultPromptsForOwner('GUEST', 'guest', 'GUEST', defaultPromptTemplates);
 
         if (defaultPromptTemplates.length > 0) {
             promptsLogger.info('ゲストデフォルトプロンプトを再作成', {
