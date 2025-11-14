@@ -109,8 +109,8 @@ service cloud.firestore {
 
     // users コレクション
     match /users/{userId} {
-      // 自分のプロファイルは読み取り可能
-      allow get: if request.auth != null && request.auth.uid == userId;
+      // ログイン済みユーザーは誰のプロファイルでも読み取り可能
+      allow get: if request.auth != null;
       
       // 管理者はすべてのユーザーを読み取り可能
       allow list: if isSuperuser();
