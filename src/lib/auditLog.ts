@@ -6,6 +6,9 @@
 import { db } from './firebase';
 import { collection, addDoc, query, orderBy, limit, getDocs, where, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { getCurrentUserId, getOwnerType } from './auth';
+import { createLogger } from './logger';
+
+const auditLogger = createLogger('auditLog');
 
 export type AuditAction =
     | 'prompt_create'
@@ -77,7 +80,7 @@ export async function logAudit(
         await addDoc(collection(db, 'auditLogs'), logData);
     } catch (error) {
         // 監査ログの記録失敗はサイレントに処理（メイン処理に影響を与えない）
-        console.error('監査ログ記録エラー:', error);
+        auditLogger.error('監査ログの記録に失敗', error);
     }
 }
 
@@ -137,7 +140,11 @@ export async function getAuditLogs(
 
         return logs;
     } catch (error) {
-        console.error('監査ログ取得エラー:', error);
+        auditLogger.error('監査ログの取得に失敗', error, {
+            limitCount,
+            filterUserId,
+            filterAction,
+        });
         throw new Error('監査ログの取得に失敗しました');
     }
 }
@@ -180,7 +187,11 @@ export async function getAuditLogsByResource(
 
         return logs;
     } catch (error) {
-        console.error('監査ログ取得エラー:', error);
+        auditLogger.error('リソース別の監査ログ取得に失敗', error, {
+            resourceType,
+            resourceId,
+            limitCount,
+        });
         throw new Error('監査ログの取得に失敗しました');
     }
 }

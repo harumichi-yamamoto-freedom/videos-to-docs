@@ -1,5 +1,6 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { createLogger } from './logger';
 
 export interface ConversionProgress {
     ratio: number;
@@ -20,6 +21,8 @@ export interface SegmentConversionResult {
     error?: string;
 }
 
+const ffmpegLogger = createLogger('ffmpeg');
+
 export class VideoConverter {
     private ffmpeg: FFmpeg;
     private isLoaded = false;
@@ -39,7 +42,7 @@ export class VideoConverter {
             });
             this.isLoaded = true;
         } catch (error) {
-            console.error('FFmpegの読み込みに失敗しました:', error);
+            ffmpegLogger.error('FFmpegの読み込みに失敗しました:', error);
             throw new Error('FFmpegの初期化に失敗しました');
         }
     }
@@ -105,7 +108,7 @@ export class VideoConverter {
 
             return duration;
         } catch (error) {
-            console.error('動画長さ取得エラー:', error);
+            ffmpegLogger.error('動画長さ取得エラー:', error);
             throw error;
         }
     }
@@ -175,7 +178,7 @@ export class VideoConverter {
             // 共有ファイルは削除せずに返す（後続処理で使用）
             return { duration, sharedFileName };
         } catch (error) {
-            console.error('動画情報取得エラー:', error);
+            ffmpegLogger.error('動画情報取得エラー:', error);
             // エラー時は共有ファイルを削除
             try {
                 await this.ffmpeg.deleteFile(sharedFileName);
@@ -220,7 +223,7 @@ export class VideoConverter {
         };
 
         try {
-            console.log(`[区間${segmentIndex}] 変換開始:`, {
+            ffmpegLogger.info(`[区間${segmentIndex}] 変換開始:`, {
                 fileName: videoFile.name,
                 fileSize: videoFile.size,
                 startTime,
@@ -235,18 +238,18 @@ export class VideoConverter {
 
             // ファイルをFFmpegに書き込み（必要な場合のみ）
             if (shouldWriteFile) {
-                console.log(`[区間${segmentIndex}] ファイル書き込み開始 (${videoFile.size} bytes)`);
+                ffmpegLogger.info(`[区間${segmentIndex}] ファイル書き込み開始 (${videoFile.size} bytes)`);
                 try {
                     const fileData = await fetchFile(videoFile);
-                    console.log(`[区間${segmentIndex}] fetchFile完了 (${fileData.byteLength} bytes)`);
+                    ffmpegLogger.info(`[区間${segmentIndex}] fetchFile完了 (${fileData.byteLength} bytes)`);
                     await this.ffmpeg.writeFile(inputFileName, fileData);
-                    console.log(`[区間${segmentIndex}] writeFile完了`);
+                    ffmpegLogger.info(`[区間${segmentIndex}] writeFile完了`);
                 } catch (writeError) {
-                    console.error(`[区間${segmentIndex}] ファイル書き込みエラー:`, writeError);
+                    ffmpegLogger.error(`[区間${segmentIndex}] ファイル書き込みエラー:`, writeError);
                     throw new Error(`ファイル書き込み失敗: ${writeError instanceof Error ? writeError.message : '不明なエラー'}`);
                 }
             } else {
-                console.log(`[区間${segmentIndex}] ファイル書き込みスキップ（既存ファイル使用: ${inputFileName}）`);
+                ffmpegLogger.info(`[区間${segmentIndex}] ファイル書き込みスキップ（既存ファイル使用: ${inputFileName}）`);
             }
 
             // 進捗監視のハンドラーを定義
@@ -260,7 +263,7 @@ export class VideoConverter {
             this.ffmpeg.on('progress', progressHandler);
 
             try {
-                console.log(`[区間${segmentIndex}] FFmpeg exec開始`);
+                ffmpegLogger.info(`[区間${segmentIndex}] FFmpeg exec開始`);
                 // 区間を指定してMP3に変換
                 await this.ffmpeg.exec([
                     '-ss', startTime.toString(),
@@ -273,10 +276,14 @@ export class VideoConverter {
                     '-y', // 出力ファイルを上書き
                     outputFileName
                 ]);
-                console.log(`[区間${segmentIndex}] FFmpeg exec完了`);
+                ffmpegLogger.info(`[区間${segmentIndex}] FFmpeg exec完了`);
             } catch (execError) {
-                console.error(`[区間${segmentIndex}] FFmpeg実行エラー:`, execError);
-                console.error(`[区間${segmentIndex}] FFmpegログ:`, ffmpegLogs.slice(-10)); // 最後の10行のみ
+                ffmpegLogger.error(`[区間${segmentIndex}] FFmpeg実行エラー:`, execError);
+                ffmpegLogger.error(
+                    `[区間${segmentIndex}] FFmpegログ`,
+                    undefined,
+                    { recentLogs: ffmpegLogs.slice(-10) },
+                ); // 最後の10行のみ
 
                 // 音声トラックがない場合の特別なエラーメッセージ
                 const hasNoStreamError = ffmpegLogs.some(log =>
@@ -295,11 +302,11 @@ export class VideoConverter {
             }
 
             // 出力ファイルを読み取り
-            console.log(`[区間${segmentIndex}] 出力ファイル読み取り開始`);
+            ffmpegLogger.info(`[区間${segmentIndex}] 出力ファイル読み取り開始`);
             const data = await this.ffmpeg.readFile(outputFileName);
             const uint8Array = new Uint8Array(data as Uint8Array);
             const outputBlob = new Blob([uint8Array], { type: 'audio/mpeg' });
-            console.log(`[区間${segmentIndex}] 出力Blob作成完了 (${outputBlob.size} bytes)`);
+            ffmpegLogger.info(`[区間${segmentIndex}] 出力Blob作成完了 (${outputBlob.size} bytes)`);
 
             // 一時ファイルを削除
             if (shouldDeleteInputFile) {
@@ -323,8 +330,12 @@ export class VideoConverter {
                 outputBlob
             };
         } catch (error) {
-            console.error(`区間${segmentIndex}の変換エラー:`, error);
-            console.error(`[区間${segmentIndex}] FFmpegログ (全体):`, ffmpegLogs.slice(-20)); // 最後の20行
+            ffmpegLogger.error(`区間${segmentIndex}の変換エラー:`, error);
+            ffmpegLogger.error(
+                `[区間${segmentIndex}] FFmpegログ (全体)`,
+                undefined,
+                { recentLogs: ffmpegLogs.slice(-20) },
+            ); // 最後の20行
 
             // エラー時もクリーンアップを試みる
             if (shouldDeleteInputFile) {
@@ -428,7 +439,7 @@ export class VideoConverter {
                 outputBlob
             };
         } catch (error) {
-            console.error('音声結合エラー:', error);
+            ffmpegLogger.error('音声結合エラー:', error);
 
             // エラー時もクリーンアップを試みる
             try {
@@ -518,7 +529,7 @@ export class VideoConverter {
                 outputBlob
             };
         } catch (error) {
-            console.error('変換エラー:', error);
+            ffmpegLogger.error('変換エラー:', error);
 
             // エラー時もクリーンアップを試みる
             try {

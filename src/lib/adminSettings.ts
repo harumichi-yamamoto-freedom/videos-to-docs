@@ -5,6 +5,9 @@
 import { db } from './firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
+import { createLogger } from './logger';
+
+const adminSettingsLogger = createLogger('adminSettings');
 
 export interface DefaultPromptTemplate {
     name: string;
@@ -183,7 +186,9 @@ export async function getAdminSettings(): Promise<AdminSettings> {
 
             // デフォルトプロンプトが未設定の場合、初期値を設定
             if (!data.defaultPrompts) {
-                console.log('デフォルトプロンプトが未設定のため、初期値を設定します...');
+                adminSettingsLogger.info('デフォルトプロンプトが未設定のため初期値を設定', {
+                    configId: 'config',
+                });
                 await setDoc(
                     docRef,
                     {
@@ -199,7 +204,7 @@ export async function getAdminSettings(): Promise<AdminSettings> {
         }
 
         // 設定が存在しない場合、デフォルト設定を保存
-        console.log('管理者設定が存在しないため、初期設定を作成します...');
+        adminSettingsLogger.info('管理者設定が存在しないため初期設定を作成', { configId: 'config' });
         await setDoc(docRef, {
             ...DEFAULT_SETTINGS,
             updatedAt: serverTimestamp(),
@@ -207,7 +212,7 @@ export async function getAdminSettings(): Promise<AdminSettings> {
 
         return DEFAULT_SETTINGS;
     } catch (error) {
-        console.error('管理者設定取得エラー:', error);
+        adminSettingsLogger.error('管理者設定の取得に失敗', error);
         return DEFAULT_SETTINGS;
     }
 }
@@ -231,7 +236,7 @@ export async function updateAdminSettings(
             { merge: true }
         );
     } catch (error) {
-        console.error('管理者設定更新エラー:', error);
+        adminSettingsLogger.error('管理者設定の更新に失敗', error, { updatedBy });
         throw new Error('管理者設定の更新に失敗しました');
     }
 }
@@ -272,7 +277,7 @@ export async function getDefaultPrompts(): Promise<DefaultPromptTemplate[]> {
         const settings = await getAdminSettings();
         return settings.defaultPrompts || INITIAL_DEFAULT_PROMPTS;
     } catch (error) {
-        console.error('デフォルトプロンプト取得エラー:', error);
+        adminSettingsLogger.error('デフォルトプロンプトの取得に失敗', error);
         return INITIAL_DEFAULT_PROMPTS;
     }
 }
@@ -302,11 +307,13 @@ export async function updateDefaultPrompts(
             const { syncGuestDefaultPrompts } = await import('./prompts');
             await syncGuestDefaultPrompts();
         } catch (syncError) {
-            console.error('ゲストデフォルトプロンプト同期エラー:', syncError);
+            adminSettingsLogger.error('ゲストデフォルトプロンプトの同期に失敗', syncError, {
+                updatedBy,
+            });
             // 同期エラーが発生しても管理者設定の更新は成功扱い
         }
     } catch (error) {
-        console.error('デフォルトプロンプト更新エラー:', error);
+        adminSettingsLogger.error('デフォルトプロンプトの更新に失敗', error, { updatedBy });
         throw new Error('デフォルトプロンプトの更新に失敗しました');
     }
 }

@@ -1,5 +1,8 @@
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
 import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
+import { createLogger } from './logger';
+
+const geminiLogger = createLogger('gemini');
 
 export interface TranscriptionResult {
     success: boolean;
@@ -89,7 +92,7 @@ export class GeminiClient {
                 text,
             };
         } catch (error) {
-            console.error('Gemini API エラー:', error);
+            geminiLogger.error('Gemini API呼び出しでエラーが発生', error, { fileName, modelName });
 
             // より詳細なエラー情報を返す
             let errorMessage = '不明なエラーが発生しました';

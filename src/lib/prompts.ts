@@ -17,6 +17,9 @@ import { logAudit } from './auditLog';
 import { validatePromptSize, getDefaultPrompts } from './adminSettings';
 import { updateUserStats } from './userManagement';
 import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
+import { createLogger } from './logger';
+
+const promptsLogger = createLogger('prompts');
 
 export interface Prompt {
     id?: string;
@@ -65,7 +68,7 @@ export async function initializeDefaultPrompts(): Promise<void> {
             }
         }
     } catch (error) {
-        console.error('デフォルトプロンプト初期化エラー:', error);
+        promptsLogger.error('デフォルトプロンプトの初期化に失敗', error);
     }
 }
 
@@ -83,7 +86,7 @@ export async function createDefaultPromptsForUser(userId: string, ownerType: 'us
         const existingPrompts = await getDocs(q);
 
         if (existingPrompts.empty) {
-            console.log(`ユーザー ${userId} のデフォルトプロンプトを作成中...`);
+            promptsLogger.info('ユーザー固有のデフォルトプロンプト作成を開始', { userId });
 
             // DBからデフォルトプロンプトテンプレートを取得
             const defaultPromptTemplates = await getDefaultPrompts();
@@ -102,10 +105,10 @@ export async function createDefaultPromptsForUser(userId: string, ownerType: 'us
                 });
             }
 
-            console.log(`✅ ユーザー ${userId} のデフォルトプロンプト作成完了`);
+            promptsLogger.info('ユーザー固有のデフォルトプロンプト作成が完了', { userId });
         }
     } catch (error) {
-        console.error('デフォルトプロンプト作成エラー:', error);
+        promptsLogger.error('デフォルトプロンプトの作成に失敗', error, { userId, ownerType });
         // エラーが発生してもアカウント作成は続行
     }
 }
@@ -119,9 +122,10 @@ export async function createPrompt(
     isDefault: boolean = false,
     model: string = DEFAULT_GEMINI_MODEL
 ): Promise<string> {
+    const userId = getCurrentUserId();
+    const ownerType = getOwnerType();
+
     try {
-        const userId = getCurrentUserId();
-        const ownerType = getOwnerType();
 
         // サイズチェック
         const sizeValidation = await validatePromptSize(content);
@@ -155,7 +159,7 @@ export async function createPrompt(
 
         return docRef.id;
     } catch (error) {
-        console.error('プロンプト作成エラー:', error);
+        promptsLogger.error('プロンプトの作成に失敗', error, { name, ownerType });
         if (error instanceof Error) {
             throw error;
         }
@@ -226,7 +230,7 @@ export async function getPrompts(): Promise<Prompt[]> {
 
         return prompts;
     } catch (error) {
-        console.error('プロンプト取得エラー:', error);
+        promptsLogger.error('プロンプト一覧の取得に失敗', error);
         throw new Error('プロンプトの取得に失敗しました');
     }
 }
@@ -264,7 +268,7 @@ export async function getPromptsByOwnerId(ownerId: string, limitCount: number = 
 
         return prompts;
     } catch (error) {
-        console.error('指定ユーザーのプロンプト取得エラー:', error);
+        promptsLogger.error('指定ユーザーのプロンプト取得に失敗', error, { ownerId, limitCount });
         throw new Error('指定したユーザーのプロンプト取得に失敗しました');
     }
 }
@@ -298,7 +302,7 @@ export async function updatePrompt(
         // 監査ログを記録
         await logAudit('prompt_update', 'prompt', promptId, updates);
     } catch (error) {
-        console.error('プロンプト更新エラー:', error);
+        promptsLogger.error('プロンプトの更新に失敗', error, { promptId });
         if (error instanceof Error) {
             throw error;
         }
@@ -324,7 +328,7 @@ export async function deletePrompt(promptId: string): Promise<void> {
             await updateUserStats(userId, -1, 0);
         }
     } catch (error) {
-        console.error('プロンプト削除エラー:', error);
+        promptsLogger.error('プロンプトの削除に失敗', error, { promptId });
         throw new Error('プロンプトの削除に失敗しました');
     }
 }
@@ -355,7 +359,9 @@ export async function syncGuestDefaultPrompts(): Promise<void> {
         await Promise.all(deletePromises);
 
         if (existingGuestDefaults.docs.length > 0) {
-            console.log(`${existingGuestDefaults.docs.length}個のゲストデフォルトプロンプトを削除しました`);
+            promptsLogger.info('ゲストデフォルトプロンプトを削除', {
+                deletedCount: existingGuestDefaults.docs.length,
+            });
         }
 
         // 管理者設定のデフォルトプロンプトから新規作成
@@ -375,10 +381,12 @@ export async function syncGuestDefaultPrompts(): Promise<void> {
         await Promise.all(createPromises);
 
         if (defaultPromptTemplates.length > 0) {
-            console.log(`${defaultPromptTemplates.length}個のゲストデフォルトプロンプトを作成しました`);
+            promptsLogger.info('ゲストデフォルトプロンプトを再作成', {
+                createdCount: defaultPromptTemplates.length,
+            });
         }
     } catch (error) {
-        console.error('ゲストデフォルトプロンプト同期エラー:', error);
+        promptsLogger.error('ゲストデフォルトプロンプトの同期に失敗', error);
         throw new Error('ゲストデフォルトプロンプトの同期に失敗しました');
     }
 }

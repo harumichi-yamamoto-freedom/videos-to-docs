@@ -1,6 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { createLogger } from './logger';
+
+const firebaseLogger = createLogger('firebase');
 
 // Firebase設定（環境変数から読み込み）
 const firebaseConfig = {
@@ -24,7 +27,7 @@ export const auth = getAuth(app);
 // 認証状態をローカルストレージに永続化（タブ跨ぎ保持）
 if (typeof window !== 'undefined') {
     setPersistence(auth, browserLocalPersistence).catch((error) => {
-        console.error('認証永続化設定エラー:', error);
+        firebaseLogger.error('認証永続化の設定に失敗', error);
     });
 }
 

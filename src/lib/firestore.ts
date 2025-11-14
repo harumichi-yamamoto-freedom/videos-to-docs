@@ -17,6 +17,9 @@ import { getCurrentUserId, getOwnerType } from './auth';
 import { logAudit } from './auditLog';
 import { validateDocumentSize } from './adminSettings';
 import { updateUserStats } from './userManagement';
+import { createLogger } from './logger';
+
+const firestoreLogger = createLogger('firestore');
 
 export interface TranscriptionDocument {
     id?: string;
@@ -93,7 +96,7 @@ export async function saveTranscription(
 
         return docRef.id;
     } catch (error) {
-        console.error('Firestore保存エラー:', error);
+        firestoreLogger.error('文書の保存に失敗', error, { fileName, promptName });
         if (error instanceof Error) {
             throw error;
         }
@@ -166,7 +169,7 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
 
         return documents;
     } catch (error) {
-        console.error('Firestore取得エラー:', error);
+        firestoreLogger.error('文書の取得に失敗', error, { limitCount });
         throw new Error('文書の取得に失敗しました');
     }
 }
@@ -228,7 +231,7 @@ export async function getTranscriptions(limitCount: number = 100): Promise<Trans
 
         return documents;
     } catch (error) {
-        console.error('Firestore取得エラー:', error);
+        firestoreLogger.error('文書の取得に失敗', error, { limitCount });
         throw new Error('文書の取得に失敗しました');
     }
 }
@@ -261,7 +264,7 @@ export async function getTranscriptionsByOwnerId(ownerId: string, limitCount: nu
 
         return documents;
     } catch (error) {
-        console.error('指定ユーザーの文書取得エラー:', error);
+        firestoreLogger.error('指定ユーザーの文書取得に失敗', error, { ownerId, limitCount });
         throw new Error('指定したユーザーの文書取得に失敗しました');
     }
 }
@@ -279,7 +282,7 @@ export async function updateTranscriptionTitle(documentId: string, newTitle: str
         // 監査ログを記録
         await logAudit('document_update', 'document', documentId, { title: newTitle });
     } catch (error) {
-        console.error('Firestoreタイトル更新エラー:', error);
+        firestoreLogger.error('文書タイトルの更新に失敗', error, { documentId });
         throw new Error('タイトルの更新に失敗しました');
     }
 }
@@ -298,7 +301,7 @@ export async function updateTranscriptionContent(documentId: string, newContent:
         // 監査ログを記録
         await logAudit('document_update', 'document', documentId, { content: 'updated' });
     } catch (error) {
-        console.error('Firestoreコンテンツ更新エラー:', error);
+        firestoreLogger.error('文書コンテンツの更新に失敗', error, { documentId });
         throw new Error('コンテンツの更新に失敗しました');
     }
 }
@@ -321,7 +324,7 @@ export async function deleteTranscription(documentId: string): Promise<void> {
             await updateUserStats(userId, 0, -1);
         }
     } catch (error) {
-        console.error('Firestore削除エラー:', error);
+        firestoreLogger.error('文書の削除に失敗', error, { documentId });
         throw new Error('文書の削除に失敗しました');
     }
 }

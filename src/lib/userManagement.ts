@@ -4,6 +4,9 @@
 
 import { db } from './firebase';
 import { collection, doc, getDoc, setDoc, getDocs, query, orderBy, serverTimestamp, Timestamp, where, limit } from 'firebase/firestore';
+import { createLogger } from './logger';
+
+const userManagementLogger = createLogger('userManagement');
 
 export interface UserProfile {
     uid: string;
@@ -67,12 +70,14 @@ export async function createOrUpdateUserProfile(
                 const { createDefaultPromptsForUser } = await import('./prompts');
                 await createDefaultPromptsForUser(uid, 'user');
             } catch (error) {
-                console.error('⚠️ デフォルトプロンプト作成エラー（ユーザー作成は成功）:', error);
+                userManagementLogger.error('デフォルトプロンプトの作成に失敗（ユーザー作成は成功）', error, {
+                    uid,
+                });
                 // エラーが発生してもユーザー作成は成功扱い
             }
         }
     } catch (error) {
-        console.error('ユーザープロファイル作成エラー:', error);
+        userManagementLogger.error('ユーザープロファイルの作成または更新に失敗', error, { uid, email });
         throw new Error('ユーザープロファイルの作成に失敗しました');
     }
 }
@@ -101,7 +106,7 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
 
         return null;
     } catch (error) {
-        console.error('ユーザープロファイル取得エラー:', error);
+        userManagementLogger.error('ユーザープロファイルの取得に失敗', error, { uid });
         return null;
     }
 }
@@ -135,7 +140,7 @@ export async function getAllUsers(): Promise<UserProfile[]> {
 
         return users;
     } catch (error) {
-        console.error('ユーザー一覧取得エラー:', error);
+        userManagementLogger.error('ユーザー一覧の取得に失敗', error);
         throw new Error('ユーザー一覧の取得に失敗しました');
     }
 }
@@ -145,7 +150,7 @@ export async function getAllUsers(): Promise<UserProfile[]> {
  */
 export async function getUserByEmail(email: string): Promise<UserProfile | null> {
     try {
-        console.log('[UserManagement] getUserByEmail start', { email });
+        userManagementLogger.info('メールアドレスによるユーザー検索を開始', { email });
         const q = query(
             collection(db, 'users'),
             where('email', '==', email),
@@ -154,7 +159,7 @@ export async function getUserByEmail(email: string): Promise<UserProfile | null>
 
         const snapshot = await getDocs(q);
         if (snapshot.empty) {
-            console.warn('[UserManagement] getUserByEmail no match', { email });
+            userManagementLogger.warn('メールアドレスによるユーザー検索に一致なし', { email });
             return null;
         }
 
@@ -171,10 +176,13 @@ export async function getUserByEmail(email: string): Promise<UserProfile | null>
             promptCount: data.promptCount,
             documentCount: data.documentCount,
         };
-        console.log('[UserManagement] getUserByEmail success', { email, uid: userProfile.uid });
+        userManagementLogger.info('メールアドレスによるユーザー検索が完了', {
+            email,
+            uid: userProfile.uid,
+        });
         return userProfile;
     } catch (error) {
-        console.error('メールアドレスからのユーザー検索エラー:', error);
+        userManagementLogger.error('メールアドレスによるユーザー検索に失敗', error, { email });
         return null;
     }
 }
@@ -187,7 +195,7 @@ export async function isSuperuser(uid: string): Promise<boolean> {
         const profile = await getUserProfile(uid);
         return profile?.superuser || false;
     } catch (error) {
-        console.error('管理者チェックエラー:', error);
+        userManagementLogger.error('管理者権限チェックに失敗', error, { uid });
         return false;
     }
 }
@@ -212,7 +220,11 @@ export async function updateUserStats(uid: string, incrementPrompts: number = 0,
             );
         }
     } catch (error) {
-        console.error('ユーザー統計更新エラー:', error);
+        userManagementLogger.error('ユーザー統計情報の更新に失敗', error, {
+            uid,
+            incrementPrompts,
+            incrementDocuments,
+        });
     }
 }
 
