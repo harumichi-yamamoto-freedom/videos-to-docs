@@ -11,7 +11,7 @@ interface PromptModalsProps {
   isCreateOpen: boolean;
   onCloseCreate: () => void;
   onSave: () => void | Promise<void>;
-  onDelete?: () => void | Promise<void>;
+  onDelete: () => void | Promise<void>;
 }
 
 export const PromptModals: React.FC<PromptModalsProps> = ({

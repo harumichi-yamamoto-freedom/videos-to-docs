@@ -4,6 +4,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { X, Download, Trash2, Eye, FileText, Check } from 'lucide-react';
 import ReactMarkdown, { Components } from 'react-markdown';
 
+type CodeProps = React.HTMLAttributes<HTMLElement> & { inline?: boolean };
+
 export interface ContentEditModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -55,7 +57,7 @@ export const ContentEditModal: React.FC<ContentEditModalProps> = ({
         li: (props) => (
             <li className="leading-relaxed" {...props} />
         ),
-        code: ({ inline, ...props }) =>
+        code: ({ inline, ...props }: CodeProps) =>
             inline ? (
                 <code
                     className="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono text-purple-600"

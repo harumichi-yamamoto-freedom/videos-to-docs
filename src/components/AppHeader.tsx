@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { useAdmin } from '@/hooks/useAdmin';
-import { Music, Sparkles, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User } from 'lucide-react';
+import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User } from 'lucide-react';
 import { signOutNow, deleteAccount } from '@/lib/auth';
 import { getUserDeletionInfo } from '@/lib/accountDeletion';
 import AuthModal from './AuthModal';
