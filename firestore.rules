@@ -165,7 +165,10 @@ service cloud.firestore {
         && request.resource.data.status == "approved";
 
       allow delete: if isSignedIn()
-        && resource.data.supervisorId == request.auth.uid;
+        && (
+          resource.data.supervisorId == request.auth.uid
+          || resource.data.subordinateId == request.auth.uid
+        );
     }
   }
 }
