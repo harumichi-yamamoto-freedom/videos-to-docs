@@ -376,41 +376,34 @@ npx tsx scripts/create-admin.ts ylSoKJnLhQPgxcjdodQSOyqO5ym1
 
 ```
 src/
-├── app/                       # Next.js App Router
-│   ├── page.tsx               # メインページ
-│   ├── admin/
-│   │   └── page.tsx           # 管理者画面
-│   ├── layout.tsx             # レイアウト
-│   └── globals.css            # グローバルスタイル
-├── components/                # Reactコンポーネント
-│   ├── FileDropZone.tsx       # ファイルドロップエリア
-│   ├── PromptListSidebar.tsx  # プロンプト一覧
-│   ├── DocumentListSidebar.tsx # 文書一覧
-│   ├── AuthButton.tsx         # 認証ボタン（ドロップダウン）
-│   ├── AuthModal.tsx          # ログイン/サインアップモーダル
-│   ├── PasswordChangeModal.tsx # パスワード変更
-│   ├── ReauthModal.tsx        # 再認証モーダル
-│   └── admin/                 # 管理者用コンポーネント
-│       ├── AuditLogPanel.tsx  # 監査ログパネル
-│       ├── SettingsPanel.tsx  # 設定パネル
-│       └── UsersPanel.tsx     # ユーザー一覧パネル
-├── hooks/                     # カスタムフック
-│   ├── useAuth.ts             # 認証状態管理
-│   ├── useAdmin.ts            # 管理者権限チェック
-│   ├── usePromptManagement.ts # プロンプト管理
-│   └── useVideoProcessing.ts  # 動画処理
-└── lib/                       # ユーティリティ・ロジック
-    ├── firebase.ts            # Firebase初期化
-    ├── auth.ts                # 認証機能
-    ├── firestore.ts           # Firestore操作（文書）
-    ├── prompts.ts             # プロンプト管理
-    ├── userManagement.ts      # ユーザー管理
-    ├── auditLog.ts            # 監査ログ
-    ├── adminSettings.ts       # 管理者設定
-    ├── accountDeletion.ts     # アカウント削除
-    ├── promptPermissions.ts   # プロンプト権限
-    ├── ffmpeg.ts              # FFmpeg.wasm処理
-    └── gemini.ts              # Gemini API クライアント
+├── app/
+│   ├── (dashboard)/
+│   │   ├── layout.tsx
+│   │   ├── home/page.tsx
+│   │   ├── documents/page.tsx
+│   │   └── team/page.tsx
+│   ├── admin/page.tsx
+│   ├── page.tsx               # ルート（/homeへリダイレクト）
+│   └── globals.css
+├── components/
+│   ├── AppHeader.tsx / AuthModal系
+│   ├── FileDropZone.tsx / BulkPromptSelector.tsx / FilePromptSelector.tsx
+│   ├── PromptListSidebar.tsx / prompts/PromptModals.tsx
+│   ├── DocumentListSidebar.tsx / DocumentDetailPanel.tsx / ContentEditModal.tsx
+│   ├── team/TeamPanel.tsx
+│   └── admin/AuditLogPanel.tsx, SettingsPanel.tsx, UsersPanel.tsx
+├── hooks/
+│   ├── useAuth.ts / useAdmin.ts
+│   ├── usePromptManagement.ts / useFileManagement.ts
+│   ├── useVideoProcessing.ts / useProcessingWorkflow.ts
+│   └── 他ユーティリティフック
+└── lib/
+    ├── firebase.ts / auth.ts
+    ├── firestore.ts / prompts.ts / relationships.ts
+    ├── userManagement.ts / adminSettings.ts / auditLog.ts
+    ├── accountDeletion.ts / promptPermissions.ts
+    ├── ffmpeg.ts / gemini.ts / videoConversionService.ts
+    └── constants・utils
 
 scripts/                       # 管理スクリプト
 ├── create-admin.ts            # 初回管理者作成
