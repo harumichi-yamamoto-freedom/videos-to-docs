@@ -12,6 +12,21 @@ import * as admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
 
+interface FirestoreUserData {
+    uid: string;
+    email: string;
+    superuser: boolean;
+    createdAt: admin.firestore.FieldValue;
+    lastLoginAt: admin.firestore.FieldValue;
+    promptCount: number;
+    documentCount: number;
+    displayName?: string;
+}
+
+interface ErrorWithCode {
+    code?: string;
+}
+
 // サービスアカウントキーのパス
 const serviceAccountPath = path.join(process.cwd(), 'serviceAccountKey.json');
 
@@ -77,7 +92,7 @@ async function createAdmin() {
             console.log('   新規作成します...\n');
 
             // undefined を避けるため、データを構築
-            const userData: any = {
+            const userData: FirestoreUserData = {
                 uid: userUid,
                 email: authUser.email || '',
                 superuser: true,
@@ -103,7 +118,7 @@ async function createAdmin() {
 
     } catch (error) {
         console.error('❌ エラーが発生しました:', error);
-        if ((error as any).code === 'auth/user-not-found') {
+        if (isErrorWithCode(error) && error.code === 'auth/user-not-found') {
             console.error('\n💡 ヒント:');
             console.error('- 対象ユーザーが Firebase Authentication に存在することを確認してください');
             console.error('- Firebase Console > Authentication でUIDを確認してください\n');
@@ -119,4 +134,8 @@ createAdmin().then(() => {
     console.error('❌ 予期しないエラー:', error);
     process.exit(1);
 });
+
+function isErrorWithCode(error: unknown): error is ErrorWithCode {
+    return typeof error === 'object' && error !== null && 'code' in error;
+}
 

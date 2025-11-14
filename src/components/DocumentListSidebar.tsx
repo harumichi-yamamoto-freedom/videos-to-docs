@@ -1,25 +1,27 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { FileText, Download, Clock, RefreshCw, Trash2, Edit2, Check, XCircle } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { FileText, Download, Clock, RefreshCw, Trash2, Edit2, Check, XCircle, Search } from 'lucide-react';
 import { getTranscriptions, Transcription, deleteTranscription, updateTranscriptionTitle } from '@/lib/firestore';
 
 interface DocumentListSidebarProps {
     onDocumentClick: (transcription: Transcription) => void;
     updateTrigger?: number;
+    selectedDocumentId?: string | null;
 }
 
 export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
     onDocumentClick,
     updateTrigger,
+    selectedDocumentId,
 }) => {
     const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
     const [loading, setLoading] = useState(true);
     const [editingDocId, setEditingDocId] = useState<string | null>(null);
     const [editedTitle, setEditedTitle] = useState<string>('');
     const [isSaving, setIsSaving] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
 
-    // 静かに更新（ローディング表示なし）
     const loadTranscriptionsQuietly = async () => {
         try {
             const data = await getTranscriptions();
@@ -29,13 +31,11 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         }
     };
 
-    // 手動更新（ローディング表示あり）
     const loadTranscriptions = async () => {
         try {
             setLoading(true);
             const data = await getTranscriptions();
             setTranscriptions(data);
-            // 最低0.5秒はローディング表示
             await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
             console.error('文書読み込みエラー:', error);
@@ -46,12 +46,10 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
 
     useEffect(() => {
         loadTranscriptions();
-        // 自動リロード（新しい文書が生成されたら更新）
         const interval = setInterval(() => loadTranscriptionsQuietly(), 5000);
         return () => clearInterval(interval);
     }, []);
 
-    // 外部からの更新トリガーを監視
     useEffect(() => {
         if (updateTrigger !== undefined && updateTrigger > 0) {
             loadTranscriptionsQuietly();
@@ -59,7 +57,7 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
     }, [updateTrigger]);
 
     const downloadDocument = (transcription: Transcription, event: React.MouseEvent) => {
-        event.stopPropagation(); // クリックイベントの伝播を防止
+        event.stopPropagation();
 
         const blob = new Blob([transcription.text], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
@@ -92,8 +90,28 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         setEditedTitle(transcription.title);
     };
 
-    const handleSaveTitle = async (transcription: Transcription, event: React.MouseEvent) => {
-        event.stopPropagation();
+    const filteredTranscriptions = useMemo(() => {
+        if (!searchQuery.trim()) return transcriptions;
+
+        const normalized = searchQuery.toLowerCase();
+        return transcriptions.filter((transcription) => {
+            const title = transcription.title?.toLowerCase() || '';
+            const fileName = transcription.fileName?.toLowerCase() || '';
+            const promptName = transcription.promptName?.toLowerCase() || '';
+            return (
+                title.includes(normalized) ||
+                fileName.includes(normalized) ||
+                promptName.includes(normalized)
+            );
+        });
+    }, [searchQuery, transcriptions]);
+
+    const handleSaveTitle = async (
+        transcription: Transcription,
+        event?: React.MouseEvent | React.KeyboardEvent,
+    ) => {
+        event?.stopPropagation();
+        event?.preventDefault();
 
         if (!editedTitle.trim()) {
             alert('タイトルを入力してください');
@@ -118,8 +136,9 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         }
     };
 
-    const handleCancelEdit = (event: React.MouseEvent) => {
-        event.stopPropagation();
+    const handleCancelEdit = (event?: React.MouseEvent | React.KeyboardEvent) => {
+        event?.stopPropagation();
+        event?.preventDefault();
         setEditingDocId(null);
         setEditedTitle('');
     };
@@ -137,14 +156,18 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
 
     return (
         <div className="h-full flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
-            {/* ヘッダー */}
             <div className="p-6 bg-white border-b border-purple-100">
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center space-x-2">
                         <FileText className="w-6 h-6 text-purple-600" />
-                        <h2 className="text-xl font-bold text-gray-900">
-                            生成された文書
-                        </h2>
+                        <div>
+                            <h2 className="text-xl font-bold text-gray-900">
+                                生成された文書
+                            </h2>
+                            <p className="text-xs text-gray-500 mt-1">
+                                全{transcriptions.length}件 / 表示{filteredTranscriptions.length}件
+                            </p>
+                        </div>
                     </div>
                     <button
                         onClick={loadTranscriptions}
@@ -155,13 +178,29 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                         <RefreshCw className={`w-5 h-5 text-purple-600 ${loading ? 'animate-spin' : ''}`} />
                     </button>
                 </div>
-                <p className="text-xs text-gray-600">
-                    {transcriptions.length}件の文書
-                </p>
+                <div className="flex items-center space-x-2">
+                    <div className="relative flex-1">
+                        <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="タイトル・ファイル名・プロンプトで検索"
+                            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        />
+                    </div>
+                    {searchQuery && (
+                        <button
+                            onClick={() => setSearchQuery('')}
+                            className="text-xs text-purple-600 hover:underline"
+                        >
+                            クリア
+                        </button>
+                    )}
+                </div>
             </div>
 
-            {/* 文書リスト */}
-            <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {loading ? (
                     <div className="flex items-center justify-center h-32">
                         <div className="text-sm text-gray-500">読み込み中...</div>
@@ -174,18 +213,29 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                             <p className="text-xs mt-1">動画を変換して文書を生成してください</p>
                         </div>
                     </div>
+                ) : filteredTranscriptions.length === 0 ? (
+                    <div className="bg-white rounded-xl p-8 shadow-sm">
+                        <div className="flex flex-col items-center justify-center text-gray-400">
+                            <Search className="w-10 h-10 mb-2 opacity-50" />
+                            <p className="text-sm">検索条件に一致する文書がありません</p>
+                            <p className="text-xs mt-1">別のキーワードをお試しください</p>
+                        </div>
+                    </div>
                 ) : (
                     <div className="space-y-3">
-                        {transcriptions.map((transcription) => {
+                        {filteredTranscriptions.map((transcription) => {
                             const isEditing = editingDocId === transcription.id;
+                            const isSelected = selectedDocumentId === transcription.id;
 
                             return (
                                 <div
                                     key={transcription.id}
                                     onClick={() => !isEditing && onDocumentClick(transcription)}
-                                    className={`bg-white rounded-xl p-4 shadow-sm transition-all group border border-gray-100 ${isEditing
+                                    className={`bg-white rounded-xl p-4 shadow-sm transition-all group border ${isEditing
                                         ? 'border-purple-300 shadow-md'
-                                        : 'hover:shadow-md cursor-pointer hover:border-purple-200'
+                                        : isSelected
+                                            ? 'border-purple-400 shadow-md ring-2 ring-purple-200'
+                                            : 'border-gray-100 hover:shadow-md cursor-pointer hover:border-purple-200'
                                         }`}
                                 >
                                     <div className="flex items-start justify-between">
@@ -201,8 +251,8 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                                                         placeholder="タイトルを入力"
                                                         autoFocus
                                                         onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') handleSaveTitle(transcription, e as unknown as React.MouseEvent);
-                                                            if (e.key === 'Escape') handleCancelEdit(e as unknown as React.MouseEvent);
+                                                            if (e.key === 'Enter') handleSaveTitle(transcription, e);
+                                                            if (e.key === 'Escape') handleCancelEdit(e);
                                                         }}
                                                         disabled={isSaving}
                                                     />
@@ -276,4 +326,5 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         </div>
     );
 };
+
 
