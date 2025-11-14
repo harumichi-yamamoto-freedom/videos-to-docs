@@ -33,6 +33,14 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.superuser == true;
     }
 
+    function isRelationshipParticipant() {
+      return request.auth != null
+        && (
+          resource.data.supervisorId == request.auth.uid
+          || resource.data.subordinateId == request.auth.uid
+        );
+    }
+
     // 読み取り/更新/削除判定（既存ドキュメントの所有に基づく）
     function canAccessExisting() {
       // 移行期間中: ownerType フィールドがない場合は一時的にゲスト扱い
@@ -118,6 +126,10 @@ service cloud.firestore {
       
       // 削除: 自分のプロファイルのみ削除可能
       allow delete: if request.auth != null && request.auth.uid == userId;
+
+      // 上司追加のためにメールアドレス検索を許可
+      allow list: if request.auth != null
+      	&& request.query.limit <= 1;
     }
 
     // adminSettings コレクション
@@ -136,6 +148,24 @@ service cloud.firestore {
       
       // 管理者のみ読み取り可能
       allow read: if isSuperuser();
+    }
+
+    // relationships コレクション
+    match /relationships/{relationshipId} {
+      allow get, list: if isRelationshipParticipant();
+
+      allow create: if isSignedIn()
+        && request.resource.data.subordinateId == request.auth.uid
+        && request.resource.data.status == "pending";
+
+      allow update: if isSignedIn()
+        && resource.data.supervisorId == request.auth.uid
+        && request.resource.data.supervisorId == resource.data.supervisorId
+        && request.resource.data.subordinateId == resource.data.subordinateId
+        && request.resource.data.status == "approved";
+
+      allow delete: if isSignedIn()
+        && resource.data.supervisorId == request.auth.uid;
     }
   }
 }
