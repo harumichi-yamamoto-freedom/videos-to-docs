@@ -283,3 +283,56 @@ export async function deletePrompt(promptId: string): Promise<void> {
     }
 }
 
+/**
+ * ゲストユーザーのデフォルトプロンプトを管理者設定と同期
+ * 管理者がデフォルトプロンプトを更新したときに呼ばれる
+ * 既存のゲストデフォルトプロンプトをすべて削除して、管理者設定から再作成する
+ * これにより、複数のプロンプト、個数の変化、順序の変更、名前変更などすべてに対応
+ */
+export async function syncGuestDefaultPrompts(): Promise<void> {
+    try {
+        // 管理者設定のデフォルトプロンプトを取得
+        const defaultPromptTemplates = await getDefaultPrompts();
+
+        // ゲストユーザーの既存のデフォルトプロンプトをすべて取得
+        const q = query(
+            collection(db, 'prompts'),
+            where('ownerType', '==', 'guest'),
+            where('isDefault', '==', true)
+        );
+        const existingGuestDefaults = await getDocs(q);
+
+        // 既存のゲストデフォルトプロンプトをすべて削除
+        const deletePromises = existingGuestDefaults.docs.map((docSnapshot) => {
+            return deleteDoc(doc(db, 'prompts', docSnapshot.id));
+        });
+        await Promise.all(deletePromises);
+
+        if (existingGuestDefaults.docs.length > 0) {
+            console.log(`${existingGuestDefaults.docs.length}個のゲストデフォルトプロンプトを削除しました`);
+        }
+
+        // 管理者設定のデフォルトプロンプトから新規作成
+        const createPromises = defaultPromptTemplates.map((template) => {
+            return addDoc(collection(db, 'prompts'), {
+                name: template.name,
+                content: template.content,
+                isDefault: true,
+                ownerType: 'guest',
+                ownerId: 'GUEST',
+                createdBy: 'GUEST',
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            });
+        });
+        await Promise.all(createPromises);
+
+        if (defaultPromptTemplates.length > 0) {
+            console.log(`${defaultPromptTemplates.length}個のゲストデフォルトプロンプトを作成しました`);
+        }
+    } catch (error) {
+        console.error('ゲストデフォルトプロンプト同期エラー:', error);
+        throw new Error('ゲストデフォルトプロンプトの同期に失敗しました');
+    }
+}
+

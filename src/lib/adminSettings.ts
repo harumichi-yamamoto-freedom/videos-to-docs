@@ -273,6 +273,7 @@ export async function getDefaultPrompts(): Promise<DefaultPromptTemplate[]> {
 
 /**
  * デフォルトプロンプトテンプレートを更新（管理者のみ）
+ * ゲストユーザーのデフォルトプロンプトも同期更新する
  */
 export async function updateDefaultPrompts(
     prompts: DefaultPromptTemplate[],
@@ -289,6 +290,15 @@ export async function updateDefaultPrompts(
             },
             { merge: true }
         );
+
+        // ゲストユーザーのデフォルトプロンプトを同期更新
+        try {
+            const { syncGuestDefaultPrompts } = await import('./prompts');
+            await syncGuestDefaultPrompts();
+        } catch (syncError) {
+            console.error('ゲストデフォルトプロンプト同期エラー:', syncError);
+            // 同期エラーが発生しても管理者設定の更新は成功扱い
+        }
     } catch (error) {
         console.error('デフォルトプロンプト更新エラー:', error);
         throw new Error('デフォルトプロンプトの更新に失敗しました');

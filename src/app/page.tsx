@@ -175,6 +175,14 @@ export default function Home() {
     // ファイルごとの選択プロンプトから削除されたものを除外
     const validPromptIds = updatedPrompts.map(p => p.id!);
     cleanupDeletedPrompts(validPromptIds);
+    
+    // 選択中のプロンプトも更新
+    if (selectedPrompt) {
+      const updatedPrompt = updatedPrompts.find(p => p.id === selectedPrompt.id);
+      if (updatedPrompt) {
+        setSelectedPrompt(updatedPrompt);
+      }
+    }
   };
 
   const handlePromptDeleted = async () => {
@@ -233,6 +241,27 @@ export default function Home() {
     } catch (error) {
       console.error('タイトル更新エラー:', error);
       throw error;
+    }
+  };
+
+  const handleContentUpdate = async (newContent: string) => {
+    if (!selectedDocument) return;
+
+    try {
+      const { updateTranscriptionContent } = await import('@/lib/firestore');
+      await updateTranscriptionContent(selectedDocument.id!, newContent);
+
+      // 文書一覧を更新
+      setDocumentUpdateTrigger(prev => prev + 1);
+
+      // モーダル内のコンテンツも更新
+      setSelectedDocument({
+        ...selectedDocument,
+        text: newContent,
+      });
+    } catch (error) {
+      console.error('コンテンツ更新エラー:', error);
+      throw error; // DocumentModalでエラーハンドリングするために再スロー
     }
   };
 
@@ -376,6 +405,7 @@ export default function Home() {
           onDownload={handleDownloadDocument}
           onDelete={handleDeleteDocument}
           onTitleUpdate={handleTitleUpdate}
+          onContentUpdate={handleContentUpdate}
         />
 
         {/* プロンプト編集モーダル */}

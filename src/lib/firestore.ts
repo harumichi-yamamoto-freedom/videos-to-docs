@@ -252,6 +252,25 @@ export async function updateTranscriptionTitle(documentId: string, newTitle: str
 }
 
 /**
+ * 文書のコンテンツを更新
+ */
+export async function updateTranscriptionContent(documentId: string, newContent: string): Promise<void> {
+    try {
+        const docRef = doc(db, 'transcriptions', documentId);
+        await updateDoc(docRef, {
+            text: newContent,
+            updatedAt: serverTimestamp(),
+        });
+
+        // 監査ログを記録
+        await logAudit('document_update', 'document', documentId, { content: 'updated' });
+    } catch (error) {
+        console.error('Firestoreコンテンツ更新エラー:', error);
+        throw new Error('コンテンツの更新に失敗しました');
+    }
+}
+
+/**
  * Firestoreから文書を削除
  */
 export async function deleteTranscription(documentId: string): Promise<void> {
