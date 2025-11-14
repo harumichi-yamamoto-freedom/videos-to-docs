@@ -3,7 +3,7 @@
  */
 
 import { db } from './firebase';
-import { collection, doc, getDoc, setDoc, getDocs, query, orderBy, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, getDocs, query, orderBy, serverTimestamp, Timestamp, where, limit } from 'firebase/firestore';
 
 export interface UserProfile {
     uid: string;
@@ -137,6 +137,45 @@ export async function getAllUsers(): Promise<UserProfile[]> {
     } catch (error) {
         console.error('ユーザー一覧取得エラー:', error);
         throw new Error('ユーザー一覧の取得に失敗しました');
+    }
+}
+
+/**
+ * メールアドレスからユーザープロファイルを取得
+ */
+export async function getUserByEmail(email: string): Promise<UserProfile | null> {
+    try {
+        console.log('[UserManagement] getUserByEmail start', { email });
+        const q = query(
+            collection(db, 'users'),
+            where('email', '==', email),
+            limit(1)
+        );
+
+        const snapshot = await getDocs(q);
+        if (snapshot.empty) {
+            console.warn('[UserManagement] getUserByEmail no match', { email });
+            return null;
+        }
+
+        const docSnap = snapshot.docs[0];
+        const data = docSnap.data();
+
+        const userProfile: UserProfile = {
+            uid: data.uid,
+            email: data.email,
+            displayName: data.displayName,
+            superuser: data.superuser || false,
+            createdAt: data.createdAt?.toDate?.() ?? data.createdAt,
+            lastLoginAt: data.lastLoginAt?.toDate?.(),
+            promptCount: data.promptCount,
+            documentCount: data.documentCount,
+        };
+        console.log('[UserManagement] getUserByEmail success', { email, uid: userProfile.uid });
+        return userProfile;
+    } catch (error) {
+        console.error('メールアドレスからのユーザー検索エラー:', error);
+        return null;
     }
 }
 
