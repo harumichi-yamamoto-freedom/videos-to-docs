@@ -5,6 +5,9 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from './useAuth';
 import { isSuperuser } from '@/lib/userManagement';
+import { createLogger } from '@/lib/logger';
+
+const useAdminLogger = createLogger('useAdmin');
 
 export function useAdmin() {
     const { user, loading: authLoading } = useAuth();
@@ -25,7 +28,7 @@ export function useAdmin() {
                 const adminStatus = await isSuperuser(user.uid);
                 setIsAdmin(adminStatus);
             } catch (error) {
-                console.error('管理者チェックエラー:', error);
+                useAdminLogger.error('管理者権限チェックに失敗', error, { userId: user.uid });
                 setIsAdmin(false);
             } finally {
                 setLoading(false);

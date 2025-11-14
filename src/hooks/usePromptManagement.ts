@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Prompt, getPrompts } from '@/lib/prompts';
 import { useAuth } from './useAuth';
+import { createLogger } from '@/lib/logger';
+
+const promptManagementLogger = createLogger('usePromptManagement');
 
 export const usePromptManagement = () => {
     const { user, loading } = useAuth();
@@ -24,7 +27,7 @@ export const usePromptManagement = () => {
                 setBulkSelectedPromptIds([prompts[0].id!]);
             }
         } catch (error) {
-            console.error('プロンプト読み込みエラー:', error);
+            promptManagementLogger.error('プロンプト一覧の読み込みに失敗', error);
         }
     };
 
@@ -42,7 +45,7 @@ export const usePromptManagement = () => {
 
             return prompts;
         } catch (error) {
-            console.error('プロンプト再読み込みエラー:', error);
+            promptManagementLogger.error('プロンプト一覧の再読み込みに失敗', error);
             return [];
         }
     };

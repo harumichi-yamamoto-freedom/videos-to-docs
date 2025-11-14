@@ -4,6 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { getAllUsers, UserProfile } from '@/lib/userManagement';
 import { RefreshCw, Users as UsersIcon } from 'lucide-react';
 import { logAudit } from '@/lib/auditLog';
+import { createLogger } from '@/lib/logger';
+
+const usersPanelLogger = createLogger('UsersPanel');
 
 export default function UsersPanel() {
     const [users, setUsers] = useState<UserProfile[]>([]);
@@ -20,7 +23,7 @@ export default function UsersPanel() {
             setUsers(data);
             await logAudit('admin_user_view', 'users', 'all');
         } catch (error) {
-            console.error('ユーザー読み込みエラー:', error);
+            usersPanelLogger.error('ユーザー一覧の取得に失敗', error);
             alert('ユーザー一覧の取得に失敗しました');
         } finally {
             setLoading(false);

@@ -4,6 +4,9 @@ import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
 import { createPrompt } from '@/lib/prompts';
 import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS, getGeminiModelLabel } from '@/constants/geminiModels';
+import { createLogger } from '@/lib/logger';
+
+const promptCreateLogger = createLogger('PromptCreateModal');
 
 interface PromptCreateModalProps {
     isOpen: boolean;
@@ -41,7 +44,7 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
             onClose();
         } catch (error) {
             alert('作成に失敗しました');
-            console.error(error);
+            promptCreateLogger.error('プロンプトの作成に失敗', error);
         } finally {
             setSaving(false);
         }

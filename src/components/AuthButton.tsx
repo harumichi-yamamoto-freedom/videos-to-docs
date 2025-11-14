@@ -8,6 +8,9 @@ import AuthModal from './AuthModal';
 import PasswordChangeModal from './PasswordChangeModal';
 import ReauthModal from './ReauthModal';
 import { ChevronDown, LogOut, Key, Trash2, User } from 'lucide-react';
+import { createLogger } from '@/lib/logger';
+
+const authButtonLogger = createLogger('AuthButton');
 
 export default function AuthButton() {
     const { user, loading } = useAuth();
@@ -75,27 +78,27 @@ export default function AuthButton() {
                 }
 
                 // セキュリティのため、必ず再認証を実行
-                console.log('🔐 セキュリティ確認のため、再認証を要求します');
+                authButtonLogger.info('アカウント削除前に再認証を要求', { userId: user.uid });
                 setShowReauthModal(true);
 
             } catch (error) {
                 const message = error instanceof Error ? error.message : 'アカウント削除の準備中にエラーが発生しました';
                 alert('アカウント削除の準備中にエラーが発生しました:\n' + message);
-                console.error('削除準備エラー:', error);
+                authButtonLogger.error('アカウント削除の準備に失敗', error, { userId: user.uid });
             }
         };
 
         const performDeletion = async () => {
             try {
-                console.log('🗑️ アカウント削除を実行中...');
+                authButtonLogger.info('アカウント削除を実行', { userId: user.uid });
                 await deleteAccount();
-                console.log('✅ アカウント削除成功');
+                authButtonLogger.info('アカウント削除が完了', { userId: user.uid });
                 alert('アカウントとすべてのデータを削除しました');
             } catch (error) {
-                console.error('❌ アカウント削除エラー:', error);
+                authButtonLogger.error('アカウント削除に失敗', error, { userId: user.uid });
                 const firebaseError = error as { code?: string; message?: string };
                 if (firebaseError.code === 'auth/requires-recent-login') {
-                    console.log('⚠️ 再認証が必要です');
+                    authButtonLogger.warn('再認証が必要なため削除を中断', { userId: user.uid });
                     throw error; // 再認証が必要なエラーは上位に伝播
                 }
                 const message = firebaseError.message || 'アカウントの削除に失敗しました';
@@ -106,7 +109,7 @@ export default function AuthButton() {
 
         const handleReauthSuccess = async () => {
             // 再認証成功後、すぐに削除を実行（再認証直後なので確実）
-            console.log('✅ 再認証成功。削除を実行します...');
+            authButtonLogger.info('再認証に成功したため削除を再開', { userId: user.uid });
 
             // 短い待機（認証トークンの伝播を確実にする）
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -114,7 +117,7 @@ export default function AuthButton() {
             try {
                 await performDeletion();
             } catch (error) {
-                console.error('❌ 削除エラー:', error);
+                authButtonLogger.error('再認証後の削除に失敗', error, { userId: user.uid });
                 const firebaseError = error as { code?: string; message?: string };
 
                 if (firebaseError.code === 'auth/requires-recent-login') {

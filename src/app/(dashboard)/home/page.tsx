@@ -15,6 +15,9 @@ import { useProcessingWorkflow } from '@/hooks/useProcessingWorkflow';
 import { DebugErrorMode } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
 import { useAuth } from '@/hooks/useAuth';
+import { createLogger } from '@/lib/logger';
+
+const homePageLogger = createLogger('HomePage');
 
 export default function HomePage() {
   const { user } = useAuth();
@@ -44,7 +47,7 @@ export default function HomePage() {
 
   useEffect(() => {
     const handleAuthChange = async () => {
-      console.log('認証状態が変更されました。データを更新します...');
+      homePageLogger.info('認証状態の変化を検知しデータを再読み込み', { userId: user?.uid });
       setPromptUpdateTrigger(prev => prev + 1);
       await reloadPrompts();
       clearFiles();

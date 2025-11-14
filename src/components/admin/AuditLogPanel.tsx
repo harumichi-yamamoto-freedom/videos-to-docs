@@ -3,6 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { getAuditLogs, AuditLog } from '@/lib/auditLog';
 import { RefreshCw, Download } from 'lucide-react';
+import { createLogger } from '@/lib/logger';
+
+const auditLogPanelLogger = createLogger('AuditLogPanel');
 
 export default function AuditLogPanel() {
     const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -20,7 +23,7 @@ export default function AuditLogPanel() {
             const data = await getAuditLogs(limitCount);
             setLogs(data);
         } catch (error) {
-            console.error('監査ログ読み込みエラー:', error);
+            auditLogPanelLogger.error('監査ログの取得に失敗', error, { limitCount });
             alert('監査ログの取得に失敗しました');
         } finally {
             setLoading(false);

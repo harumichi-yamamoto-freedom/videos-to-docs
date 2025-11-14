@@ -5,6 +5,9 @@ import { FileText, RefreshCw, Plus, Trash2, Lock } from 'lucide-react';
 import { Prompt, getPrompts, deletePrompt, initializeDefaultPrompts } from '@/lib/prompts';
 import { useAuth } from '@/hooks/useAuth';
 import { getGeminiModelLabel } from '@/constants/geminiModels';
+import { createLogger } from '@/lib/logger';
+
+const promptListLogger = createLogger('PromptListSidebar');
 
 /**
  * プロンプト一覧サイドバーのProps
@@ -35,7 +38,9 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
             // プロンプトが0件の場合、デフォルトプロンプトを自動生成
             if (data.length === 0 && !isInitializing) {
                 setIsInitializing(true);
-                console.log('プロンプトが0件のため、デフォルトプロンプトを自動生成します...');
+                promptListLogger.info('プロンプトが0件のためデフォルトプロンプトを生成', {
+                    userId: user?.uid,
+                });
                 await initializeDefaultPrompts();
                 const newData = await getPrompts();
                 setPrompts(newData);
@@ -44,7 +49,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                 setPrompts(data);
             }
         } catch (error) {
-            console.error('プロンプト読み込みエラー:', error);
+            promptListLogger.error('静的更新でのプロンプト取得に失敗', error, { userId: user?.uid });
             setIsInitializing(false);
         }
     };
@@ -58,7 +63,9 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
             // プロンプトが0件の場合、デフォルトプロンプトを自動生成
             if (data.length === 0 && !isInitializing) {
                 setIsInitializing(true);
-                console.log('プロンプトが0件のため、デフォルトプロンプトを自動生成します...');
+                promptListLogger.info('プロンプトが0件のためデフォルトプロンプトを生成', {
+                    userId: user?.uid,
+                });
                 await initializeDefaultPrompts();
                 const newData = await getPrompts();
                 setPrompts(newData);
@@ -70,7 +77,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
             // 最低0.5秒はローディング表示
             await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
-            console.error('プロンプト読み込みエラー:', error);
+            promptListLogger.error('プロンプト一覧の取得に失敗', error, { userId: user?.uid });
             setIsInitializing(false);
         } finally {
             setLoading(false);
@@ -110,7 +117,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
             }
         } catch (error) {
             alert('削除に失敗しました');
-            console.error(error);
+            promptListLogger.error('プロンプトの削除に失敗', error, { promptId: prompt.id });
         }
     };
 

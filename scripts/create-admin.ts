@@ -11,6 +11,9 @@
 import * as admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createLogger } from '../src/lib/logger';
+
+const scriptLogger = createLogger('create-admin');
 
 interface FirestoreUserData {
     uid: string;
@@ -32,13 +35,13 @@ const serviceAccountPath = path.join(process.cwd(), 'serviceAccountKey.json');
 
 // サービスアカウントキーの存在確認
 if (!fs.existsSync(serviceAccountPath)) {
-    console.error('❌ エラー: serviceAccountKey.json が見つかりません。');
-    console.error('\n📖 セットアップ手順:');
-    console.error('1. Firebase Console にアクセス');
-    console.error('2. プロジェクト設定 > サービスアカウント');
-    console.error('3. 「新しい秘密鍵の生成」をクリック');
-    console.error('4. ダウンロードしたJSONファイルをプロジェクトルートに配置');
-    console.error('5. ファイル名を "serviceAccountKey.json" に変更\n');
+    scriptLogger.error('serviceAccountKey.json が見つかりません');
+    scriptLogger.error('📖 セットアップ手順:');
+    scriptLogger.error('1. Firebase Console にアクセス');
+    scriptLogger.error('2. プロジェクト設定 > サービスアカウント');
+    scriptLogger.error('3. 「新しい秘密鍵の生成」をクリック');
+    scriptLogger.error('4. ダウンロードしたJSONファイルをプロジェクトルートに配置');
+    scriptLogger.error('5. ファイル名を "serviceAccountKey.json" に変更');
     process.exit(1);
 }
 
@@ -46,12 +49,11 @@ if (!fs.existsSync(serviceAccountPath)) {
 const userUid = process.argv[2];
 
 if (!userUid) {
-    console.error('❌ エラー: ユーザーUIDを指定してください。\n');
-    console.error('使用方法:');
-    console.error('  npx tsx scripts/create-admin.ts YOUR_USER_UID\n');
-    console.error('📝 UIDの確認方法:');
-    console.error('1. Firebase Console > Authentication');
-    console.error('2. ユーザー一覧で対象ユーザーのUIDをコピー\n');
+    scriptLogger.error('ユーザーUIDを指定してください');
+    scriptLogger.error('使用方法: npx tsx scripts/create-admin.ts YOUR_USER_UID');
+    scriptLogger.error('UIDの確認方法:');
+    scriptLogger.error('1. Firebase Console > Authentication');
+    scriptLogger.error('2. ユーザー一覧で対象ユーザーのUIDをコピー');
     process.exit(1);
 }
 
@@ -65,31 +67,30 @@ admin.initializeApp({
 const db = admin.firestore();
 
 async function createAdmin() {
-    console.log('🚀 管理者作成スクリプトを開始します...\n');
-    console.log(`対象UID: ${userUid}\n`);
+    scriptLogger.info('管理者作成スクリプトを開始');
+    scriptLogger.info(`対象UID: ${userUid}`);
 
     try {
         // Firebase Authentication でユーザーが存在するか確認
         const authUser = await admin.auth().getUser(userUid);
-        console.log('✅ Firebase Authentication でユーザーが見つかりました:');
-        console.log(`   - Email: ${authUser.email}`);
-        console.log(`   - DisplayName: ${authUser.displayName || '(未設定)'}\n`);
+        scriptLogger.info('Firebase Authentication でユーザーが見つかりました', {
+            email: authUser.email,
+            displayName: authUser.displayName || '(未設定)',
+        });
 
         // Firestore の users コレクションを確認
         const userRef = db.collection('users').doc(userUid);
         const userDoc = await userRef.get();
 
         if (userDoc.exists) {
-            console.log('ℹ️  Firestore にユーザープロファイルが存在します。');
-            console.log('   superuser フラグを更新します...\n');
+            scriptLogger.info('Firestore にユーザープロファイルが存在するため superuser を更新');
 
             await userRef.update({
                 superuser: true,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
         } else {
-            console.log('ℹ️  Firestore にユーザープロファイルが存在しません。');
-            console.log('   新規作成します...\n');
+            scriptLogger.info('Firestore にユーザープロファイルが存在しません。新規作成します');
 
             // undefined を避けるため、データを構築
             const userData: FirestoreUserData = {
@@ -110,28 +111,27 @@ async function createAdmin() {
             await userRef.set(userData);
         }
 
-        console.log('✅ 管理者権限の付与が完了しました！\n');
-        console.log('📋 確認事項:');
-        console.log('1. Firebase Console で users コレクションを確認');
-        console.log('2. アプリにログインして /admin にアクセス');
-        console.log('3. 管理者画面が表示されることを確認\n');
+        scriptLogger.info('管理者権限の付与が完了しました');
+        scriptLogger.info('確認事項:');
+        scriptLogger.info('1. Firebase Console で users コレクションを確認');
+        scriptLogger.info('2. アプリにログインして /admin にアクセス');
+        scriptLogger.info('3. 管理者画面が表示されることを確認');
 
     } catch (error) {
-        console.error('❌ エラーが発生しました:', error);
+        scriptLogger.error('エラーが発生しました', error);
         if (isErrorWithCode(error) && error.code === 'auth/user-not-found') {
-            console.error('\n💡 ヒント:');
-            console.error('- 対象ユーザーが Firebase Authentication に存在することを確認してください');
-            console.error('- Firebase Console > Authentication でUIDを確認してください\n');
+            scriptLogger.error('対象ユーザーが Firebase Authentication に存在するか確認してください');
+            scriptLogger.error('Firebase Console > Authentication でUIDを確認してください');
         }
         process.exit(1);
     }
 }
 
 createAdmin().then(() => {
-    console.log('👋 スクリプトを終了します。');
+    scriptLogger.info('スクリプトを終了します');
     process.exit(0);
 }).catch((error) => {
-    console.error('❌ 予期しないエラー:', error);
+    scriptLogger.error('予期しないエラーが発生しました', error);
     process.exit(1);
 });
 

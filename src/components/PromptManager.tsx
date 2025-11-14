@@ -4,6 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { Prompt, getPrompts, createPrompt, updatePrompt, deletePrompt, initializeDefaultPrompts } from '@/lib/prompts';
 import { Plus, Edit2, Trash2, Save, X } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS, getGeminiModelLabel } from '@/constants/geminiModels';
+import { createLogger } from '@/lib/logger';
+
+const promptManagerLogger = createLogger('PromptManager');
 
 export const PromptManager: React.FC = () => {
     const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -22,7 +25,7 @@ export const PromptManager: React.FC = () => {
             const data = await getPrompts();
             setPrompts(data);
         } catch (error) {
-            console.error('プロンプト読み込みエラー:', error);
+            promptManagerLogger.error('プロンプト一覧の読み込みに失敗', error);
         } finally {
             setLoading(false);
         }

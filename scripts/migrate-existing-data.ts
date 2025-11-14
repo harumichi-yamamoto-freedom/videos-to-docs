@@ -21,19 +21,22 @@
 import * as admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createLogger } from '../src/lib/logger';
+
+const migrateLogger = createLogger('migrate-data');
 
 // サービスアカウントキーのパス
 const serviceAccountPath = path.join(process.cwd(), 'serviceAccountKey.json');
 
 // サービスアカウントキーの存在確認
 if (!fs.existsSync(serviceAccountPath)) {
-    console.error('❌ エラー: serviceAccountKey.json が見つかりません。');
-    console.error('\n📖 セットアップ手順:');
-    console.error('1. Firebase Console にアクセス');
-    console.error('2. プロジェクト設定 > サービスアカウント');
-    console.error('3. 「新しい秘密鍵の生成」をクリック');
-    console.error('4. ダウンロードしたJSONファイルをプロジェクトルートに配置');
-    console.error('5. ファイル名を "serviceAccountKey.json" に変更\n');
+    migrateLogger.error('serviceAccountKey.json が見つかりません');
+    migrateLogger.error('セットアップ手順:');
+    migrateLogger.error('1. Firebase Console にアクセス');
+    migrateLogger.error('2. プロジェクト設定 > サービスアカウント');
+    migrateLogger.error('3. 「新しい秘密鍵の生成」をクリック');
+    migrateLogger.error('4. ダウンロードしたJSONファイルをプロジェクトルートに配置');
+    migrateLogger.error('5. ファイル名を "serviceAccountKey.json" に変更');
     process.exit(1);
 }
 
@@ -47,14 +50,14 @@ admin.initializeApp({
 const db = admin.firestore();
 
 async function migrateCollection(collectionName: string) {
-    console.log(`\n📦 ${collectionName} コレクションの移行を開始...`);
+    migrateLogger.info(`${collectionName} コレクションの移行を開始`);
 
     const snapshot = await db.collection(collectionName).get();
     let migratedCount = 0;
     let skippedCount = 0;
 
     if (snapshot.empty) {
-        console.log(`  ℹ️  ${collectionName} コレクションにデータがありません`);
+        migrateLogger.info(`${collectionName} コレクションにデータがありません`);
         return;
     }
 
@@ -64,7 +67,7 @@ async function migrateCollection(collectionName: string) {
         // 既に ownerType が設定されている場合はスキップ
         if (data.ownerType) {
             skippedCount++;
-            console.log(`  ⏭️  ${docSnapshot.id} はスキップ（既に移行済み）`);
+            migrateLogger.info(`${docSnapshot.id} はスキップ（既に移行済み）`);
             continue;
         }
 
@@ -76,25 +79,25 @@ async function migrateCollection(collectionName: string) {
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
             migratedCount++;
-            console.log(`  ✅ ${docSnapshot.id} を移行しました`);
+            migrateLogger.info(`${docSnapshot.id} を移行しました`);
         } catch (error) {
-            console.error(`  ❌ ${docSnapshot.id} の移行に失敗:`, error);
+            migrateLogger.error(`${docSnapshot.id} の移行に失敗`, error);
         }
     }
 
-    console.log(`\n✨ ${collectionName} の移行完了:`);
-    console.log(`   - 移行済み: ${migratedCount}件`);
-    console.log(`   - スキップ: ${skippedCount}件`);
-    console.log(`   - 合計: ${snapshot.size}件`);
+    migrateLogger.info(`${collectionName} の移行完了`, {
+        migratedCount,
+        skippedCount,
+        total: snapshot.size,
+    });
 }
 
 async function main() {
-    console.log('🚀 データ移行スクリプトを開始します...\n');
-    console.log('⚠️  注意: このスクリプトは既存のデータを変更します。');
-    console.log('   本番環境で実行する前に、必ずバックアップを取ってください。\n');
+    migrateLogger.info('データ移行スクリプトを開始');
+    migrateLogger.info('注意: このスクリプトは既存のデータを変更します。本番環境で実行する前にバックアップを取得してください');
 
     // 5秒待機（誤実行防止）
-    console.log('5秒後に開始します...');
+    migrateLogger.info('5秒後に開始します');
     await new Promise(resolve => setTimeout(resolve, 5000));
 
     try {
@@ -104,19 +107,19 @@ async function main() {
         // 文書の移行
         await migrateCollection('transcriptions');
 
-        console.log('\n🎉 すべての移行が完了しました！');
+        migrateLogger.info('すべての移行が完了しました');
     } catch (error) {
-        console.error('\n❌ 移行中にエラーが発生しました:', error);
+        migrateLogger.error('移行中にエラーが発生しました', error);
         process.exit(1);
     }
 }
 
 // スクリプトの実行
 main().then(() => {
-    console.log('\n👋 スクリプトを終了します。');
+    migrateLogger.info('スクリプトを終了します');
     process.exit(0);
 }).catch((error) => {
-    console.error('\n❌ 予期しないエラーが発生しました:', error);
+    migrateLogger.error('予期しないエラーが発生しました', error);
     process.exit(1);
 });
 

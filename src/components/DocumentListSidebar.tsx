@@ -3,6 +3,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { FileText, Download, Clock, RefreshCw, Trash2, Edit2, Check, XCircle, Search } from 'lucide-react';
 import { getTranscriptions, Transcription, deleteTranscription, updateTranscriptionTitle } from '@/lib/firestore';
+import { createLogger } from '@/lib/logger';
+
+const documentListLogger = createLogger('DocumentListSidebar');
 
 interface DocumentListSidebarProps {
     onDocumentClick: (transcription: Transcription) => void;
@@ -27,7 +30,7 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
             const data = await getTranscriptions();
             setTranscriptions(data);
         } catch (error) {
-            console.error('文書読み込みエラー:', error);
+            documentListLogger.error('バックグラウンドでの文書再取得に失敗', error);
         }
     };
 
@@ -38,7 +41,7 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
             setTranscriptions(data);
             await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
-            console.error('文書読み込みエラー:', error);
+            documentListLogger.error('文書一覧の取得に失敗', error);
         } finally {
             setLoading(false);
         }
@@ -80,7 +83,7 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
             await loadTranscriptionsQuietly();
         } catch (error) {
             alert('削除に失敗しました');
-            console.error(error);
+            documentListLogger.error('文書の削除に失敗', error, { documentId: transcription.id });
         }
     };
 
@@ -129,7 +132,7 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
             await loadTranscriptionsQuietly();
             setEditingDocId(null);
         } catch (error) {
-            console.error('タイトル更新エラー:', error);
+            documentListLogger.error('文書タイトルの更新に失敗', error, { documentId: transcription.id });
             alert('タイトルの更新に失敗しました');
         } finally {
             setIsSaving(false);

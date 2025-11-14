@@ -7,6 +7,9 @@ import remarkGfm from 'remark-gfm';
 type CodeProps = React.HTMLAttributes<HTMLElement> & { inline?: boolean };
 import { Eye, FileText, Check, FileTextIcon } from 'lucide-react';
 import { Transcription } from '@/lib/firestore';
+import { createLogger } from '@/lib/logger';
+
+const documentDetailLogger = createLogger('DocumentDetailPanel');
 
 interface DocumentDetailPanelProps {
     document: Transcription | null;
@@ -146,7 +149,7 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
             await Promise.all(updates);
             setIsViewMode(true);
         } catch (error) {
-            console.error('保存エラー:', error);
+            documentDetailLogger.error('文書の保存に失敗', error, { documentId: document?.id });
             alert('保存に失敗しました');
         } finally {
             setSaving(false);

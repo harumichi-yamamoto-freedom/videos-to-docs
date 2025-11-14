@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { X, Download, Trash2, Eye, FileText, Check } from 'lucide-react';
 import ReactMarkdown, { Components } from 'react-markdown';
+import { createLogger } from '@/lib/logger';
 
 type CodeProps = React.HTMLAttributes<HTMLElement> & { inline?: boolean };
 
@@ -20,6 +21,8 @@ export interface ContentEditModalProps {
     contentLabel?: string; // コンテンツのラベル（デフォルト: 'コンテンツ'）
     renderExtraContent?: (params: { isViewMode: boolean; saving: boolean }) => React.ReactNode;
 }
+
+const contentEditLogger = createLogger('ContentEditModal');
 
 export const ContentEditModal: React.FC<ContentEditModalProps> = ({
     isOpen,
@@ -149,7 +152,7 @@ export const ContentEditModal: React.FC<ContentEditModalProps> = ({
             setContent(editedContent);
             setIsViewMode(true);
         } catch (error) {
-            console.error('保存エラー:', error);
+            contentEditLogger.error('モーダルでの保存に失敗', error);
             alert('保存に失敗しました');
         } finally {
             setSaving(false);

@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
 import { subscribeAuth } from '@/lib/auth';
 import { createOrUpdateUserProfile } from '@/lib/userManagement';
+import { createLogger } from '@/lib/logger';
+
+const useAuthLogger = createLogger('useAuth');
 
 /**
  * 認証状態を管理するカスタムフック
@@ -18,15 +21,17 @@ export function useAuth() {
             // ユーザーがログインしている場合、Firestoreプロファイルを確認・作成
             if (authUser) {
                 try {
-                    console.log('🔄 Firestoreユーザープロファイルを同期中...');
+                    useAuthLogger.info('Firestoreユーザープロファイルを同期', { userId: authUser.uid });
                     await createOrUpdateUserProfile(
                         authUser.uid,
                         authUser.email || '',
                         authUser.displayName || undefined
                     );
-                    console.log('✅ Firestoreユーザープロファイルの同期完了');
+                    useAuthLogger.info('Firestoreユーザープロファイルの同期完了', { userId: authUser.uid });
                 } catch (error) {
-                    console.error('❌ Firestoreプロファイル同期エラー:', error);
+                    useAuthLogger.error('Firestoreユーザープロファイルの同期に失敗', error, {
+                        userId: authUser.uid,
+                    });
                     // エラーがあってもログインは継続（認証は成功している）
                 }
             }

@@ -5,6 +5,9 @@ import { saveTranscription } from '@/lib/firestore';
 import { FileProcessingStatus, FileWithPrompts, DebugErrorMode } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
 import { validatePromptPermission } from '@/lib/promptPermissions';
+import { createLogger } from '@/lib/logger';
+
+const videoProcessingLogger = createLogger('useVideoProcessing');
 
 export const useVideoProcessing = (
     availablePrompts: Prompt[],
@@ -51,7 +54,9 @@ export const useVideoProcessing = (
                 try {
                     validatePromptPermission(prompt);
                 } catch (permissionError) {
-                    console.error('プロンプト利用権限エラー:', permissionError);
+                    videoProcessingLogger.error('プロンプト利用権限チェックに失敗', permissionError, {
+                        promptId: prompt.id,
+                    });
                     throw permissionError;
                 }
             }
@@ -99,11 +104,19 @@ export const useVideoProcessing = (
                                 })
                             );
                         } else if (!transcriptionResult.success) {
-                            console.error(`プロンプト「${prompt.name}」での文書生成失敗:`, transcriptionResult.error);
+                            videoProcessingLogger.error(
+                                `プロンプト「${prompt.name}」での文書生成が失敗`,
+                                transcriptionResult.error,
+                                { promptId: prompt.id, fileIndex }
+                            );
                             throw new Error(transcriptionResult.error || 'Gemini API処理失敗');
                         }
                     } catch (promptError) {
-                        console.error(`プロンプト「${prompt.name}」での文書生成エラー:`, promptError);
+                        videoProcessingLogger.error(
+                            `プロンプト「${prompt.name}」での文書生成中にエラー`,
+                            promptError,
+                            { promptId: prompt.id, fileIndex }
+                        );
                         throw promptError;
                     }
                 })
@@ -118,7 +131,9 @@ export const useVideoProcessing = (
                 )
             );
         } catch (error) {
-            console.error(`ファイル ${file.file.name} の文書生成エラー:`, error);
+            videoProcessingLogger.error(`ファイル ${file.file.name} の文書生成に失敗`, error, {
+                fileIndex,
+            });
             setProcessingStatuses(prev =>
                 prev.map((status, idx) =>
                     idx === fileIndex
@@ -219,11 +234,19 @@ export const useVideoProcessing = (
                                 })
                             );
                         } else if (!transcriptionResult.success) {
-                            console.error(`プロンプト「${prompt.name}」での文書生成失敗:`, transcriptionResult.error);
+                            videoProcessingLogger.error(
+                                `プロンプト「${prompt.name}」での文書生成が失敗`,
+                                transcriptionResult.error,
+                                { promptId: prompt.id, fileIndex }
+                            );
                             throw new Error(transcriptionResult.error || 'Gemini API処理失敗');
                         }
                     } catch (promptError) {
-                        console.error(`プロンプト「${prompt.name}」での文書生成エラー:`, promptError);
+                        videoProcessingLogger.error(
+                            `プロンプト「${prompt.name}」での文書生成中にエラー`,
+                            promptError,
+                            { promptId: prompt.id, fileIndex }
+                        );
                         throw promptError;
                     }
                 })
@@ -238,7 +261,10 @@ export const useVideoProcessing = (
                 )
             );
         } catch (error) {
-            console.error(`ファイル ${file.file.name} の文書生成エラー:`, error);
+            videoProcessingLogger.error(`ファイル ${file.file.name} の文書生成に失敗`, error, {
+                fileIndex,
+                resume: true,
+            });
             setProcessingStatuses(prev =>
                 prev.map((status, idx) =>
                     idx === fileIndex

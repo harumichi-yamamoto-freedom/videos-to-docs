@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import { reauthenticateWithCredential, EmailAuthProvider, reauthenticateWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
+import { createLogger } from '@/lib/logger';
+
+const reauthModalLogger = createLogger('ReauthModal');
 
 interface ReauthModalProps {
     isOpen: boolean;
@@ -37,7 +40,7 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
             const credential = EmailAuthProvider.credential(user.email, password);
             await reauthenticateWithCredential(user, credential);
 
-            console.log('✅ メール認証での再認証が成功しました');
+            reauthModalLogger.info('メールによる再認証に成功', { userId: user.uid });
             onClose();
             onSuccess();
         } catch (err) {
@@ -60,7 +63,7 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
             const provider = new GoogleAuthProvider();
             await reauthenticateWithPopup(user, provider);
 
-            console.log('✅ Google認証での再認証が成功しました');
+            reauthModalLogger.info('Googleによる再認証に成功', { userId: user.uid });
             onClose();
             onSuccess();
         } catch (err) {

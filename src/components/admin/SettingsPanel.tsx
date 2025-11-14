@@ -14,6 +14,9 @@ import { getCurrentUserId } from '@/lib/auth';
 import { logAudit } from '@/lib/auditLog';
 import DefaultPromptEditModal from './DefaultPromptEditModal';
 import { SettingsPanelRef } from '@/app/admin/page';
+import { createLogger } from '@/lib/logger';
+
+const adminSettingsPanelLogger = createLogger('AdminSettingsPanel');
 
 const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
     const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -44,7 +47,7 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
             setOriginalSettings(settingsData);
             setOriginalPrompts(JSON.parse(JSON.stringify(promptsData)));
         } catch (error) {
-            console.error('設定読み込みエラー:', error);
+            adminSettingsPanelLogger.error('設定の読み込みに失敗', error);
             alert('設定の取得に失敗しました');
         } finally {
             setLoading(false);
@@ -95,7 +98,7 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
 
             alert('設定を保存しました');
         } catch (error) {
-            console.error('設定保存エラー:', error);
+            adminSettingsPanelLogger.error('設定の保存に失敗', error);
             alert('設定の保存に失敗しました');
         } finally {
             setSaving(false);
