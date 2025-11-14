@@ -26,6 +26,13 @@ service cloud.firestore {
         && resource.data.ownerId == request.resource.data.ownerId;
     }
 
+    // 管理者かどうかを判定
+    function isSuperuser() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.superuser == true;
+    }
+
     // 読み取り/更新/削除判定（既存ドキュメントの所有に基づく）
     function canAccessExisting() {
       // 移行期間中: ownerType フィールドがない場合は一時的にゲスト扱い
@@ -46,19 +53,33 @@ service cloud.firestore {
       // 読み取り
       allow get, list: if canAccessExisting();
 
-      // 作成
-      allow create: if isGuestCreate() || isUserCreate();
+      // 作成: ゲスト/ユーザーによる通常作成、または管理者によるゲストデフォルトプロンプト作成
+      allow create: if isGuestCreate() 
+        || isUserCreate()
+        || (isSuperuser() 
+            && request.resource.data.ownerType == "guest" 
+            && request.resource.data.ownerId == "GUEST"
+            && request.resource.data.isDefault == true);
 
-      // 更新: デフォルトゲストプロンプトは編集不可
-      allow update: if canAccessExisting() 
+      // 更新: 通常の更新、または管理者によるゲストデフォルトプロンプト更新
+      allow update: if (canAccessExisting() 
         && ownershipUnchanged()
         && !(resource.data.keys().hasAll(['ownerType', 'isDefault']) 
             && resource.data.ownerType == "guest" 
-            && resource.data.isDefault == true);
+            && resource.data.isDefault == true))
+        || (isSuperuser()
+            && resource.data.keys().hasAll(['ownerType', 'isDefault'])
+            && resource.data.ownerType == "guest" 
+            && resource.data.isDefault == true
+            && ownershipUnchanged());
 
-      // 削除: デフォルトゲストプロンプトは削除不可
-      allow delete: if canAccessExisting()
+      // 削除: 通常の削除、または管理者によるゲストデフォルトプロンプト削除
+      allow delete: if (canAccessExisting()
         && !(resource.data.keys().hasAll(['ownerType', 'isDefault'])
+            && resource.data.ownerType == "guest" 
+            && resource.data.isDefault == true))
+        || (isSuperuser()
+            && resource.data.keys().hasAll(['ownerType', 'isDefault'])
             && resource.data.ownerType == "guest" 
             && resource.data.isDefault == true);
     }
@@ -84,9 +105,7 @@ service cloud.firestore {
       allow get: if request.auth != null && request.auth.uid == userId;
       
       // 管理者はすべてのユーザーを読み取り可能
-      allow list: if request.auth != null 
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.superuser == true;
+      allow list: if isSuperuser();
       
       // ユーザープロファイルの作成（自分のみ）
       allow create: if request.auth != null && request.auth.uid == userId;
@@ -107,9 +126,7 @@ service cloud.firestore {
       allow read: if true;
       
       // 書き込み: 管理者のみ可能
-      allow write: if request.auth != null
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.superuser == true;
+      allow write: if isSuperuser();
     }
 
     // auditLogs コレクション
@@ -118,9 +135,7 @@ service cloud.firestore {
       allow create: if true;
       
       // 管理者のみ読み取り可能
-      allow read: if request.auth != null
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.superuser == true;
+      allow read: if isSuperuser();
     }
   }
 }
