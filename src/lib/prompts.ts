@@ -23,6 +23,13 @@ import { createLogger } from './logger';
 
 const promptsLogger = createLogger('prompts');
 
+/**
+ * 正規表現用の文字列をエスケープ
+ */
+function escapeRegExp(string: string): string {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function createDeterministicHash(value: string): string {
     let hash = 0;
     for (let i = 0; i < value.length; i++) {
@@ -137,6 +144,187 @@ export async function createDefaultPromptsForUser(userId: string, ownerType: 'us
     } catch (error) {
         promptsLogger.error('デフォルトプロンプトの作成に失敗', error, { userId, ownerType });
         // エラーが発生してもアカウント作成は続行
+    }
+}
+
+/**
+ * ベース名に基づいて既存のプロンプトを検索
+ * 例: "打ち合わせの流れ" で検索すると "打ち合わせの流れ", "打ち合わせの流れ (2)" などが該当
+ */
+async function findExistingPromptsByBaseName(
+    ownerId: string,
+    baseName: string
+): Promise<Prompt[]> {
+    try {
+        const userId = getCurrentUserId();
+        const ownerType = getOwnerType();
+
+        let q;
+        if (ownerType === 'guest') {
+            q = query(
+                collection(db, 'prompts'),
+                where('ownerType', '==', 'guest'),
+                orderBy('createdAt', 'desc')
+            );
+        } else {
+            q = query(
+                collection(db, 'prompts'),
+                where('ownerId', '==', userId),
+                orderBy('createdAt', 'desc')
+            );
+        }
+
+        const querySnapshot = await getDocs(q);
+        const prompts: Prompt[] = [];
+
+        // baseName または "baseName (数字)" にマッチするプロンプトをフィルタ
+        const pattern = new RegExp(`^${escapeRegExp(baseName)}(?: \\(\\d+\\))?$`);
+
+        querySnapshot.forEach((docSnapshot) => {
+            const data = docSnapshot.data();
+
+            if (pattern.test(data.name)) {
+                const ownerType = data.ownerType || 'guest';
+                const ownerId = data.ownerId || 'GUEST';
+                const createdBy = data.createdBy || 'GUEST';
+                const createdAt = data.createdAt ? data.createdAt.toDate() : new Date();
+                const updatedAt = data.updatedAt ? data.updatedAt.toDate() : new Date();
+
+                prompts.push({
+                    id: docSnapshot.id,
+                    name: data.name,
+                    content: data.content,
+                    model: data.model || DEFAULT_GEMINI_MODEL,
+                    isDefault: data.isDefault || false,
+                    ownerType: ownerType as 'guest' | 'user',
+                    ownerId: ownerId,
+                    createdBy: createdBy,
+                    createdAt,
+                    updatedAt,
+                });
+            }
+        });
+
+        return prompts;
+    } catch (error) {
+        promptsLogger.error('ベース名によるプロンプト検索に失敗', error, { ownerId, baseName });
+        return [];
+    }
+}
+
+/**
+ * 次のプロンプト名を決定（最大値+1方式）
+ */
+function getNextPromptName(existingPrompts: Prompt[], baseName: string): string {
+    const pattern = new RegExp(`^${escapeRegExp(baseName)}(?: \\((\\d+)\\))?$`);
+    const numbers: number[] = [];
+
+    existingPrompts.forEach(prompt => {
+        const match = prompt.name.match(pattern);
+        if (match) {
+            if (match[1]) {
+                // "(2)", "(3)" などの場合
+                numbers.push(parseInt(match[1]));
+            } else {
+                // 連番なし（ベース名そのまま）の場合は1として扱う
+                numbers.push(1);
+            }
+        }
+    });
+
+    // 既存プロンプトがない場合は連番なし
+    if (numbers.length === 0) {
+        return baseName;
+    }
+
+    // 最大値を取得
+    const maxNumber = Math.max(...numbers);
+
+    // 次の名前を返す
+    const nextNumber = maxNumber + 1;
+    return `${baseName} (${nextNumber})`;
+}
+
+/**
+ * デフォルトプロンプトを追加（連番付き、決定論的ID）
+ */
+async function addDefaultPrompt(
+    template: { name: string; content: string; model?: string },
+    ownerId: string,
+    ownerType: 'guest' | 'user',
+    createdBy: string
+): Promise<void> {
+    // 1. 既存のプロンプトを検索
+    const existingPrompts = await findExistingPromptsByBaseName(ownerId, template.name);
+
+    // 2. 次の名前を決定
+    const newName = getNextPromptName(existingPrompts, template.name);
+
+    // 3. 決定論的IDを生成（新しい名前から）
+    const docId = generateDefaultPromptId(ownerId, newName);
+
+    // 4. 存在チェック
+    const promptRef = doc(db, 'prompts', docId);
+    const existingDoc = await getDoc(promptRef);
+
+    if (existingDoc.exists()) {
+        promptsLogger.info('デフォルトプロンプトは既に存在するためスキップ', {
+            ownerId,
+            name: newName,
+        });
+        return; // 既に存在するのでスキップ
+    }
+
+    // 5. setDocで作成（決定論的ID）
+    await setDoc(promptRef, {
+        name: newName,
+        content: template.content,
+        model: template.model || DEFAULT_GEMINI_MODEL,
+        isDefault: true,
+        ownerType,
+        ownerId,
+        createdBy,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+    });
+
+    promptsLogger.info('デフォルトプロンプトを追加', { ownerId, name: newName });
+}
+
+/**
+ * デフォルトプロンプトを追加（ユーザーが明示的に追加ボタンを押した場合）
+ * 既存のデフォルトプロンプト有無に関係なく、連番を付けて追加する
+ * @param selectedTemplateNames 追加するテンプレート名の配列。指定がない場合は全てのテンプレートを追加
+ */
+export async function addDefaultPrompts(selectedTemplateNames?: string[]): Promise<void> {
+    try {
+        const userId = getCurrentUserId();
+        const ownerType = getOwnerType();
+        const allTemplates = await getDefaultPrompts();
+
+        // 選択されたテンプレート名が指定されている場合、それに該当するテンプレートのみをフィルタ
+        const templates = selectedTemplateNames
+            ? allTemplates.filter(template => selectedTemplateNames.includes(template.name))
+            : allTemplates;
+
+        promptsLogger.info('デフォルトプロンプトの追加を開始', {
+            userId,
+            ownerType,
+            templateCount: templates.length,
+            selectedCount: selectedTemplateNames?.length,
+        });
+
+        // 選択されたテンプレートのみを追加（連番付き）
+        await Promise.all(
+            templates.map((template) =>
+                addDefaultPrompt(template, userId, ownerType, userId)
+            )
+        );
+
+        promptsLogger.info('デフォルトプロンプトの追加が完了', { userId, ownerType });
+    } catch (error) {
+        promptsLogger.error('デフォルトプロンプトの追加に失敗', error);
+        throw error; // エラーを上位に伝播
     }
 }
 
