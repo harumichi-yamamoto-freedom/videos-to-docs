@@ -60,7 +60,7 @@ export const AddDefaultPromptsModal: React.FC<AddDefaultPromptsModalProps> = ({
             // 成功したら選択をリセットしてモーダルを閉じる
             setSelected(new Set());
             onClose();
-        } catch (error) {
+        } catch {
             // エラーは親コンポーネントで処理される
         } finally {
             setIsLoading(false);

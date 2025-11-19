@@ -148,7 +148,7 @@ export default function DefaultPromptEditModal({
             setSelectedModel(editedModel);
             setIsViewMode(true);
             onClose();
-        } catch (error) {
+        } catch {
             alert('保存に失敗しました');
         } finally {
             setSaving(false);
