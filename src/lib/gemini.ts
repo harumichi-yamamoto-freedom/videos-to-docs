@@ -72,13 +72,16 @@ export class GeminiClient {
 音声が日本語の場合は日本語で、英語の場合は英語で文書を作成してください。
 `.trim();
 
+            // BlobのmimeTypeを取得（デフォルトはaudio/mp3）
+            const mimeType = audioBlob.type || 'audio/mp3';
+
             // Gemini APIにリクエスト
             const model = this.getModelInstance(modelName);
             const result = await model.generateContent([
                 { text: prompt },
                 {
                     inlineData: {
-                        mimeType: 'audio/mp3',
+                        mimeType: mimeType,
                         data: base64Audio,
                     },
                 },
