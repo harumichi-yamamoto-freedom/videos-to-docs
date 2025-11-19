@@ -44,7 +44,7 @@ export const convertVideoToAudioWithWebCodecs = async (
         );
 
         const bitrateNumber = parseInt(bitrate.replace('k', '')) * 1000;
-        
+
         const result = await AudioExtractor.extractAudio(file.file, {
             outputFormat: 'aac',
             bitrate: bitrateNumber,
