@@ -58,8 +58,12 @@ service cloud.firestore {
 
     // プロンプトコレクションのルール
     match /prompts/{promptId} {
-      // 読み取り
-      allow get, list: if canAccessExisting();
+      // 読み取り: 存在確認は誰でも可能、存在する場合は所有権チェック
+      allow get: if !exists(/databases/$(database)/documents/prompts/$(promptId))
+        || canAccessExisting();
+
+      // リスト取得: 所有権チェック
+      allow list: if canAccessExisting();
 
       // 作成: ゲスト/ユーザーによる通常作成、または管理者によるゲストデフォルトプロンプト作成
       allow create: if isGuestCreate() 
