@@ -1,4 +1,5 @@
 import { VideoConverter } from '@/lib/ffmpeg';
+import { AudioExtractor } from '@/lib/audioExtractor';
 import { FileWithPrompts, FileProcessingStatus, SegmentStatus, DebugErrorMode } from '@/types/processing';
 import { calculateOverallProgress } from '@/utils/progressCalculator';
 import { createLogger } from './logger';
@@ -22,7 +23,81 @@ export const VIDEO_SEGMENT_CONFIG = {
 const videoConversionLogger = createLogger('videoConversion');
 
 /**
- * 区間ベースで動画を音声に変換
+ * WebCodecs APIを使用して動画を音声に変換（高速）
+ */
+export const convertVideoToAudioWithWebCodecs = async (
+    file: FileWithPrompts,
+    fileIndex: number,
+    converter: VideoConverter,
+    bitrate: string,
+    sampleRate: number,
+    setProcessingStatuses: React.Dispatch<React.SetStateAction<FileProcessingStatus[]>>
+): Promise<Blob | null> => {
+    try {
+        // 音声変換フェーズ開始
+        setProcessingStatuses(prev =>
+            prev.map((status, idx) =>
+                idx === fileIndex
+                    ? { ...status, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
+                    : status
+            )
+        );
+
+        const bitrateNumber = parseInt(bitrate.replace('k', '')) * 1000;
+        
+        const result = await AudioExtractor.extractAudio(file.file, {
+            outputFormat: 'aac',
+            bitrate: bitrateNumber,
+            sampleRate,
+            ffmpegConverter: converter,
+            onProgress: (progress) => {
+                setProcessingStatuses(prev =>
+                    prev.map((status, idx) =>
+                        idx === fileIndex
+                            ? { ...status, audioConversionProgress: progress.percentage }
+                            : status
+                    )
+                );
+            },
+        });
+
+        if (result.success && result.audioBlob) {
+            return result.audioBlob;
+        } else {
+            setProcessingStatuses(prev =>
+                prev.map((status, idx) =>
+                    idx === fileIndex
+                        ? {
+                            ...status,
+                            status: 'error',
+                            error: result.error || '音声変換に失敗しました',
+                            failedPhase: 'audio_conversion'
+                        }
+                        : status
+                )
+            );
+            return null;
+        }
+    } catch (error) {
+        videoConversionLogger.error('WebCodecs音声変換エラー:', error);
+        setProcessingStatuses(prev =>
+            prev.map((status, idx) =>
+                idx === fileIndex
+                    ? {
+                        ...status,
+                        status: 'error',
+                        error: error instanceof Error ? error.message : '不明なエラー',
+                        failedPhase: 'audio_conversion'
+                    }
+                    : status
+            )
+        );
+        return null;
+    }
+};
+
+/**
+ * 区間ベースで動画を音声に変換（FFmpeg WASM、フォールバック用）
  */
 export const convertVideoToAudioSegments = async (
     file: FileWithPrompts,

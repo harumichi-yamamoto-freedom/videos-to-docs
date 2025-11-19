@@ -1,8 +1,9 @@
 import { useCallback } from 'react';
 import { VideoConverter } from '@/lib/ffmpeg';
 import { GeminiClient } from '@/lib/gemini';
+import { AudioExtractor } from '@/lib/audioExtractor';
 import { FileWithPrompts, FileProcessingStatus, DebugErrorMode } from '@/types/processing';
-import { convertVideoToAudioSegments, resumeVideoConversion } from '@/lib/videoConversionService';
+import { convertVideoToAudioSegments, convertVideoToAudioWithWebCodecs, resumeVideoConversion } from '@/lib/videoConversionService';
 import { createLogger } from '@/lib/logger';
 
 interface UseProcessingWorkflowProps {
@@ -113,15 +114,25 @@ export const useProcessingWorkflow = ({
                             )
                         );
 
-                        const audioBlob = await convertVideoToAudioSegments(
-                            file,
-                            i,
-                            converterRef.current!,
-                            bitrate,
-                            sampleRate,
-                            debugErrorMode,
-                            setProcessingStatuses
-                        );
+                        // WebCodecs APIが利用可能な場合はそれを使用、そうでない場合はFFmpeg WASMを使用
+                        const audioBlob = AudioExtractor.isWebCodecsSupported()
+                            ? await convertVideoToAudioWithWebCodecs(
+                                file,
+                                i,
+                                converterRef.current!,
+                                bitrate,
+                                sampleRate,
+                                setProcessingStatuses
+                            )
+                            : await convertVideoToAudioSegments(
+                                file,
+                                i,
+                                converterRef.current!,
+                                bitrate,
+                                sampleRate,
+                                debugErrorMode,
+                                setProcessingStatuses
+                            );
 
                         if (audioBlob) {
                             // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始
