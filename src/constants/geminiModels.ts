@@ -22,6 +22,11 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
         label: 'Gemini 2.5 Flash Lite',
         description: '軽量・超高速でドラフト生成や大量処理向け',
     },
+    {
+        value: 'gemini-3-pro-preview',
+        label: 'Gemini 3 Pro (Preview)',
+        description: '最新の高精度モデル（プレビュー版）',
+    }
 ];
 
 const GEMINI_MODEL_MAP = new Map(GEMINI_MODEL_OPTIONS.map(option => [option.value, option]));
