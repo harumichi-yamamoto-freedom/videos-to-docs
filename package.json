@@ -15,7 +15,6 @@
     "dotenv": "^17.2.3",
     "firebase": "^12.4.0",
     "lucide-react": "^0.545.0",
-    "mp4box": "^2.2.0",
     "next": "15.5.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
