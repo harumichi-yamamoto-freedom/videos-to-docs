@@ -38,6 +38,113 @@ export class GeminiClient {
     }
 
     /**
+     * 動画ファイルから文字起こしと文書生成を行う（直接送信）
+     * @param videoBlob 動画ファイルのBlob
+     * @param fileName ファイル名
+     * @param customPrompt カスタムプロンプト（オプション）
+     * @param modelName 使用するGeminiモデル。未指定の場合は既定モデル。
+     */
+    async transcribeVideo(
+        videoBlob: Blob,
+        fileName: string,
+        customPrompt?: string,
+        modelName?: string
+    ): Promise<TranscriptionResult> {
+        try {
+            // BlobをBase64に変換
+            const base64Video = await this.blobToBase64(videoBlob);
+
+            // プロンプトの作成（カスタムプロンプトがあればそれを使用）
+            const prompt = customPrompt || `
+以下の動画ファイルの内容を分析し、以下の形式でMarkdown文書を作成してください：
+
+# タイトル
+（動画の主題を簡潔に）
+
+## 要約
+（内容の要約を3-5文で）
+
+## 詳細な内容
+（話されている内容を詳しく記述）
+
+## キーポイント
+- （重要なポイント1）
+- （重要なポイント2）
+- （重要なポイント3）
+
+動画が日本語の場合は日本語で、英語の場合は英語で文書を作成してください。
+`.trim();
+
+            // BlobのmimeTypeを取得（デフォルトはvideo/mp4）
+            const mimeType = videoBlob.type || 'video/mp4';
+
+            geminiLogger.info('動画を直接Gemini APIに送信', {
+                fileName,
+                mimeType,
+                sizeInMB: (videoBlob.size / 1024 / 1024).toFixed(2),
+                modelName: modelName || this.defaultModel
+            });
+
+            // Gemini APIにリクエスト
+            const model = this.getModelInstance(modelName);
+            const result = await model.generateContent([
+                { text: prompt },
+                {
+                    inlineData: {
+                        mimeType: mimeType,
+                        data: base64Video,
+                    },
+                },
+            ]);
+
+            const response = await result.response;
+            const text = response.text();
+
+            geminiLogger.info('動画の直接送信による文書生成が成功', {
+                fileName,
+                modelName: modelName || this.defaultModel
+            });
+
+            return {
+                success: true,
+                text,
+            };
+        } catch (error) {
+            geminiLogger.error('動画の直接送信でエラーが発生', error, { fileName, modelName });
+
+            // より詳細なエラー情報を返す
+            let errorMessage = '不明なエラーが発生しました';
+            if (error instanceof Error) {
+                errorMessage = error.message;
+
+                // ネットワークエラーチェック
+                if (errorMessage.includes('fetch') ||
+                    errorMessage.includes('network') ||
+                    errorMessage.includes('Failed to fetch') ||
+                    errorMessage.includes('NetworkError') ||
+                    errorMessage.toLowerCase().includes('offline')) {
+                    errorMessage = 'ネットワークエラー: インターネット接続を確認してください。';
+                }
+                // APIキーのエラーチェック
+                else if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('API key not valid')) {
+                    errorMessage = 'Gemini APIキーが無効です。.env.localファイルを確認してください。';
+                } else if (errorMessage.includes('not found') || errorMessage.includes('404')) {
+                    errorMessage = `指定されたモデルが見つかりません（${modelName || this.defaultModel}）。Gemini APIキーとモデル名を確認してください。`;
+                } else if (errorMessage.includes('PERMISSION_DENIED')) {
+                    errorMessage = 'Gemini APIへのアクセスが拒否されました。APIキーの権限を確認してください。';
+                } else if (errorMessage.includes('file too large') || errorMessage.includes('payload')) {
+                    errorMessage = '動画ファイルが大きすぎます。より小さいファイルを使用してください。';
+                }
+            }
+
+            return {
+                success: false,
+                error: errorMessage,
+            };
+        }
+    }
+
+    /**
      * 音声ファイルから文字起こしと文書生成を行う
      * @param modelName 使用するGeminiモデル。未指定の場合は既定モデル。
      */

@@ -15,6 +15,8 @@ interface UseProcessingWorkflowProps {
     processTranscription: (file: FileWithPrompts, fileIndex: number, audioBlob: Blob, bitrate: string, sampleRate: number) => Promise<void>;
     processTranscriptionResume: (file: FileWithPrompts, fileIndex: number, audioBlob: Blob, completedPromptIds: string[], bitrate: string, sampleRate: number) => Promise<void>;
     debugErrorMode: DebugErrorMode;
+    // 🎬 動画を直接送信するフラグ（試験的）
+    sendVideoDirectly?: boolean;
 }
 
 const processingWorkflowLogger = createLogger('useProcessingWorkflow');
@@ -29,6 +31,7 @@ export const useProcessingWorkflow = ({
     processTranscription,
     processTranscriptionResume,
     debugErrorMode,
+    sendVideoDirectly = false, // 🎬 動画を直接送信するフラグ（デフォルトはfalse）
 }: UseProcessingWorkflowProps) => {
 
     // メイン処理
@@ -100,44 +103,72 @@ export const useProcessingWorkflow = ({
                     const transcriptionPromise = processTranscription(file, i, file.file as Blob, bitrate, sampleRate);
                     transcriptionPromises.push(transcriptionPromise);
                 } else {
-                    // 動画ファイルの場合：区間変換が必要（直列処理）
-                    audioConversionQueueRef.current = true;
+                    // 動画ファイルの場合
+                    // 🎬 動画を直接送信する場合
+                    if (sendVideoDirectly) {
+                        processingWorkflowLogger.info('動画を直接送信モードで処理', { fileName: file.file.name });
 
-                    try {
-                        // 動画の長さを取得と区間変換
+                        // 音声変換をスキップして動画を直接使用
                         setProcessingStatuses(prev =>
                             prev.map((status, idx) =>
                                 idx === i
-                                    ? { ...status, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
+                                    ? { ...status, status: 'converting', phase: 'direct_video_send', audioConversionProgress: 100 }
                                     : status
                             )
                         );
 
-                        const audioBlob = await convertVideoToAudioSegments(
-                            file,
-                            i,
-                            converterRef.current!,
-                            bitrate,
-                            sampleRate,
-                            debugErrorMode,
-                            setProcessingStatuses
+                        // 動画Blobをキャッシュしてから文書生成を並列で開始
+                        setProcessingStatuses(prev =>
+                            prev.map((status, idx) =>
+                                idx === i
+                                    ? { ...status, convertedAudioBlob: file.file as Blob }
+                                    : status
+                            )
                         );
 
-                        if (audioBlob) {
-                            // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始
+                        // processTranscriptionに動画Blobを渡す（内部でGeminiClient.transcribeVideoを使用する必要あり）
+                        const transcriptionPromise = processTranscription(file, i, file.file as Blob, bitrate, sampleRate);
+                        transcriptionPromises.push(transcriptionPromise);
+                    } else {
+                        // 通常の音声変換処理：区間変換が必要（直列処理）
+                        audioConversionQueueRef.current = true;
+
+                        try {
+                            // 動画の長さを取得と区間変換
                             setProcessingStatuses(prev =>
                                 prev.map((status, idx) =>
                                     idx === i
-                                        ? { ...status, convertedAudioBlob: audioBlob }
+                                        ? { ...status, status: 'converting', phase: 'audio_conversion', audioConversionProgress: 0 }
                                         : status
                                 )
                             );
-                            const transcriptionPromise = processTranscription(file, i, audioBlob, bitrate, sampleRate);
-                            transcriptionPromises.push(transcriptionPromise);
+
+                            const audioBlob = await convertVideoToAudioSegments(
+                                file,
+                                i,
+                                converterRef.current!,
+                                bitrate,
+                                sampleRate,
+                                debugErrorMode,
+                                setProcessingStatuses
+                            );
+
+                            if (audioBlob) {
+                                // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始
+                                setProcessingStatuses(prev =>
+                                    prev.map((status, idx) =>
+                                        idx === i
+                                            ? { ...status, convertedAudioBlob: audioBlob }
+                                            : status
+                                    )
+                                );
+                                const transcriptionPromise = processTranscription(file, i, audioBlob, bitrate, sampleRate);
+                                transcriptionPromises.push(transcriptionPromise);
+                            }
+                        } finally {
+                            // 音声変換処理完了
+                            audioConversionQueueRef.current = false;
                         }
-                    } finally {
-                        // 音声変換処理完了
-                        audioConversionQueueRef.current = false;
                     }
                 }
             }
@@ -156,7 +187,8 @@ export const useProcessingWorkflow = ({
         setFfmpegLoaded,
         setProcessingStatuses,
         processTranscription,
-        debugErrorMode
+        debugErrorMode,
+        sendVideoDirectly // 🎬 動画直接送信フラグ
     ]);
 
     // 再開処理

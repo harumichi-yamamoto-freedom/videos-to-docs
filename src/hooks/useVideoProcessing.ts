@@ -65,12 +65,21 @@ export const useVideoProcessing = (
             await Promise.all(
                 selectedPrompts.map(async (prompt) => {
                     try {
-                        const transcriptionResult = await geminiClientRef.current!.transcribeAudio(
-                            audioBlob,
-                            file.file.name,
-                            prompt.content,
-                            prompt.model
-                        );
+                        // 🎬 動画Blobの場合は直接送信、音声Blobの場合は通常処理
+                        const isVideoBlob = audioBlob.type.startsWith('video/');
+                        const transcriptionResult = isVideoBlob
+                            ? await geminiClientRef.current!.transcribeVideo(
+                                audioBlob,
+                                file.file.name,
+                                prompt.content,
+                                prompt.model
+                            )
+                            : await geminiClientRef.current!.transcribeAudio(
+                                audioBlob,
+                                file.file.name,
+                                prompt.content,
+                                prompt.model
+                            );
 
                         if (transcriptionResult.success && transcriptionResult.text) {
                             // Firestoreに保存
@@ -195,12 +204,21 @@ export const useVideoProcessing = (
             await Promise.all(
                 selectedPrompts.map(async (prompt) => {
                     try {
-                        const transcriptionResult = await geminiClientRef.current!.transcribeAudio(
-                            audioBlob,
-                            file.file.name,
-                            prompt.content,
-                            prompt.model
-                        );
+                        // 🎬 動画Blobの場合は直接送信、音声Blobの場合は通常処理
+                        const isVideoBlob = audioBlob.type.startsWith('video/');
+                        const transcriptionResult = isVideoBlob
+                            ? await geminiClientRef.current!.transcribeVideo(
+                                audioBlob,
+                                file.file.name,
+                                prompt.content,
+                                prompt.model
+                            )
+                            : await geminiClientRef.current!.transcribeAudio(
+                                audioBlob,
+                                file.file.name,
+                                prompt.content,
+                                prompt.model
+                            );
 
                         if (transcriptionResult.success && transcriptionResult.text) {
                             // Firestoreに保存

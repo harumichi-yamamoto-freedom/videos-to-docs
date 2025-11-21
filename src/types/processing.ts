@@ -11,7 +11,8 @@ export interface SegmentStatus {
 export interface FileProcessingStatus {
     fileName: string;
     status: 'waiting' | 'converting' | 'transcribing' | 'completed' | 'error';
-    phase: 'waiting' | 'video_analysis' | 'audio_conversion' | 'audio_concat' | 'text_generation' | 'completed';
+    // 🎬 'direct_video_send' を追加（動画を直接送信する試験的機能用）
+    phase: 'waiting' | 'video_analysis' | 'audio_conversion' | 'audio_concat' | 'text_generation' | 'completed' | 'direct_video_send';
     audioConversionProgress: number; // 音声変換の進捗（0-100）
     transcriptionCount: number; // 生成された文書数
     totalTranscriptions: number; // 生成予定の文書数

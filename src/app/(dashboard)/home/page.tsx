@@ -31,6 +31,9 @@ export default function HomePage() {
     errorAtSegmentIndex: 2,
   });
 
+  // 🎬 動画を直接送信する機能（試験的）
+  const [sendVideoDirectly, setSendVideoDirectly] = useState(false);
+
   const bitrate = '192k';
   const sampleRate = 44100;
 
@@ -85,6 +88,8 @@ export default function HomePage() {
     processTranscriptionResume: (file, fileIndex, audioBlob, completedPromptIds) =>
       processTranscriptionResume(file, fileIndex, audioBlob, completedPromptIds, bitrate, sampleRate),
     debugErrorMode,
+    // 🎬 動画を直接送信するフラグ（試験的）
+    sendVideoDirectly,
   });
 
   const onStartProcessing = async () => {
@@ -160,6 +165,26 @@ export default function HomePage() {
         <div className="bg-white rounded-xl shadow-lg p-6 h-[calc(100vh-125px)] min-h-[532px] flex flex-col">
           <div className="flex-1 overflow-y-auto flex flex-col gap-6">
             <FileDropZone onFilesSelected={handleFilesSelected} selectedFiles={selectedFiles.map(f => f.file)} onRemoveFile={handleRemoveFile} />
+
+            {/* 🎬 動画直接送信オプション（試験的機能） */}
+            {selectedFiles.length > 0 && processingStatuses.length === 0 && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <label className="flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sendVideoDirectly}
+                    onChange={(e) => setSendVideoDirectly(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="ml-3 text-sm font-medium text-gray-900">
+                    🎬 動画を直接送信（試験的）
+                  </span>
+                </label>
+                <p className="ml-7 mt-1 text-xs text-gray-600">
+                  ⚠️ 音声変換をスキップして動画を直接Gemini APIに送信します。ファイルサイズが大きいと失敗する可能性があります。
+                </p>
+              </div>
+            )}
 
             {selectedFiles.length === 0 && (
               <BulkPromptSelector
