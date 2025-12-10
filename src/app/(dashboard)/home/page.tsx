@@ -168,21 +168,27 @@ export default function HomePage() {
 
             {/* 🎬 動画直接送信オプション（試験的機能） */}
             {selectedFiles.length > 0 && processingStatuses.length === 0 && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <label className="flex items-center cursor-pointer">
+              <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
+                <label className="flex items-center cursor-not-allowed opacity-60">
                   <input
                     type="checkbox"
                     checked={sendVideoDirectly}
                     onChange={(e) => setSendVideoDirectly(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                    disabled={true}
+                    className="w-4 h-4 text-gray-400 bg-gray-200 border-gray-300 rounded cursor-not-allowed"
                   />
-                  <span className="ml-3 text-sm font-medium text-gray-900">
+                  <span className="ml-3 text-sm font-medium text-red-900">
                     🎬 動画を直接送信（試験的）
                   </span>
                 </label>
-                <p className="ml-7 mt-1 text-xs text-gray-600">
-                  ⚠️ 音声変換をスキップして動画を直接Gemini APIに送信します。ファイルサイズが大きいと失敗する可能性があります。
-                </p>
+                <div className="ml-7 mt-2 space-y-1">
+                  <p className="text-xs font-bold text-red-700">
+                    ⚠️ この機能は現在開発中です。使用しないでください。
+                  </p>
+                  <p className="text-xs text-red-600">
+                    音声変換をスキップして動画を直接Gemini APIに送信する機能ですが、未完成のため正常に動作しません。
+                  </p>
+                </div>
               </div>
             )}
 

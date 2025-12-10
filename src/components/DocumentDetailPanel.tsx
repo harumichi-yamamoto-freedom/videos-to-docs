@@ -15,12 +15,14 @@ interface DocumentDetailPanelProps {
     document: Transcription | null;
     onTitleUpdate?: (newTitle: string) => Promise<void>;
     onContentUpdate?: (newContent: string) => Promise<void>;
+    compactMode?: boolean;
 }
 
 export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
     document,
     onTitleUpdate,
     onContentUpdate,
+    compactMode = false,
 }) => {
     const [isViewMode, setIsViewMode] = useState(true);
     const [editedTitle, setEditedTitle] = useState('');
@@ -169,31 +171,36 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
 
     return (
         <div className="bg-white rounded-xl shadow-lg h-full flex flex-col overflow-hidden border border-gray-200">
-            <div className="p-6 bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100">
-                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+            <div className={`${compactMode ? 'p-3' : 'p-6'} bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100`}>
+                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-2">
                     <div className="flex-1 min-w-0">
                         {isEditable && !isViewMode ? (
                             <input
                                 type="text"
                                 value={editedTitle}
                                 onChange={(e) => setEditedTitle(e.target.value)}
-                                className="w-full px-3 py-2 border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
+                                className={`w-full px-2 py-1 border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900 ${compactMode ? 'text-sm' : ''}`}
                                 placeholder="タイトルを入力"
                                 autoFocus
                                 disabled={saving}
                             />
                         ) : (
-                            <h2 className="text-2xl font-bold text-gray-900 truncate">
+                            <h2 className={`${compactMode ? 'text-base' : 'text-2xl'} font-bold text-gray-900 truncate`}>
                                 {document.title}
                             </h2>
                         )}
-                        <div className="mt-3 text-xs text-gray-600 space-y-1">
-                            <p>ファイル: {document.fileName}</p>
-                            <p>プロンプト: <span className="text-purple-700 font-semibold">{document.promptName}</span></p>
-                            <p>生成日時: {formatDate(document.createdAt)}</p>
-                        </div>
+                        {!compactMode && (
+                            <div className="mt-3 text-xs text-gray-600 space-y-1">
+                                <p>ファイル: {document.fileName}</p>
+                                <p>プロンプト: <span className="text-purple-700 font-semibold">{document.promptName}</span></p>
+                                <p>生成日時: {formatDate(document.createdAt)}</p>
+                            </div>
+                        )}
+                        {compactMode && (
+                            <p className="text-xs text-purple-600 mt-1 truncate">{document.promptName}</p>
+                        )}
                     </div>
-                    {isEditable && (
+                    {isEditable && !compactMode && (
                         <div className="flex items-center justify-end">
                             <div className="flex items-center space-x-2 bg-white/80 rounded-lg p-1 shadow-sm">
                                 <button
@@ -221,12 +228,32 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                             </div>
                         </div>
                     )}
+                    {isEditable && compactMode && (
+                        <div className="flex items-center space-x-1">
+                            <button
+                                onClick={handleViewModeSwitch}
+                                className={`p-1.5 rounded-md text-xs transition-colors ${isViewMode ? 'bg-purple-100 text-purple-700' : 'text-gray-600'}`}
+                                title="表示"
+                                disabled={saving}
+                            >
+                                <Eye className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                                onClick={() => setIsViewMode(false)}
+                                className={`p-1.5 rounded-md text-xs transition-colors ${!isViewMode ? 'bg-purple-100 text-purple-700' : 'text-gray-600'}`}
+                                title="編集"
+                                disabled={saving}
+                            >
+                                <FileText className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+            <div className={`flex-1 overflow-y-auto ${compactMode ? 'p-3' : 'p-6'} bg-gray-50`}>
                 {isViewMode ? (
-                    <div className="prose prose-sm max-w-none text-gray-800">
+                    <div className={`prose ${compactMode ? 'prose-xs' : 'prose-sm'} max-w-none text-gray-800`}>
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             components={markdownComponents}
@@ -239,7 +266,7 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                         <textarea
                             value={editedContent}
                             onChange={(e) => setEditedContent(e.target.value)}
-                            className="w-full h-full min-h-0 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-sm resize-none"
+                            className={`w-full h-full min-h-0 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono ${compactMode ? 'text-xs' : 'text-sm'} resize-none`}
                             placeholder="コンテンツを入力"
                             disabled={saving}
                         />
@@ -248,27 +275,27 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
             </div>
 
             {isEditable && !isViewMode && (
-                <div className="flex items-center justify-end space-x-3 p-4 border-t bg-white">
+                <div className={`flex items-center justify-end space-x-2 ${compactMode ? 'p-2' : 'p-4'} border-t bg-white`}>
                     <button
                         onClick={handleCancelEdit}
                         disabled={saving}
-                        className="px-6 py-2 bg-gray-400 text-white rounded-lg hover:bg-gray-500 transition-colors text-sm font-medium disabled:opacity-50"
+                        className={`${compactMode ? 'px-3 py-1 text-xs' : 'px-6 py-2 text-sm'} bg-gray-400 text-white rounded-lg hover:bg-gray-500 transition-colors font-medium disabled:opacity-50`}
                     >
                         キャンセル
                     </button>
                     <button
                         onClick={handleSave}
                         disabled={saving}
-                        className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center space-x-2 disabled:opacity-50"
+                        className={`${compactMode ? 'px-3 py-1 text-xs' : 'px-6 py-2 text-sm'} bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium flex items-center space-x-1 disabled:opacity-50`}
                     >
                         {saving ? (
                             <>
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                <div className={`animate-spin rounded-full ${compactMode ? 'h-3 w-3' : 'h-4 w-4'} border-b-2 border-white`}></div>
                                 <span>保存中...</span>
                             </>
                         ) : (
                             <>
-                                <Check className="w-4 h-4" />
+                                <Check className={compactMode ? 'w-3 h-3' : 'w-4 h-4'} />
                                 <span>保存</span>
                             </>
                         )}

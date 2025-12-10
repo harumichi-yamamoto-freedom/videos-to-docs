@@ -10,13 +10,15 @@ const documentListLogger = createLogger('DocumentListSidebar');
 interface DocumentListSidebarProps {
     onDocumentClick: (transcription: Transcription) => void;
     updateTrigger?: number;
-    selectedDocumentId?: string | null;
+    selectedDocumentIds?: string[];
+    isMultiSelectMode?: boolean;
 }
 
 export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
     onDocumentClick,
     updateTrigger,
-    selectedDocumentId,
+    selectedDocumentIds = [],
+    isMultiSelectMode = false,
 }) => {
     const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
     const [loading, setLoading] = useState(true);
@@ -25,10 +27,46 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
     const [isSaving, setIsSaving] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
+    // モックデータ
+    const mockTranscriptions: Transcription[] = [
+        {
+            id: '1',
+            title: 'モニカ様',
+            fileName: 'Test (1).mp3',
+            promptName: '顧客情報と希望条件',
+            text: '# 議事録\n\n## 顧客情報\n- 名前: モニカ様\n- 連絡先: xxx@example.com\n\n## 希望条件\n- 予算: 500万円\n- 希望エリア: 東京都内\n\n## 次回アクション\n- 物件資料の送付\n- 内見日程の調整',
+            createdAt: new Date('2024-12-02T17:26:00'),
+        },
+        {
+            id: '2',
+            title: '20251115-shoudan2-smaller',
+            fileName: '20251115-shoudan2-smaller.mp4',
+            promptName: '動画解析test',
+            text: '# 商談記録\n\n## 概要\n新製品の導入についての商談\n\n## 主な議題\n1. 製品の特徴説明\n2. 価格について\n3. 導入スケジュール\n\n## 結論\n来週までに見積もりを提出',
+            createdAt: new Date('2024-11-26T18:36:00'),
+        },
+        {
+            id: '3',
+            title: '20251115-shoudan1-smaller',
+            fileName: '20251115-shoudan1-smaller.mp4',
+            promptName: '動画解析test',
+            text: '# 打ち合わせメモ\n\n## 参加者\n- 田中様（先方）\n- 佐藤（当社）\n\n## 議題\n- サービス内容の確認\n- 契約条件の協議\n\n## 決定事項\n- 次回ミーティング: 12月15日',
+            createdAt: new Date('2024-11-26T18:22:00'),
+        },
+        {
+            id: '4',
+            title: '打ち合わせの流れ',
+            fileName: '20251115-shoudan1-smaller.mp4',
+            promptName: '打ち合わせの流れ',
+            text: '# 打ち合わせの流れ\n\n## 1. アイスブレイク\n- 自己紹介\n- 雑談\n\n## 2. 本題\n- 課題のヒアリング\n- 解決策の提案\n\n## 3. まとめ\n- 次回アクションの確認\n- スケジュールの調整',
+            createdAt: new Date('2024-11-22T11:28:00'),
+        },
+    ];
+
     const loadTranscriptionsQuietly = async () => {
         try {
-            const data = await getTranscriptions();
-            setTranscriptions(data);
+            // モックデータを使用（Firebase接続なし）
+            setTranscriptions(mockTranscriptions);
         } catch (error) {
             documentListLogger.error('バックグラウンドでの文書再取得に失敗', error);
         }
@@ -37,9 +75,9 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
     const loadTranscriptions = async () => {
         try {
             setLoading(true);
-            const data = await getTranscriptions();
-            setTranscriptions(data);
+            // モックデータを使用（Firebase接続なし）
             await new Promise(resolve => setTimeout(resolve, 500));
+            setTranscriptions(mockTranscriptions);
         } catch (error) {
             documentListLogger.error('文書一覧の取得に失敗', error);
         } finally {
@@ -79,8 +117,9 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         if (!confirm(`「${transcription.title}」を削除しますか？`)) return;
 
         try {
-            await deleteTranscription(transcription.id!);
-            await loadTranscriptionsQuietly();
+            // モック: ローカルで削除
+            setTranscriptions(prev => prev.filter(t => t.id !== transcription.id));
+            alert('削除しました（モック）');
         } catch (error) {
             alert('削除に失敗しました');
             documentListLogger.error('文書の削除に失敗', error, { documentId: transcription.id });
@@ -128,9 +167,13 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
 
         try {
             setIsSaving(true);
-            await updateTranscriptionTitle(transcription.id!, editedTitle);
-            await loadTranscriptionsQuietly();
+            // モック: ローカルで更新
+            await new Promise(resolve => setTimeout(resolve, 300));
+            setTranscriptions(prev =>
+                prev.map(t => (t.id === transcription.id ? { ...t, title: editedTitle } : t))
+            );
             setEditingDocId(null);
+            alert('タイトルを更新しました（モック）');
         } catch (error) {
             documentListLogger.error('文書タイトルの更新に失敗', error, { documentId: transcription.id });
             alert('タイトルの更新に失敗しました');
@@ -228,19 +271,29 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                     <div className="space-y-3">
                         {filteredTranscriptions.map((transcription) => {
                             const isEditing = editingDocId === transcription.id;
-                            const isSelected = selectedDocumentId === transcription.id;
+                            const isSelected = selectedDocumentIds.includes(transcription.id!);
+                            const selectionNumber = isSelected
+                                ? selectedDocumentIds.indexOf(transcription.id!) + 1
+                                : null;
 
                             return (
                                 <div
                                     key={transcription.id}
                                     onClick={() => !isEditing && onDocumentClick(transcription)}
-                                    className={`bg-white rounded-xl p-4 shadow-sm transition-all group border ${isEditing
+                                    className={`bg-white rounded-xl p-4 shadow-sm transition-all group border relative ${isEditing
                                         ? 'border-purple-300 shadow-md'
                                         : isSelected
-                                            ? 'border-purple-400 shadow-md ring-2 ring-purple-200'
+                                            ? 'border-purple-400 shadow-md ring-2 ring-purple-200 bg-purple-50'
                                             : 'border-gray-100 hover:shadow-md cursor-pointer hover:border-purple-200'
                                         }`}
                                 >
+                                    {/* 複数選択モードの場合、選択番号を表示 */}
+                                    {isMultiSelectMode && isSelected && selectionNumber && (
+                                        <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 text-white flex items-center justify-center text-sm font-bold shadow-lg">
+                                            {selectionNumber}
+                                        </div>
+                                    )}
+
                                     <div className="flex items-start justify-between">
                                         <div className="flex-1 min-w-0 mr-2">
                                             {isEditing ? (
