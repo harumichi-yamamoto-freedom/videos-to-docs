@@ -63,7 +63,7 @@ export default function DocumentsPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="w-full">
       {/* 複数選択モード切替ボタン */}
       <div className="mb-4 flex justify-end">
         <button
@@ -81,7 +81,7 @@ export default function DocumentsPage() {
 
       <div className="flex flex-col lg:flex-row gap-6">
         {/* 左サイドバー: 文書一覧 */}
-        <div className="lg:w-3/10 w-full">
+        <div className="lg:w-1/5 w-full">
           <div className="bg-white rounded-xl shadow-lg overflow-hidden h-[calc(100vh-180px)] min-h-[532px]">
             <DocumentListSidebar
               onDocumentClick={handleDocumentClick}
@@ -93,7 +93,7 @@ export default function DocumentsPage() {
         </div>
 
         {/* 右パネル: 文書詳細表示 */}
-        <div className="lg:w-7/10 w-full h-[calc(100vh-180px)] min-h-[532px]">
+        <div className="lg:w-4/5 w-full h-[calc(100vh-180px)] min-h-[532px]">
           {selectedDocuments.length === 0 ? (
             <div className="bg-white rounded-xl shadow-lg h-full flex items-center justify-center">
               <div className="text-center text-gray-400">
