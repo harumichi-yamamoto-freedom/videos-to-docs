@@ -13,7 +13,7 @@ export default function DashboardLayout({
             <Suspense fallback={<div className="h-20" />}>
                 <AppHeader />
             </Suspense>
-            <main className="container mx-auto px-10 py-8 max-w-[1920px]">
+            <main className="container mx-auto px-10 py-8 max-w-full">
                 {children}
             </main>
         </div>
