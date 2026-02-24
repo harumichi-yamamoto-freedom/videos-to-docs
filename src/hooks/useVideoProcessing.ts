@@ -61,27 +61,63 @@ export const useVideoProcessing = (
                 }
             }
 
-            // 各プロンプトで文書生成（並列処理）
+            videoProcessingLogger.info('文書生成を開始', {
+                fileName: file.file.name,
+                fileIndex,
+                promptCount: selectedPrompts.length,
+                promptNames: selectedPrompts.map(p => p.name),
+                blobMimeType: audioBlob.type,
+                blobSizeInMB: (audioBlob.size / 1024 / 1024).toFixed(2),
+            });
+
+            // 同一Blobを複数FileReaderで同時読みすると大容量で空になることがあるため、
+            // Base64は1回だけ取得し、全プロンプトで共有する
+            const mimeType = audioBlob.type || (audioBlob.type?.startsWith('video/') ? 'video/mp4' : 'audio/mpeg');
+            let base64Data: string;
+            try {
+                base64Data = await geminiClientRef.current!.getBase64(audioBlob);
+            } catch (base64Error) {
+                videoProcessingLogger.error('Base64変換に失敗', base64Error, { fileIndex });
+                throw new Error('音声/動画データの読み取りに失敗しました。ファイルが大きい場合は再試行してください。');
+            }
+            if (!base64Data || base64Data.length === 0) {
+                videoProcessingLogger.error('Base64データが空です', { fileIndex, blobSize: audioBlob.size });
+                throw new Error('音声/動画データの読み取りに失敗しました。');
+            }
+
+            // 各プロンプトで文書生成（並列処理・同一Base64を共有）
             await Promise.all(
                 selectedPrompts.map(async (prompt) => {
                     try {
-                        // 🎬 動画Blobの場合は直接送信、音声Blobの場合は通常処理
-                        const isVideoBlob = audioBlob.type.startsWith('video/');
-                        const transcriptionResult = isVideoBlob
-                            ? await geminiClientRef.current!.transcribeVideo(
-                                audioBlob,
-                                file.file.name,
-                                prompt.content,
-                                prompt.model
-                            )
-                            : await geminiClientRef.current!.transcribeAudio(
-                                audioBlob,
-                                file.file.name,
-                                prompt.content,
-                                prompt.model
-                            );
+                        const isVideoBlob = mimeType.startsWith('video/');
+                        videoProcessingLogger.info(`プロンプト「${prompt.name}」の処理を開始`, {
+                            fileIndex,
+                            promptId: prompt.id,
+                            promptModel: prompt.model,
+                            isVideoBlob,
+                        });
+
+                        const transcriptionResult = await geminiClientRef.current!.transcribeWithBase64(
+                            base64Data,
+                            mimeType,
+                            file.file.name,
+                            prompt.content,
+                            prompt.model
+                        );
+
+                        videoProcessingLogger.info(`プロンプト「${prompt.name}」の Gemini API 呼び出し完了`, {
+                            fileIndex,
+                            promptId: prompt.id,
+                            success: transcriptionResult.success,
+                            textLength: transcriptionResult.text?.length,
+                        });
 
                         if (transcriptionResult.success && transcriptionResult.text) {
+                            videoProcessingLogger.info('Firestoreへ保存を開始', {
+                                fileIndex,
+                                promptId: prompt.id,
+                                promptName: prompt.name,
+                            });
                             // Firestoreに保存
                             await saveTranscription(
                                 file.file.name,
@@ -91,6 +127,10 @@ export const useVideoProcessing = (
                                 bitrate,
                                 sampleRate
                             );
+                            videoProcessingLogger.info('Firestoreへの保存が完了', {
+                                fileIndex,
+                                promptId: prompt.id,
+                            });
 
                             // 文書一覧を更新
                             if (onDocumentSaved) {
@@ -200,27 +240,62 @@ export const useVideoProcessing = (
                 return;
             }
 
-            // 各プロンプトで文書生成（並列処理）
+            videoProcessingLogger.info('文書生成を再開', {
+                fileName: file.file.name,
+                fileIndex,
+                promptCount: selectedPrompts.length,
+                promptNames: selectedPrompts.map(p => p.name),
+                blobMimeType: audioBlob.type,
+                blobSizeInMB: (audioBlob.size / 1024 / 1024).toFixed(2),
+            });
+
+            // Base64は1回だけ取得し、全プロンプトで共有する（大容量時の空データ対策）
+            const mimeType = audioBlob.type || (audioBlob.type?.startsWith('video/') ? 'video/mp4' : 'audio/mpeg');
+            let base64Data: string;
+            try {
+                base64Data = await geminiClientRef.current!.getBase64(audioBlob);
+            } catch (base64Error) {
+                videoProcessingLogger.error('Base64変換に失敗（再開）', base64Error, { fileIndex });
+                throw new Error('音声/動画データの読み取りに失敗しました。ファイルが大きい場合は再試行してください。');
+            }
+            if (!base64Data || base64Data.length === 0) {
+                videoProcessingLogger.error('Base64データが空です（再開）', { fileIndex, blobSize: audioBlob.size });
+                throw new Error('音声/動画データの読み取りに失敗しました。');
+            }
+
+            // 各プロンプトで文書生成（並列処理・同一Base64を共有）
             await Promise.all(
                 selectedPrompts.map(async (prompt) => {
                     try {
-                        // 🎬 動画Blobの場合は直接送信、音声Blobの場合は通常処理
-                        const isVideoBlob = audioBlob.type.startsWith('video/');
-                        const transcriptionResult = isVideoBlob
-                            ? await geminiClientRef.current!.transcribeVideo(
-                                audioBlob,
-                                file.file.name,
-                                prompt.content,
-                                prompt.model
-                            )
-                            : await geminiClientRef.current!.transcribeAudio(
-                                audioBlob,
-                                file.file.name,
-                                prompt.content,
-                                prompt.model
-                            );
+                        const isVideoBlob = mimeType.startsWith('video/');
+                        videoProcessingLogger.info(`プロンプト「${prompt.name}」の処理を開始（再開）`, {
+                            fileIndex,
+                            promptId: prompt.id,
+                            promptModel: prompt.model,
+                            isVideoBlob,
+                        });
+
+                        const transcriptionResult = await geminiClientRef.current!.transcribeWithBase64(
+                            base64Data,
+                            mimeType,
+                            file.file.name,
+                            prompt.content,
+                            prompt.model
+                        );
+
+                        videoProcessingLogger.info(`プロンプト「${prompt.name}」の Gemini API 呼び出し完了（再開）`, {
+                            fileIndex,
+                            promptId: prompt.id,
+                            success: transcriptionResult.success,
+                            textLength: transcriptionResult.text?.length,
+                        });
 
                         if (transcriptionResult.success && transcriptionResult.text) {
+                            videoProcessingLogger.info('Firestoreへ保存を開始（再開）', {
+                                fileIndex,
+                                promptId: prompt.id,
+                                promptName: prompt.name,
+                            });
                             // Firestoreに保存
                             await saveTranscription(
                                 file.file.name,
@@ -230,6 +305,10 @@ export const useVideoProcessing = (
                                 bitrate,
                                 sampleRate
                             );
+                            videoProcessingLogger.info('Firestoreへの保存が完了（再開）', {
+                                fileIndex,
+                                promptId: prompt.id,
+                            });
 
                             // 文書一覧を更新
                             if (onDocumentSaved) {
