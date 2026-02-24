@@ -10,22 +10,27 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
     {
         value: 'gemini-2.5-pro',
         label: 'Gemini 2.5 Pro',
-        description: '最高精度・推論力重視のモデル（コスト高）',
+        description: '複雑な推論・コーディング・マルチモーダルタスク向けフラッグシップ。最高精度だがコスト高',
     },
     {
         value: 'gemini-2.5-flash',
         label: 'Gemini 2.5 Flash',
-        description: 'マルチモーダル対応・高速/低コストの標準モデル',
+        description: '速度・コスト・精度のバランスに優れた標準モデル。ほとんどのタスクに対応',
     },
     {
         value: 'gemini-2.5-flash-lite',
         label: 'Gemini 2.5 Flash Lite',
-        description: '軽量・超高速でドラフト生成や大量処理向け',
+        description: '超低コスト・超高速の軽量モデル。大量処理やドラフト生成に最適',
     },
     {
         value: 'gemini-3-pro-preview',
         label: 'Gemini 3 Pro (Preview)',
-        description: '最新の高精度モデル（プレビュー版）',
+        description: '強力な推論・エージェント機能を持つGemini 3世代フラッグシップ（プレビュー版）',
+    },
+    {
+        value: 'gemini-3.1-pro-preview',
+        label: 'Gemini 3.1 Pro (Preview)',
+        description: '3 Proから推論力を大幅強化（ARC-AGI-2スコア2.5倍）。Deep Think Mini相当の高思考モード搭載（プレビュー版）',
     }
 ];
 
