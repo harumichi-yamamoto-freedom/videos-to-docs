@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { VideoConverter } from '@/lib/ffmpeg';
 import { GeminiClient } from '@/lib/gemini';
 import { saveTranscription } from '@/lib/firestore';
+import { uploadAudioToStorage } from '@/lib/storage';
 import { FileProcessingStatus, FileWithPrompts, DebugErrorMode } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
 import { validatePromptPermission } from '@/lib/promptPermissions';
@@ -73,13 +74,22 @@ export const useVideoProcessing = (
             // 同一Blobを複数FileReaderで同時読みすると大容量で空になることがあるため、
             // Base64は1回だけ取得し、全プロンプトで共有する
             const mimeType = audioBlob.type || (audioBlob.type?.startsWith('video/') ? 'video/mp4' : 'audio/mpeg');
-            let base64Data: string;
-            try {
-                base64Data = await geminiClientRef.current!.getBase64(audioBlob);
-            } catch (base64Error) {
-                videoProcessingLogger.error('Base64変換に失敗', base64Error, { fileIndex });
-                throw new Error('音声/動画データの読み取りに失敗しました。ファイルが大きい場合は再試行してください。');
-            }
+            const originalFileType = file.file.type.startsWith('video/') ? 'video' as const : 'audio' as const;
+
+            // Base64変換と Storage アップロードを並列実行
+            const [base64Data, audioStoragePath] = await Promise.all([
+                geminiClientRef.current!.getBase64(audioBlob).catch((base64Error) => {
+                    videoProcessingLogger.error('Base64変換に失敗', base64Error, { fileIndex });
+                    throw new Error('音声/動画データの読み取りに失敗しました。ファイルが大きい場合は再試行してください。');
+                }),
+                uploadAudioToStorage(audioBlob, file.file.name, {
+                    originalFileName: file.file.name,
+                    originalFileType,
+                    bitrate,
+                    sampleRate: String(sampleRate),
+                }),
+            ]);
+
             if (!base64Data || base64Data.length === 0) {
                 videoProcessingLogger.error('Base64データが空です', { fileIndex, blobSize: audioBlob.size });
                 throw new Error('音声/動画データの読み取りに失敗しました。');
@@ -123,9 +133,11 @@ export const useVideoProcessing = (
                                 file.file.name,
                                 transcriptionResult.text,
                                 prompt.name,
-                                file.file.type.startsWith('video/') ? 'video' : 'audio',
+                                originalFileType,
                                 bitrate,
-                                sampleRate
+                                sampleRate,
+                                undefined,
+                                audioStoragePath ?? undefined
                             );
                             videoProcessingLogger.info('Firestoreへの保存が完了', {
                                 fileIndex,
@@ -251,13 +263,22 @@ export const useVideoProcessing = (
 
             // Base64は1回だけ取得し、全プロンプトで共有する（大容量時の空データ対策）
             const mimeType = audioBlob.type || (audioBlob.type?.startsWith('video/') ? 'video/mp4' : 'audio/mpeg');
-            let base64Data: string;
-            try {
-                base64Data = await geminiClientRef.current!.getBase64(audioBlob);
-            } catch (base64Error) {
-                videoProcessingLogger.error('Base64変換に失敗（再開）', base64Error, { fileIndex });
-                throw new Error('音声/動画データの読み取りに失敗しました。ファイルが大きい場合は再試行してください。');
-            }
+            const originalFileType = file.file.type.startsWith('video/') ? 'video' as const : 'audio' as const;
+
+            // Base64変換と Storage アップロードを並列実行
+            const [base64Data, audioStoragePath] = await Promise.all([
+                geminiClientRef.current!.getBase64(audioBlob).catch((base64Error) => {
+                    videoProcessingLogger.error('Base64変換に失敗（再開）', base64Error, { fileIndex });
+                    throw new Error('音声/動画データの読み取りに失敗しました。ファイルが大きい場合は再試行してください。');
+                }),
+                uploadAudioToStorage(audioBlob, file.file.name, {
+                    originalFileName: file.file.name,
+                    originalFileType,
+                    bitrate,
+                    sampleRate: String(sampleRate),
+                }),
+            ]);
+
             if (!base64Data || base64Data.length === 0) {
                 videoProcessingLogger.error('Base64データが空です（再開）', { fileIndex, blobSize: audioBlob.size });
                 throw new Error('音声/動画データの読み取りに失敗しました。');
@@ -301,9 +322,11 @@ export const useVideoProcessing = (
                                 file.file.name,
                                 transcriptionResult.text,
                                 prompt.name,
-                                file.file.type.startsWith('video/') ? 'video' : 'audio',
+                                originalFileType,
                                 bitrate,
-                                sampleRate
+                                sampleRate,
+                                undefined,
+                                audioStoragePath ?? undefined
                             );
                             videoProcessingLogger.info('Firestoreへの保存が完了（再開）', {
                                 fileIndex,
