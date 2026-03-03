@@ -34,6 +34,7 @@ export interface TranscriptionDocument {
     createdAt: Timestamp | Date; // Firestore Timestamp または Date
     bitrate?: string;
     sampleRate?: number;
+    audioStoragePath?: string;
 }
 
 // エイリアス（後方互換性のため）
@@ -56,7 +57,8 @@ export async function saveTranscription(
     originalFileType: string,
     bitrate?: string,
     sampleRate?: number,
-    title?: string
+    title?: string,
+    audioStoragePath?: string
 ): Promise<string> {
     try {
         const userId = getCurrentUserId();
@@ -84,6 +86,7 @@ export async function saveTranscription(
             ownerId: userId,
             createdBy: userId,
             createdAt: serverTimestamp(),
+            ...(audioStoragePath && { audioStoragePath }),
         });
 
         // 監査ログを記録
@@ -163,6 +166,7 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
                 createdBy: createdBy,
                 bitrate: data.bitrate,
                 sampleRate: data.sampleRate,
+                audioStoragePath: data.audioStoragePath,
                 createdAt,
             });
         });
