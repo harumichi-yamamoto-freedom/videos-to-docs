@@ -5,6 +5,7 @@
 import { db } from './firebase';
 import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
 import { getAdminSettings } from './adminSettings';
+import { audioExists } from './storage';
 import { createLogger } from './logger';
 
 const logger = createLogger('adminAudioFiles');
@@ -102,6 +103,22 @@ export function groupByAudioPath(docs: AudioTranscriptionDoc[]): AudioFileGroup[
     // 新しい順にソート
     groups.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return groups;
+}
+
+/**
+ * Storage に実在するグループのみを返す
+ */
+export async function filterExistingInStorage(groups: AudioFileGroup[]): Promise<AudioFileGroup[]> {
+    const results = await Promise.all(
+        groups.map(async (group) => {
+            const exists = await audioExists(group.audioStoragePath);
+            if (!exists) {
+                logger.info('Storage にファイルが存在しないため除外', { path: group.audioStoragePath });
+            }
+            return { group, exists };
+        })
+    );
+    return results.filter((r) => r.exists).map((r) => r.group);
 }
 
 /**

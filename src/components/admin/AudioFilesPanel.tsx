@@ -5,6 +5,7 @@ import { RefreshCw, Download, ChevronDown, ChevronRight, CheckSquare, Square } f
 import {
     getAllAudioTranscriptions,
     groupByAudioPath,
+    filterExistingInStorage,
     filterGroups,
     getDefaultTemplateNames,
     AudioFileGroup,
@@ -37,7 +38,8 @@ export default function AudioFilesPanel() {
                 getAllAudioTranscriptions(),
                 getDefaultTemplateNames(),
             ]);
-            const grouped = groupByAudioPath(docs);
+            const allGroups = groupByAudioPath(docs);
+            const grouped = await filterExistingInStorage(allGroups);
             setGroups(grouped);
             setTemplateNames(names);
 

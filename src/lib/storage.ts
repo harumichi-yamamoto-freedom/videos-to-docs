@@ -1,5 +1,5 @@
 import { storage } from './firebase';
-import { ref, uploadBytes, getDownloadURL, getBlob } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, getBlob, getMetadata } from 'firebase/storage';
 import { getCurrentUserId, getOwnerType } from './auth';
 import { createLogger } from './logger';
 
@@ -71,6 +71,19 @@ export async function uploadAudioToStorage(
 export async function getAudioDownloadURL(storagePath: string): Promise<string> {
     const storageRef = ref(storage, storagePath);
     return getDownloadURL(storageRef);
+}
+
+/**
+ * Firebase Storage にファイルが存在するか確認
+ */
+export async function audioExists(storagePath: string): Promise<boolean> {
+    try {
+        const storageRef = ref(storage, storagePath);
+        await getMetadata(storageRef);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 /**
