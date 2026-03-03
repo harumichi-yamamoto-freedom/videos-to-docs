@@ -1,5 +1,5 @@
 import { storage } from './firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, getBlob } from 'firebase/storage';
 import { getCurrentUserId, getOwnerType } from './auth';
 import { createLogger } from './logger';
 
@@ -71,4 +71,15 @@ export async function uploadAudioToStorage(
 export async function getAudioDownloadURL(storagePath: string): Promise<string> {
     const storageRef = ref(storage, storagePath);
     return getDownloadURL(storageRef);
+}
+
+/**
+ * Firebase Storage のパスから直接 Blob を取得（CORS 不要）
+ */
+export async function getAudioBlob(storagePath: string): Promise<Blob> {
+    storageLogger.info('音声ファイルの Blob 取得を開始', { storagePath });
+    const storageRef = ref(storage, storagePath);
+    const blob = await getBlob(storageRef);
+    storageLogger.info('音声ファイルの Blob 取得が完了', { storagePath, size: blob.size });
+    return blob;
 }

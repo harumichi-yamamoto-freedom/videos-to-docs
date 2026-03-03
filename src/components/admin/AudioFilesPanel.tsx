@@ -10,7 +10,7 @@ import {
     AudioFileGroup,
     FilterMode,
 } from '@/lib/adminAudioFiles';
-import { getAudioDownloadURL } from '@/lib/storage';
+import { getAudioBlob } from '@/lib/storage';
 import { createLogger } from '@/lib/logger';
 import JSZip from 'jszip';
 
@@ -375,9 +375,7 @@ function DownloadModal({
 // --- ダウンロードヘルパー ---
 
 async function fetchAudioBlob(storagePath: string): Promise<Blob> {
-    const url = await getAudioDownloadURL(storagePath);
-    const res = await fetch(url);
-    return res.blob();
+    return getAudioBlob(storagePath);
 }
 
 function triggerDownload(blob: Blob, fileName: string) {
