@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // 管理者判定（Firestore の superuser フィールドを参照）
+    function isSuperuser() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.superuser == true;
+    }
+
+    match /audio/{ownerId}/{fileName} {
+      // 読み取り:
+      //   - ゲストファイル（ownerId == "GUEST"）は誰でも読み取り可
+      //   - ログインユーザーは自分のファイルのみ
+      //   - 管理者は全ファイル読み取り可
+      allow read: if ownerId == "GUEST"
+        || (request.auth != null && request.auth.uid == ownerId)
+        || isSuperuser();
+
+      // 書き込み（create/update）:
+      //   - ゲスト: 未認証でも GUEST ディレクトリに書き込み可
+      //   - ログインユーザー: 自分のディレクトリにのみ書き込み可
+      //   - ファイルサイズ上限: 100MB
+      //   - content-type: audio/* のみ許可
+      allow write: if (ownerId == "GUEST" || (request.auth != null && request.auth.uid == ownerId))
+        && request.resource.size < 100 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+    }
+  }
+}
