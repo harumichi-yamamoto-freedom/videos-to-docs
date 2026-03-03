@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
 import { createLogger } from './logger';
 
@@ -11,8 +11,7 @@ export interface TranscriptionResult {
 }
 
 export class GeminiClient {
-    private genAI: GoogleGenerativeAI;
-    private modelCache = new Map<string, GenerativeModel>();
+    private genAI: GoogleGenAI;
     private defaultModel: string;
 
     constructor(defaultModel: string = DEFAULT_GEMINI_MODEL) {
@@ -22,22 +21,8 @@ export class GeminiClient {
             throw new Error('NEXT_PUBLIC_GEMINI_API_KEY が設定されていません');
         }
 
-        this.genAI = new GoogleGenerativeAI(apiKey);
+        this.genAI = new GoogleGenAI({ apiKey });
         this.defaultModel = defaultModel;
-    }
-
-    private getModelInstance(modelName?: string): GenerativeModel {
-        const targetModel = (modelName || this.defaultModel || DEFAULT_GEMINI_MODEL).trim();
-        if (!this.modelCache.has(targetModel)) {
-            geminiLogger.info('モデルインスタンスを新規作成', { targetModel });
-            this.modelCache.set(
-                targetModel,
-                this.genAI.getGenerativeModel({ model: targetModel })
-            );
-        } else {
-            geminiLogger.info('モデルインスタンスをキャッシュから取得', { targetModel });
-        }
-        return this.modelCache.get(targetModel)!;
     }
 
     /**
@@ -99,21 +84,23 @@ export class GeminiClient {
             });
 
             // Gemini APIにリクエスト
-            const model = this.getModelInstance(modelName);
-            const result = await model.generateContent([
-                { text: prompt },
-                {
-                    inlineData: {
-                        mimeType: mimeType,
-                        data: base64Video,
+            const targetModel = (modelName || this.defaultModel || DEFAULT_GEMINI_MODEL).trim();
+            const result = await this.genAI.models.generateContent({
+                model: targetModel,
+                contents: [
+                    {
+                        role: 'user',
+                        parts: [
+                            { text: prompt },
+                            { inlineData: { mimeType, data: base64Video } },
+                        ],
                     },
-                },
-            ]);
+                ],
+            });
 
             geminiLogger.info('generateContent のレスポンスを受信', { fileName });
 
-            const response = result.response;
-            const text = response.text();
+            const text = result.text ?? '';
 
             geminiLogger.info('動画の直接送信による文書生成が成功', {
                 fileName,
@@ -216,21 +203,23 @@ export class GeminiClient {
             });
 
             // Gemini APIにリクエスト
-            const model = this.getModelInstance(modelName);
-            const result = await model.generateContent([
-                { text: prompt },
-                {
-                    inlineData: {
-                        mimeType: mimeType,
-                        data: base64Audio,
+            const targetModel = (modelName || this.defaultModel || DEFAULT_GEMINI_MODEL).trim();
+            const result = await this.genAI.models.generateContent({
+                model: targetModel,
+                contents: [
+                    {
+                        role: 'user',
+                        parts: [
+                            { text: prompt },
+                            { inlineData: { mimeType, data: base64Audio } },
+                        ],
                     },
-                },
-            ]);
+                ],
+            });
 
             geminiLogger.info('generateContent のレスポンスを受信', { fileName });
 
-            const response = result.response;
-            const text = response.text();
+            const text = result.text ?? '';
 
             geminiLogger.info('音声の文書生成が成功', {
                 fileName,
@@ -355,21 +344,23 @@ export class GeminiClient {
                 promptLength: prompt.length,
             });
 
-            const model = this.getModelInstance(modelName);
-            const result = await model.generateContent([
-                { text: prompt },
-                {
-                    inlineData: {
-                        mimeType: mimeType,
-                        data: base64Data,
+            const targetModel = (modelName || this.defaultModel || DEFAULT_GEMINI_MODEL).trim();
+            const result = await this.genAI.models.generateContent({
+                model: targetModel,
+                contents: [
+                    {
+                        role: 'user',
+                        parts: [
+                            { text: prompt },
+                            { inlineData: { mimeType, data: base64Data } },
+                        ],
                     },
-                },
-            ]);
+                ],
+            });
 
             geminiLogger.info('generateContent のレスポンスを受信', { fileName });
 
-            const response = result.response;
-            const text = response.text();
+            const text = result.text ?? '';
 
             geminiLogger.info('文書生成が成功', {
                 fileName,
@@ -441,4 +432,3 @@ export class GeminiClient {
         });
     }
 }
-
