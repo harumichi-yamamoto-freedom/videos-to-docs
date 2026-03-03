@@ -3,12 +3,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAdmin } from '@/hooks/useAdmin';
-import { Shield, Settings, Users, BarChart } from 'lucide-react';
+import { Shield, Settings, Users, BarChart, Music } from 'lucide-react';
 import AuditLogPanel from '@/components/admin/AuditLogPanel';
 import SettingsPanel from '@/components/admin/SettingsPanel';
 import UsersPanel from '@/components/admin/UsersPanel';
+import AudioFilesPanel from '@/components/admin/AudioFilesPanel';
 
-type Tab = 'audit' | 'settings' | 'users';
+type Tab = 'audit' | 'settings' | 'users' | 'audio';
 
 export interface SettingsPanelRef {
     hasUnsavedChanges: () => boolean;
@@ -132,6 +133,17 @@ export default function AdminPage() {
                             <Users className="w-5 h-5" />
                             <span>ユーザー一覧</span>
                         </button>
+
+                        <button
+                            onClick={() => handleTabChange('audio')}
+                            className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors ${activeTab === 'audio'
+                                ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
+                                : 'text-gray-600 hover:bg-gray-50'
+                                }`}
+                        >
+                            <Music className="w-5 h-5" />
+                            <span>音声ファイル</span>
+                        </button>
                     </div>
                 </div>
 
@@ -140,6 +152,7 @@ export default function AdminPage() {
                     {activeTab === 'audit' && <AuditLogPanel />}
                     {activeTab === 'settings' && <SettingsPanel ref={settingsPanelRef} />}
                     {activeTab === 'users' && <UsersPanel />}
+                    {activeTab === 'audio' && <AudioFilesPanel />}
                 </div>
             </div>
         </div>
