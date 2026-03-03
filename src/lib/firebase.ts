@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 import { createLogger } from './logger';
 
 const firebaseLogger = createLogger('firebase');
@@ -23,6 +24,9 @@ export const db = getFirestore(app);
 
 // Firebase Authenticationインスタンスをエクスポート
 export const auth = getAuth(app);
+
+// Firebase Storageインスタンスをエクスポート
+export const storage = getStorage(app);
 
 // 認証状態をローカルストレージに永続化（タブ跨ぎ保持）
 if (typeof window !== 'undefined') {
