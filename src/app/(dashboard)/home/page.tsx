@@ -149,7 +149,18 @@ export default function HomePage() {
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+    <div className="space-y-4">
+      <div className="bg-red-50 border border-red-300 rounded-lg p-4 flex items-start gap-3">
+        <span className="text-red-500 text-lg mt-0.5">⚠</span>
+        <div>
+          <p className="text-sm font-semibold text-red-800">既知の不具合のお知らせ</p>
+          <p className="text-sm text-red-700 mt-1">
+            現在 <span className="font-mono font-semibold">Gemini 3.1 Pro</span> を使用すると文書生成が正常に完了しない不具合が発生しています。お手数ですが、他のモデルをご利用ください。
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
       <div className="lg:col-span-2 space-y-6">
         <div className="rounded-xl shadow-lg overflow-hidden h-[calc(100vh-125px)] min-h-[532px]">
           <PromptListSidebar
@@ -233,6 +244,8 @@ export default function HomePage() {
             <DebugControls debugErrorMode={debugErrorMode} onDebugModeChange={setDebugErrorMode} />
           </div>
         )}
+      </div>
+
       </div>
 
       <PromptModals
