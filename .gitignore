@@ -65,3 +65,7 @@ serviceAccountKey.json
 
 # docs
 /docs
+
+# review-with-ai-agent
+/pre-commit-review-v3
+/measurement-01
