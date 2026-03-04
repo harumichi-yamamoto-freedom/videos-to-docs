@@ -26,6 +26,9 @@ export const FilePromptSelector: React.FC<FilePromptSelectorProps> = ({
       <h3 className="text-lg font-medium text-gray-900">
         ファイルごとのプロンプト設定
       </h3>
+      <p className="text-xs text-amber-600 -mt-2">
+        ※ Gemini 3.1 Pro は処理に時間がかかる場合があります。速度を重視する場合は Gemini 3 Pro もお試しください。
+      </p>
       {selectedFiles.map((fileWithPrompts, fileIndex) => (
         <div key={fileIndex} className="bg-gray-50 border border-gray-200 rounded-lg p-4">
           <p className="text-sm font-medium text-gray-900 mb-3">
