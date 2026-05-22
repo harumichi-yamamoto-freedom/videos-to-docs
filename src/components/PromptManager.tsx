@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { Prompt, getPrompts, createPrompt, updatePrompt, deletePrompt, initializeDefaultPrompts } from '@/lib/prompts';
 import { Plus, Edit2, Trash2, Save, X } from 'lucide-react';
-import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS, getGeminiModelLabel } from '@/constants/geminiModels';
+import { DEFAULT_GEMINI_MODEL, getGeminiModelLabel } from '@/constants/geminiModels';
+import { ModelComboboxSelect } from './ModelComboboxSelect';
 import { createLogger } from '@/lib/logger';
 
 const promptManagerLogger = createLogger('PromptManager');
@@ -129,17 +130,7 @@ export const PromptManager: React.FC = () => {
                         rows={8}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 font-mono text-sm"
                     />
-                    <select
-                        value={editModel}
-                        onChange={(e) => setEditModel(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 bg-white text-sm"
-                    >
-                        {GEMINI_MODEL_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                                {option.label}
-                            </option>
-                        ))}
-                    </select>
+                    <ModelComboboxSelect value={editModel} onChange={setEditModel} className="mb-3" />
                     <div className="flex space-x-2">
                         <button
                             onClick={handleSaveNew}
@@ -186,17 +177,7 @@ export const PromptManager: React.FC = () => {
                                     rows={8}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 font-mono text-sm"
                                 />
-                                <select
-                                    value={editModel}
-                                    onChange={(e) => setEditModel(e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 bg-white text-sm"
-                                >
-                                    {GEMINI_MODEL_OPTIONS.map((option) => (
-                                        <option key={option.value} value={option.value}>
-                                            {option.label}
-                                        </option>
-                                    ))}
-                                </select>
+                                <ModelComboboxSelect value={editModel} onChange={setEditModel} className="mb-3" />
                                 <div className="flex space-x-2">
                                     <button
                                         onClick={() => handleSaveEdit(prompt.id!)}

@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
 import { createPrompt } from '@/lib/prompts';
-import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS, getGeminiModelLabel } from '@/constants/geminiModels';
+import { DEFAULT_GEMINI_MODEL } from '@/constants/geminiModels';
+import { ModelComboboxSelect } from './ModelComboboxSelect';
 import { createLogger } from '@/lib/logger';
 
 const promptCreateLogger = createLogger('PromptCreateModal');
@@ -23,8 +24,6 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
     const [content, setContent] = useState('');
     const [model, setModel] = useState(DEFAULT_GEMINI_MODEL);
     const [saving, setSaving] = useState(false);
-
-    const selectedModelOption = GEMINI_MODEL_OPTIONS.find(option => option.value === model);
 
     if (!isOpen) return null;
 
@@ -116,20 +115,7 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                                 使用するGeminiモデル
                             </label>
-                            <select
-                                value={model}
-                                onChange={(e) => setModel(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                            >
-                                {GEMINI_MODEL_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                            <p className="text-xs text-gray-500 mt-1">
-                                {selectedModelOption?.description || `${getGeminiModelLabel(model)} を使用します`}
-                            </p>
+                            <ModelComboboxSelect value={model} onChange={setModel} />
                         </div>
                     </div>
                 </div>

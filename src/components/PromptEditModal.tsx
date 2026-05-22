@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { Prompt, updatePrompt, deletePrompt } from '@/lib/prompts';
 import { ContentEditModal } from './ContentEditModal';
-import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS, getGeminiModelLabel } from '@/constants/geminiModels';
+import { DEFAULT_GEMINI_MODEL } from '@/constants/geminiModels';
+import { ModelComboboxSelect } from './ModelComboboxSelect';
 
 interface PromptEditModalProps {
     isOpen: boolean;
@@ -83,41 +84,18 @@ export const PromptEditModal: React.FC<PromptEditModalProps> = ({
             warningMessage={warningMessage}
             contentLabel="プロンプト内容"
             renderExtraContent={({ isViewMode, saving }) => {
-                const option = GEMINI_MODEL_OPTIONS.find(opt => opt.value === selectedModel);
-                const displayLabel = getGeminiModelLabel(selectedModel);
-                const isSelectDisabled = !isEditable || saving;
+                const isSelectDisabled = !isEditable || saving || isViewMode;
 
                 return (
                     <div className="space-y-2">
                         <label className="block text-sm font-semibold text-gray-700">
                             使用するGeminiモデル
                         </label>
-                        {isViewMode || !isEditable ? (
-                            <div>
-                                <p className="text-sm text-gray-800">{displayLabel}</p>
-                                {option?.description && (
-                                    <p className="text-xs text-gray-500 mt-1">{option.description}</p>
-                                )}
-                            </div>
-                        ) : (
-                            <>
-                                <select
-                                    value={selectedModel}
-                                    onChange={(e) => setSelectedModel(e.target.value)}
-                                    disabled={isSelectDisabled}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                >
-                                    {GEMINI_MODEL_OPTIONS.map(opt => (
-                                        <option key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </option>
-                                    ))}
-                                </select>
-                                {option?.description && (
-                                    <p className="text-xs text-gray-500">{option.description}</p>
-                                )}
-                            </>
-                        )}
+                        <ModelComboboxSelect
+                            value={selectedModel}
+                            onChange={setSelectedModel}
+                            disabled={isSelectDisabled}
+                        />
                     </div>
                 );
             }}

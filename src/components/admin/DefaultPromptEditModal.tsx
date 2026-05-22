@@ -4,7 +4,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { X, Trash2, Eye, FileText, Check } from 'lucide-react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import { DefaultPromptTemplate } from '@/lib/adminSettings';
-import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS, getGeminiModelLabel } from '@/constants/geminiModels';
+import { DEFAULT_GEMINI_MODEL } from '@/constants/geminiModels';
+import { ModelComboboxSelect } from '../ModelComboboxSelect';
 
 type CodeProps = React.HTMLAttributes<HTMLElement> & { inline?: boolean };
 
@@ -305,36 +306,11 @@ export default function DefaultPromptEditModal({
                         <label className="block text-sm font-semibold text-gray-700 mb-2">
                             使用するGeminiモデル
                         </label>
-                        {isViewMode ? (
-                            <div>
-                                <p className="text-sm text-gray-800">{getGeminiModelLabel(selectedModel)}</p>
-                                {GEMINI_MODEL_OPTIONS.find(opt => opt.value === selectedModel)?.description && (
-                                    <p className="text-xs text-gray-500 mt-1">
-                                        {GEMINI_MODEL_OPTIONS.find(opt => opt.value === selectedModel)?.description}
-                                    </p>
-                                )}
-                            </div>
-                        ) : (
-                            <>
-                                <select
-                                    value={editedModel}
-                                    onChange={(e) => setEditedModel(e.target.value)}
-                                    disabled={saving}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                >
-                                    {GEMINI_MODEL_OPTIONS.map(opt => (
-                                        <option key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </option>
-                                    ))}
-                                </select>
-                                {GEMINI_MODEL_OPTIONS.find(opt => opt.value === editedModel)?.description && (
-                                    <p className="text-xs text-gray-500 mt-1">
-                                        {GEMINI_MODEL_OPTIONS.find(opt => opt.value === editedModel)?.description}
-                                    </p>
-                                )}
-                            </>
-                        )}
+                        <ModelComboboxSelect
+                            value={isViewMode ? selectedModel : editedModel}
+                            onChange={setEditedModel}
+                            disabled={isViewMode || saving}
+                        />
                     </div>
 
                     {/* 警告メッセージ（本文の下） */}
