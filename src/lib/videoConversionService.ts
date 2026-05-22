@@ -214,7 +214,6 @@ export const convertVideoToAudioSegments = async (
                 );
                 // エラー時は共有ファイルを削除
                 try {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     await (converter as any).ffmpeg.deleteFile(sharedInputFileName);
                 } catch {
                     // 削除エラーは無視
@@ -255,7 +254,6 @@ export const convertVideoToAudioSegments = async (
         // 共有入力ファイルを削除
         videoConversionLogger.info(`[ファイル${fileIndex}] 共有入力ファイル削除: ${sharedInputFileName}`);
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (converter as any).ffmpeg.deleteFile(sharedInputFileName);
         } catch {
             // 削除エラーは無視
@@ -299,7 +297,6 @@ export const convertVideoToAudioSegments = async (
         videoConversionLogger.error('音声変換エラー:', error);
         // エラー時は共有ファイルを削除
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (converter as any).ffmpeg.deleteFile(sharedInputFileName);
         } catch {
             // 削除エラーは無視
@@ -372,7 +369,6 @@ export const resumeVideoConversion = async (
                 try {
                     const { fetchFile } = await import('@ffmpeg/util');
                     const fileData = await fetchFile(file.file);
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     await (converter as any).ffmpeg.writeFile(sharedInputFileName, fileData);
                     sharedFileWritten = true;
                     videoConversionLogger.info(`[再開] 共有入力ファイル書き込み完了`);
@@ -527,7 +523,6 @@ export const resumeVideoConversion = async (
         if (sharedFileWritten) {
             videoConversionLogger.info(`[再開] 共有入力ファイル削除: ${sharedInputFileName}`);
             try {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 await (converter as any).ffmpeg.deleteFile(sharedInputFileName);
             } catch {
                 // 削除エラーは無視
@@ -582,7 +577,6 @@ export const resumeVideoConversion = async (
         // エラー時は共有ファイルを削除
         if (sharedFileWritten) {
             try {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 await (converter as any).ffmpeg.deleteFile(sharedInputFileName);
             } catch {
                 // 削除エラーは無視
