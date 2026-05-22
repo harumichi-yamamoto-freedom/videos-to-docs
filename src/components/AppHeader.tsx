@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { useAdmin } from '@/hooks/useAdmin';
-import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User, Edit3 } from 'lucide-react';
+import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User, Edit3, Bell } from 'lucide-react';
 import { signOutNow, deleteAccount } from '@/lib/auth';
 import { getUserDeletionInfo } from '@/lib/accountDeletion';
 import { createLogger } from '@/lib/logger';
@@ -13,8 +13,9 @@ import PasswordChangeModal from './PasswordChangeModal';
 import ReauthModal from './ReauthModal';
 import DisplayNameModal from './DisplayNameModal';
 import { subscribeToPendingSubordinateRelationships } from '@/lib/relationships';
+import { useSystemNotifications } from '@/hooks/useSystemNotifications';
 
-type Tab = 'home' | 'documents' | 'team' | 'admin';
+type Tab = 'home' | 'documents' | 'team' | 'notifications' | 'admin';
 type TeamView = 'subordinates' | 'supervisors';
 const isValidTeamView = (view: string | null): view is TeamView =>
     view === 'subordinates' || view === 'supervisors';
@@ -57,6 +58,13 @@ export const AppHeader: React.FC = () => {
     const effectivePendingCount = user?.uid ? pendingSubordinateCount : 0;
     const pendingBadgeDisplay = effectivePendingCount > 99 ? '99+' : effectivePendingCount;
 
+    // お知らせの未読数（dismiss されていない通知の件数）。未認証時は常に0。
+    const { notifications: systemNotifications, dismissedIds } = useSystemNotifications();
+    const unreadNotificationCount = user?.uid
+        ? systemNotifications.filter(n => !dismissedIds.includes(n.id)).length
+        : 0;
+    const unreadNotificationBadge = unreadNotificationCount > 99 ? '99+' : unreadNotificationCount;
+
     useEffect(() => {
         if (!user?.uid) return;
         const unsubscribe = subscribeToPendingSubordinateRelationships(
@@ -76,6 +84,7 @@ export const AppHeader: React.FC = () => {
     const activeTab: Tab = (() => {
         if (pathname?.startsWith('/documents')) return 'documents';
         if (pathname?.startsWith('/team')) return 'team';
+        if (pathname?.startsWith('/notifications')) return 'notifications';
         if (pathname?.startsWith('/admin')) return 'admin';
         return 'home';
     })();
@@ -94,6 +103,9 @@ export const AppHeader: React.FC = () => {
                 router.push(`/team?${params.toString()}`);
                 return;
             }
+            case 'notifications':
+                router.push('/notifications');
+                return;
             case 'admin':
                 router.push('/admin');
                 return;
@@ -262,6 +274,21 @@ export const AppHeader: React.FC = () => {
                                 </div>
                             )}
                         </div>
+                        <button
+                            onClick={() => navigateToTab('notifications')}
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 relative ${activeTab === 'notifications'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'text-gray-600 hover:bg-gray-100'
+                                }`}
+                        >
+                            <Bell className="w-4 h-4" />
+                            お知らせ
+                            {unreadNotificationCount > 0 && (
+                                <span className="absolute -top-1 -right-1 inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold min-w-[18px] h-[18px] px-1 shadow">
+                                    {unreadNotificationBadge}
+                                </span>
+                            )}
+                        </button>
                         {isAdmin && (
                             <button
                                 onClick={() => navigateToTab('admin')}

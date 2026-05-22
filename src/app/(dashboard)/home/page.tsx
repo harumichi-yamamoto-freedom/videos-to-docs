@@ -8,6 +8,7 @@ import { BulkPromptSelector } from '@/components/BulkPromptSelector';
 import { FilePromptSelector } from '@/components/FilePromptSelector';
 import { PromptListSidebar } from '@/components/PromptListSidebar';
 import { PromptModals } from '@/components/prompts/PromptModals';
+import { NotificationBanner } from '@/components/NotificationBanner';
 import { useFileManagement } from '@/hooks/useFileManagement';
 import { usePromptManagement } from '@/hooks/usePromptManagement';
 import { useVideoProcessing } from '@/hooks/useVideoProcessing';
@@ -150,6 +151,7 @@ export default function HomePage() {
 
   return (
     <div className="space-y-4">
+      <NotificationBanner />
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
       <div className="lg:col-span-2 space-y-6">
         <div className="rounded-xl shadow-lg overflow-hidden h-[calc(100vh-125px)] min-h-[532px]">

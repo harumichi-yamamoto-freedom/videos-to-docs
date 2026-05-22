@@ -3,13 +3,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAdmin } from '@/hooks/useAdmin';
-import { Shield, Settings, Users, BarChart, Music } from 'lucide-react';
+import { Shield, Settings, Users, BarChart, Music, Bell } from 'lucide-react';
 import AuditLogPanel from '@/components/admin/AuditLogPanel';
 import SettingsPanel from '@/components/admin/SettingsPanel';
 import UsersPanel from '@/components/admin/UsersPanel';
 import AudioFilesPanel from '@/components/admin/AudioFilesPanel';
+import SystemNotificationPanel from '@/components/admin/SystemNotificationPanel';
 
-type Tab = 'audit' | 'settings' | 'users' | 'audio';
+type Tab = 'audit' | 'settings' | 'users' | 'audio' | 'notifications';
 
 export interface SettingsPanelRef {
     hasUnsavedChanges: () => boolean;
@@ -144,6 +145,17 @@ export default function AdminPage() {
                             <Music className="w-5 h-5" />
                             <span>音声ファイル</span>
                         </button>
+
+                        <button
+                            onClick={() => handleTabChange('notifications')}
+                            className={`flex items-center gap-2 px-6 py-4 font-medium transition-colors ${activeTab === 'notifications'
+                                ? 'border-b-2 border-purple-600 text-purple-600 bg-purple-50'
+                                : 'text-gray-600 hover:bg-gray-50'
+                                }`}
+                        >
+                            <Bell className="w-5 h-5" />
+                            <span>お知らせ</span>
+                        </button>
                     </div>
                 </div>
 
@@ -153,6 +165,7 @@ export default function AdminPage() {
                     {activeTab === 'settings' && <SettingsPanel ref={settingsPanelRef} />}
                     {activeTab === 'users' && <UsersPanel />}
                     {activeTab === 'audio' && <AudioFilesPanel />}
+                    {activeTab === 'notifications' && <SystemNotificationPanel />}
                 </div>
             </div>
         </div>

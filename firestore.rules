@@ -154,6 +154,29 @@ service cloud.firestore {
       allow read: if isSuperuser();
     }
 
+    // systemNotifications コレクション（システムからのお知らせ）
+    match /systemNotifications/{notificationId} {
+      // 読み取り: 管理者は全件 / 一般は公開中（published=true）のみ
+      // 旧データには published フィールドが無いため、欠落時は公開扱い（後方互換）
+      allow read: if isSuperuser()
+        || !('published' in resource.data)
+        || resource.data.published == true;
+
+      // 作成: 管理者のみ
+      allow create: if isSuperuser()
+        && request.resource.data.publishedBy == request.auth.uid
+        && request.resource.data.severity in ['info', 'critical'];
+
+      // 更新・削除: 管理者のみ
+      allow update, delete: if isSuperuser();
+    }
+
+    // notificationDismissals コレクション（ユーザーごとの dismiss 状態）
+    match /notificationDismissals/{userId} {
+      // 本人のみ read/write
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
     // relationships コレクション
     match /relationships/{relationshipId} {
       allow get, list: if isRelationshipParticipant();
