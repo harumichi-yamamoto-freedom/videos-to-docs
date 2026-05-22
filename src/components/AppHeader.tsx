@@ -54,13 +54,11 @@ export const AppHeader: React.FC = () => {
     }, []);
 
     const currentTeamView = isValidTeamView(searchParams.get('view')) ? (searchParams.get('view') as TeamView) : 'subordinates';
-    const pendingBadgeDisplay = pendingSubordinateCount > 99 ? '99+' : pendingSubordinateCount;
+    const effectivePendingCount = user?.uid ? pendingSubordinateCount : 0;
+    const pendingBadgeDisplay = effectivePendingCount > 99 ? '99+' : effectivePendingCount;
 
     useEffect(() => {
-        if (!user?.uid) {
-            setPendingSubordinateCount(0);
-            return;
-        }
+        if (!user?.uid) return;
         const unsubscribe = subscribeToPendingSubordinateRelationships(
             user.uid,
             (relationships) => {

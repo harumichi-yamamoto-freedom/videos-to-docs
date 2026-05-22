@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Prompt, updatePrompt, deletePrompt } from '@/lib/prompts';
 import { ContentEditModal } from './ContentEditModal';
 import { DEFAULT_GEMINI_MODEL } from '@/constants/geminiModels';
@@ -22,12 +22,13 @@ export const PromptEditModal: React.FC<PromptEditModalProps> = ({
     onDelete,
 }) => {
     const [selectedModel, setSelectedModel] = useState(prompt?.model || DEFAULT_GEMINI_MODEL);
-
-    useEffect(() => {
-        if (prompt && isOpen) {
-            setSelectedModel(prompt.model || DEFAULT_GEMINI_MODEL);
-        }
-    }, [prompt, isOpen]);
+    // Adjusting state during render: prompt が切り替わったら selectedModel を新しい prompt のモデルにリセット。
+    // useEffect 内での setState は React 19 で警告となるため、レンダー中比較で同期させる。
+    const [lastPromptId, setLastPromptId] = useState(prompt?.id);
+    if (prompt?.id !== lastPromptId) {
+        setLastPromptId(prompt?.id);
+        setSelectedModel(prompt?.model || DEFAULT_GEMINI_MODEL);
+    }
 
     if (!prompt) return null;
 
