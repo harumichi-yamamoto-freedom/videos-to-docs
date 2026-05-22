@@ -81,52 +81,33 @@ export const NotificationDetailModal: React.FC<NotificationDetailModalProps> = (
                 onClick={e => e.stopPropagation()}
             >
                 {/* ヘッダー */}
-                <div className="flex items-center justify-between p-6 border-b bg-gradient-to-r from-purple-50 to-pink-50">
-                    <div className="flex items-center flex-1 mr-4 space-x-2 min-w-0">
-                        <Icon className={`w-6 h-6 flex-shrink-0 ${display.iconColor}`} />
-                        <h2 className="text-xl font-bold text-gray-900 truncate">
-                            {notification.title}
-                        </h2>
+                <div className="flex items-start justify-between p-6 border-b bg-gradient-to-r from-purple-50 to-pink-50">
+                    <div className="flex items-start flex-1 mr-4 gap-3 min-w-0">
+                        <Icon className={`w-6 h-6 flex-shrink-0 mt-0.5 ${display.iconColor}`} />
+                        <div className="min-w-0">
+                            <h2 className="text-xl font-bold text-gray-900 truncate">
+                                {notification.title}
+                            </h2>
+                            <div className="text-xs text-gray-500 mt-1">
+                                {notification.publishedAt.toLocaleString('ja-JP')}
+                            </div>
+                        </div>
                     </div>
                     <button
                         type="button"
                         onClick={onClose}
-                        className="p-2 hover:bg-white rounded-lg transition-colors shadow-sm"
+                        className="p-2 hover:bg-white rounded-lg transition-colors shadow-sm flex-shrink-0"
                         title="閉じる"
                     >
                         <X className="w-5 h-5 text-gray-600" />
                     </button>
                 </div>
 
-                {/* コンテンツ */}
-                <div className="flex-1 overflow-y-auto p-6 bg-gray-50 space-y-6">
-                    <div>
-                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                            本文
-                        </label>
-                        <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
-                            {notification.body}
-                        </p>
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                            種別
-                        </label>
-                        <div className="flex items-center gap-2 text-sm text-gray-800">
-                            <Icon className={`w-4 h-4 ${display.iconColor}`} />
-                            <span>{display.label}</span>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                            公開日時
-                        </label>
-                        <div className="text-sm text-gray-700">
-                            {notification.publishedAt.toLocaleString('ja-JP')}
-                        </div>
-                    </div>
+                {/* 本文 */}
+                <div className="flex-1 overflow-y-auto p-6 bg-white">
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+                        {notification.body}
+                    </p>
                 </div>
 
                 {/* フッター */}
