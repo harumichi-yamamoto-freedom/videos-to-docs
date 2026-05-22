@@ -23,7 +23,6 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/jszip": "^3.4.0",
     "@types/node": "^20",
