@@ -69,3 +69,6 @@ serviceAccountKey.json
 # review-with-ai-agent
 /pre-commit-review-v3
 /measurement-01
+
+# Claude Code
+.claude/
