@@ -2,6 +2,10 @@
 @import "./pdf-themes/minimal.css";
 @import "./pdf-themes/classic.css";
 @import "./pdf-themes/rich.css";
+@import "./pdf-themes/sumi.css";
+@import "./pdf-themes/navy.css";
+@import "./pdf-themes/amber.css";
+@import "./pdf-themes/sakura.css";
 
 /* PDF は描画前に計測するため、印刷メディア外でも専用フォントを確定させる。 */
 :where(.pdf-print-root, .pdf-preview) .pdf-document {
