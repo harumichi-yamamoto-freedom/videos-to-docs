@@ -6,13 +6,13 @@
   --pdf-hairline: #deded9;
   --pdf-wash: #f5f5f2;
   --pdf-sans:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     sans-serif;
   --pdf-mono:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     monospace;
   --pdf-code-background: var(--pdf-wash);
   --pdf-code-rule: var(--pdf-rule);

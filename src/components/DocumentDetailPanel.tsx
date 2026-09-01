@@ -11,6 +11,13 @@ import { useDocumentPrint } from '@/hooks/useDocumentPrint';
 import { getGeminiModelLabel } from '../constants/geminiModels';
 import { THINKING_LEVELS } from '../constants/geminiThinking';
 import {
+    DEFAULT_PDF_FONT_ID,
+    normalizePdfFontId,
+    PDF_FONTS,
+    resolvePdfFontId,
+    type PdfFontId,
+} from '../constants/pdfFonts';
+import {
     DEFAULT_PDF_THEME_ID,
     normalizePdfThemeId,
     PDF_THEMES,
@@ -20,6 +27,7 @@ import {
 const documentDetailLogger = createLogger('DocumentDetailPanel');
 const PDF_INCLUDE_METADATA_STORAGE_KEY = 'pdfIncludeMetadata';
 const PDF_THEME_STORAGE_KEY = 'pdfTheme';
+const PDF_FONT_STORAGE_KEY = 'pdfFont';
 
 function getThinkingLevelLabel(level: string): string {
     const normalizedLevel = level.trim().toLowerCase();
@@ -49,6 +57,7 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
     const [saving, setSaving] = useState(false);
     const [includeMetadata, setIncludeMetadata] = useState(false);
     const [pdfTheme, setPdfTheme] = useState<PdfThemeId>(DEFAULT_PDF_THEME_ID);
+    const [pdfFont, setPdfFont] = useState<PdfFontId>(DEFAULT_PDF_FONT_ID);
     const { printPdf, isPreparing } = useDocumentPrint(document);
 
     const isEditable = !!onContentUpdate;
@@ -87,6 +96,18 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
         }
     }, []);
 
+    useEffect(() => {
+        try {
+            setPdfFont(
+                normalizePdfFontId(
+                    window.localStorage.getItem(PDF_FONT_STORAGE_KEY),
+                ),
+            );
+        } catch {
+            setPdfFont(DEFAULT_PDF_FONT_ID);
+        }
+    }, []);
+
     if (!document) {
         return (
             <div className="bg-white rounded-xl shadow-lg p-10 h-full flex flex-col items-center justify-center text-center text-gray-500">
@@ -98,6 +119,10 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
     }
 
     const hasChanges = editedTitle !== document.title || editedContent !== document.text;
+    const resolvedPdfFont = resolvePdfFontId(pdfFont, pdfTheme);
+    const autoFontLabel =
+        PDF_FONTS.find(font => font.id === resolvePdfFontId('auto', pdfTheme))
+            ?.label.split('（')[0] ?? '';
     const canPrintPdf = isViewMode && !saving && !isPreparing;
     const pdfButtonTitle = saving
         ? '保存完了後に PDF 出力できます'
@@ -137,6 +162,19 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
 
         try {
             window.localStorage.setItem(PDF_THEME_STORAGE_KEY, nextTheme);
+        } catch {
+            // localStorage が利用できない環境でも、現在の選択はそのまま反映する。
+        }
+    };
+
+    const handlePdfFontChange = (
+        event: React.ChangeEvent<HTMLSelectElement>,
+    ): void => {
+        const nextFont = normalizePdfFontId(event.target.value);
+        setPdfFont(nextFont);
+
+        try {
+            window.localStorage.setItem(PDF_FONT_STORAGE_KEY, nextFont);
         } catch {
             // localStorage が利用できない環境でも、現在の選択はそのまま反映する。
         }
@@ -304,6 +342,28 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                                             ))}
                                         </select>
                                     </label>
+                                    <label className="flex items-center gap-1.5">
+                                        <span>フォント</span>
+                                        <select
+                                            aria-label="PDF フォント"
+                                            value={pdfFont}
+                                            onChange={handlePdfFontChange}
+                                            disabled={isPreparing}
+                                            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 shadow-sm focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-400 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {PDF_FONTS.map(font => (
+                                                <option
+                                                    key={font.id}
+                                                    value={font.id}
+                                                    title={font.description}
+                                                >
+                                                    {font.id === 'auto'
+                                                        ? `テーマおまかせ（${autoFontLabel}）`
+                                                        : font.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
                                 </div>
                                 <p className="text-xs text-gray-400 text-right">
                                     ※改ページ位置はPDF出力時のみ反映されます
@@ -319,7 +379,9 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
 
             <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
                 {isViewMode ? (
-                    <div className={`pdf-preview pdf-theme-${pdfTheme} shadow`}>
+                    <div
+                        className={`pdf-preview pdf-theme-${pdfTheme} pdf-font-${resolvedPdfFont} shadow`}
+                    >
                         <article className="pdf-document">
                             {includeMetadata && (
                                 <PdfDocumentHeader document={document} />
@@ -376,6 +438,7 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                 active={isPreparing}
                 includeMetadata={includeMetadata}
                 theme={pdfTheme}
+                font={pdfFont}
             />
         </div>
     );

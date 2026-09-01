@@ -6,6 +6,11 @@ import type { Transcription } from '@/lib/firestore';
 import { MarkdownDocument } from '@/components/MarkdownDocument';
 import { PdfDocumentHeader } from './PdfDocumentHeader';
 import {
+    normalizePdfFontId,
+    resolvePdfFontId,
+    type PdfFontId,
+} from '../constants/pdfFonts';
+import {
     normalizePdfThemeId,
     type PdfThemeId,
 } from '../constants/pdfThemes';
@@ -15,6 +20,7 @@ export type DocumentPrintPortalProps = {
     active: boolean;
     includeMetadata: boolean;
     theme?: PdfThemeId;
+    font?: PdfFontId;
 };
 
 export function DocumentPrintPortal({
@@ -22,15 +28,19 @@ export function DocumentPrintPortal({
     active,
     includeMetadata,
     theme,
+    font,
 }: DocumentPrintPortalProps): React.ReactPortal | null {
     if (!active) {
         return null;
     }
 
     const resolvedTheme = normalizePdfThemeId(theme);
+    const resolvedFont = resolvePdfFontId(normalizePdfFontId(font), resolvedTheme);
 
     return createPortal(
-        <div className={`pdf-print-root pdf-theme-${resolvedTheme}`}>
+        <div
+            className={`pdf-print-root pdf-theme-${resolvedTheme} pdf-font-${resolvedFont}`}
+        >
             <article className="pdf-document">
                 {includeMetadata && (
                     <PdfDocumentHeader document={document} />

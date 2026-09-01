@@ -27,7 +27,7 @@
   color: var(--pdf-amber-ink);
   background: var(--pdf-amber-paper);
   font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -67,7 +67,7 @@
   background: var(--pdf-amber-sand);
   color: var(--pdf-amber-ink);
   font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -167,7 +167,7 @@
   :is(h1, h2, h3, h4, h5, h6) {
   color: var(--pdf-amber-ink);
   font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -546,7 +546,7 @@
   .pdf-markdown code {
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;
@@ -565,7 +565,7 @@
   color: var(--pdf-amber-ink);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;

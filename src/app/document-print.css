@@ -11,13 +11,47 @@
 
 /* PDF は描画前に計測するため、印刷メディア外でも専用フォントを確定させる。 */
 :where(.pdf-print-root, .pdf-preview) .pdf-document {
-  font-family:
+  font-family: var(
+    --pdf-font-body,
     var(--font-noto-sans-jp, "Noto Sans JP"),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
     Meiryo,
-    sans-serif;
+    sans-serif
+  );
+}
+
+/* フォント選択: pdf-font-* が --pdf-font-body を決める。
+   'auto' はコンポーネント側でテーマ推奨の具象 ID へ解決済み(resolvePdfFontId)。 */
+:where(.pdf-print-root.pdf-font-gothic, .pdf-preview.pdf-font-gothic) {
+  --pdf-font-body: var(--font-noto-sans-jp, "Noto Sans JP"), "Hiragino Sans",
+    "Yu Gothic", YuGothic, Meiryo, sans-serif;
+}
+
+:where(.pdf-print-root.pdf-font-mincho, .pdf-preview.pdf-font-mincho) {
+  --pdf-font-body: var(--font-noto-serif-jp, "Noto Serif JP"),
+    "Hiragino Mincho ProN", "Yu Mincho", YuMincho, serif;
+}
+
+:where(.pdf-print-root.pdf-font-zen, .pdf-preview.pdf-font-zen) {
+  --pdf-font-body: var(--font-zen-kaku-gothic, "Zen Kaku Gothic New"),
+    "Hiragino Sans", "Yu Gothic", YuGothic, Meiryo, sans-serif;
+}
+
+:where(.pdf-print-root.pdf-font-shippori, .pdf-preview.pdf-font-shippori) {
+  --pdf-font-body: var(--font-shippori-mincho, "Shippori Mincho"),
+    "Hiragino Mincho ProN", "Yu Mincho", YuMincho, serif;
+}
+
+:where(.pdf-print-root.pdf-font-biz, .pdf-preview.pdf-font-biz) {
+  --pdf-font-body: var(--font-biz-udpgothic, "BIZ UDPGothic"), "Hiragino Sans",
+    "Yu Gothic", YuGothic, Meiryo, sans-serif;
+}
+
+:where(.pdf-print-root.pdf-font-maru, .pdf-preview.pdf-font-maru) {
+  --pdf-font-body: var(--font-zen-maru-gothic, "Zen Maru Gothic"),
+    "Hiragino Maru Gothic ProN", "Hiragino Sans", "Yu Gothic", sans-serif;
 }
 
 /* hidden 属性は Tailwind Preflight と競合し得るため使用しない。 */

@@ -36,7 +36,7 @@
   color: var(--pdf-rich-ink);
   background: var(--pdf-rich-paper);
   font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -83,7 +83,7 @@
   border: 0;
   color: #ffffff;
   font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -178,7 +178,7 @@
 :where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h5,
 :where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h6 {
   font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -595,7 +595,7 @@
   color: var(--pdf-rich-plum);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;
@@ -613,7 +613,7 @@
   color: #ffffff;
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;

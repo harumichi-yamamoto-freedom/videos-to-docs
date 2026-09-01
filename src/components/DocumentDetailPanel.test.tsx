@@ -160,6 +160,28 @@ function findPdfThemeSelect(
     return null;
 }
 
+function findPdfFontSelect(
+    node: React.ReactNode,
+): React.ReactElement<SelectProps> | null {
+    if (!React.isValidElement<SelectProps & { children?: React.ReactNode }>(node)) {
+        return null;
+    }
+
+    if (node.type === 'select' && node.props['aria-label'] === 'PDF フォント') {
+        return node as React.ReactElement<SelectProps>;
+    }
+
+    for (const child of React.Children.toArray(node.props.children)) {
+        const select = findPdfFontSelect(child);
+
+        if (select) {
+            return select;
+        }
+    }
+
+    return null;
+}
+
 function findPrintPortal(
     node: React.ReactNode,
 ): React.ReactElement<DocumentPrintPortalProps> | null {
@@ -238,15 +260,19 @@ function findPdfDocumentHeader(
 function mockPanelState({
     includeMetadata = false,
     pdfTheme = 'editorial',
+    pdfFont = 'auto',
     saving = false,
     setIncludeMetadata = vi.fn(),
     setPdfTheme = vi.fn(),
+    setPdfFont = vi.fn(),
 }: {
     includeMetadata?: boolean;
     pdfTheme?: string;
+    pdfFont?: string;
     saving?: boolean;
     setIncludeMetadata?: ReturnType<typeof vi.fn>;
     setPdfTheme?: ReturnType<typeof vi.fn>;
+    setPdfFont?: ReturnType<typeof vi.fn>;
 } = {}): void {
     vi.mocked(useState)
         .mockImplementationOnce(() => [true, vi.fn()])
@@ -254,7 +280,8 @@ function mockPanelState({
         .mockImplementationOnce(() => [document.text, vi.fn()])
         .mockImplementationOnce(() => [saving, vi.fn()])
         .mockImplementationOnce(() => [includeMetadata, setIncludeMetadata])
-        .mockImplementationOnce(() => [pdfTheme, setPdfTheme]);
+        .mockImplementationOnce(() => [pdfTheme, setPdfTheme])
+        .mockImplementationOnce(() => [pdfFont, setPdfFont]);
 }
 
 describe('DocumentDetailPanel', () => {
@@ -438,7 +465,7 @@ describe('DocumentDetailPanel', () => {
         expect(select).not.toBeNull();
         expect(select?.props.value).toBe('editorial');
         expect(findPdfPreview(tree)?.props.className).toBe(
-            'pdf-preview pdf-theme-editorial shadow',
+            'pdf-preview pdf-theme-editorial pdf-font-gothic shadow',
         );
         expect(portal?.props.theme).toBe('editorial');
     });
@@ -463,9 +490,69 @@ describe('DocumentDetailPanel', () => {
 
         const selectedTree = DocumentDetailPanel({ document }) as React.ReactNode;
         expect(findPdfPreview(selectedTree)?.props.className).toBe(
-            'pdf-preview pdf-theme-minimal shadow',
+            'pdf-preview pdf-theme-minimal pdf-font-zen shadow',
         );
         expect(findPrintPortal(selectedTree)?.props.theme).toBe('minimal');
+    });
+
+    it('PDF フォントは auto を既定とし、テーマ推奨へ解決して画面プレビューに反映する', () => {
+        mockPanelState({ pdfTheme: 'sumi' });
+
+        const tree = DocumentDetailPanel({ document }) as React.ReactNode;
+        const select = findPdfFontSelect(tree);
+        const portal = findPrintPortal(tree);
+
+        expect(useState).toHaveBeenNthCalledWith(7, 'auto');
+        expect(select).not.toBeNull();
+        expect(select?.props.value).toBe('auto');
+        expect(findPdfPreview(tree)?.props.className).toBe(
+            'pdf-preview pdf-theme-sumi pdf-font-shippori shadow',
+        );
+        expect(portal?.props.font).toBe('auto');
+    });
+
+    it('PDF フォントを選択すると保存し、画面プレビューと portal に即時反映する', () => {
+        const setPdfFont = vi.fn();
+        mockPanelState({ setPdfFont });
+
+        const initialTree = DocumentDetailPanel({ document }) as React.ReactNode;
+        const select = findPdfFontSelect(initialTree);
+
+        expect(select).not.toBeNull();
+        select?.props.onChange({
+            target: { value: 'mincho' },
+        } as React.ChangeEvent<HTMLSelectElement>);
+
+        expect(setPdfFont).toHaveBeenCalledWith('mincho');
+        expect(localStorageSetItem).toHaveBeenCalledWith('pdfFont', 'mincho');
+
+        vi.mocked(useState).mockReset();
+        mockPanelState({ pdfFont: 'mincho' });
+
+        const selectedTree = DocumentDetailPanel({ document }) as React.ReactNode;
+        expect(findPdfPreview(selectedTree)?.props.className).toBe(
+            'pdf-preview pdf-theme-editorial pdf-font-mincho shadow',
+        );
+        expect(findPrintPortal(selectedTree)?.props.font).toBe('mincho');
+    });
+
+    it('不正な保存済み PDF フォントは auto にフォールバックする', () => {
+        const setPdfFont = vi.fn();
+        localStorageGetItem.mockImplementation(key => (
+            key === 'pdfFont' ? 'unknown-font' : null
+        ));
+        mockPanelState({ setPdfFont });
+
+        DocumentDetailPanel({ document });
+
+        for (const [effect, dependencies] of vi.mocked(useEffect).mock.calls) {
+            if (Array.isArray(dependencies) && dependencies.length === 0) {
+                effect();
+            }
+        }
+
+        expect(localStorageGetItem).toHaveBeenCalledWith('pdfFont');
+        expect(setPdfFont).toHaveBeenCalledWith('auto');
     });
 
     it('画面プレビューの改ページ位置に関する注記を表示する', () => {
@@ -555,7 +642,28 @@ describe('DocumentPrintPortal PDF テーマ', () => {
             theme: 'minimal',
         }) as unknown as React.ReactElement<{ className: string }>;
 
-        expect(portal.props.className).toBe('pdf-print-root pdf-theme-minimal');
+        expect(portal.props.className).toBe(
+            'pdf-print-root pdf-theme-minimal pdf-font-zen',
+        );
+    });
+
+    it('明示フォント指定はテーマ推奨より優先してルート class に反映する', async () => {
+        const { DocumentPrintPortal: ActualDocumentPrintPortal } =
+            await vi.importActual<typeof import('./DocumentPrintPortal')>(
+                './DocumentPrintPortal',
+            );
+
+        const portal = ActualDocumentPrintPortal({
+            document,
+            active: true,
+            includeMetadata: false,
+            theme: 'minimal',
+            font: 'mincho',
+        }) as unknown as React.ReactElement<{ className: string }>;
+
+        expect(portal.props.className).toBe(
+            'pdf-print-root pdf-theme-minimal pdf-font-mincho',
+        );
     });
 
     it('テーマ未指定時は editorial のルート class にフォールバックする', async () => {
@@ -570,7 +678,9 @@ describe('DocumentPrintPortal PDF テーマ', () => {
             includeMetadata: false,
         }) as unknown as React.ReactElement<{ className: string }>;
 
-        expect(portal.props.className).toBe('pdf-print-root pdf-theme-editorial');
+        expect(portal.props.className).toBe(
+            'pdf-print-root pdf-theme-editorial pdf-font-gothic',
+        );
     });
 
     it('文書情報に解決済みモデル名・デフォルト選択の注記・思考レベルを表示する', async () => {

@@ -14,7 +14,7 @@
   color: var(--classic-ink);
   background: #ffffff;
   font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     var(--font-geist-sans, "Geist"),
     "Yu Gothic",
     Meiryo,
@@ -251,7 +251,7 @@
   color: var(--classic-ink);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;
@@ -273,7 +273,7 @@
   color: var(--classic-ink);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     monospace;
   font-size: 0.9em;
   line-height: 1.25;

@@ -13,7 +13,7 @@
   --pdf-code: #ece8f1;
   --pdf-code-ink: #292430;
   --pdf-sans:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -21,7 +21,7 @@
     sans-serif;
   --pdf-mono:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;

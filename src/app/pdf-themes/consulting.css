@@ -19,7 +19,7 @@
   --consult-wash-soft: #f8f9f9;
   --consult-paper: #ffffff;
   --consult-sans:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -27,7 +27,7 @@
     sans-serif;
   --consult-mono:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;

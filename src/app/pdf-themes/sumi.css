@@ -14,7 +14,7 @@
   --sumi-shu-deep: #8e3d33;
   --sumi-shu-quiet: #9d4c42;
   --sumi-sans:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -22,7 +22,7 @@
     sans-serif;
   --sumi-mono:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;
