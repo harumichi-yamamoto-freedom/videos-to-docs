@@ -268,7 +268,7 @@ export const AppHeader: React.FC = () => {
                             >
                                 <Music className="h-6 w-6 text-white" />
                             </span>
-                            <span className="min-w-0 truncate text-xl font-bold text-text-primary sm:text-2xl">
+                            <span className="whitespace-nowrap text-xl font-bold text-text-primary sm:text-2xl">
                                 商談くんミニ
                             </span>
                             <span className="hidden shrink-0 rounded-full border border-brand-border bg-brand-subtle px-2 py-0.5 text-xs font-bold text-brand sm:inline">

@@ -425,7 +425,7 @@ export function DocumentDetailPanelView({
             >
                 <FileTextIcon className="w-12 h-12 mb-4 text-purple-300" />
                 <p className="text-sm font-medium">文書が選択されていません</p>
-                <p className="text-xs mt-2 text-gray-400">左側の一覧から表示したい文書を選択してください</p>
+                <p className="text-xs mt-2 text-muted">一覧から表示したい文書を選択してください</p>
             </div>
         );
     }
