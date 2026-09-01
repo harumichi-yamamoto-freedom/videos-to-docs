@@ -2,7 +2,10 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { getGeminiModelLabel } from '@/constants/geminiModels';
+import {
+    canonicalizeGeminiModel,
+    getGeminiModelLabel,
+} from '@/constants/geminiModels';
 import { ModelComparisonTable } from './ModelComparisonTable';
 
 interface ModelComboboxSelectProps {
@@ -10,6 +13,21 @@ interface ModelComboboxSelectProps {
     onChange: (value: string) => void;
     disabled?: boolean;
     className?: string;
+}
+
+export interface ModelComboboxKeyTransition {
+    isOpen: boolean;
+    shouldConsume: boolean;
+}
+
+export function getModelComboboxKeyTransition(
+    isOpen: boolean,
+    key: string,
+): ModelComboboxKeyTransition {
+    if (isOpen && key === 'Escape') {
+        return { isOpen: false, shouldConsume: true };
+    }
+    return { isOpen, shouldConsume: false };
 }
 
 // 比較表で直接モデルを選べるコンボボックス。
@@ -32,15 +50,10 @@ export const ModelComboboxSelect: React.FC<ModelComboboxSelectProps> = ({
                 setOpen(false);
             }
         };
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') setOpen(false);
-        };
 
         document.addEventListener('mousedown', handlePointerDown);
-        document.addEventListener('keydown', handleKeyDown);
         return () => {
             document.removeEventListener('mousedown', handlePointerDown);
-            document.removeEventListener('keydown', handleKeyDown);
         };
     }, [open]);
 
@@ -49,11 +62,23 @@ export const ModelComboboxSelect: React.FC<ModelComboboxSelectProps> = ({
         setOpen(false);
     };
 
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        const transition = getModelComboboxKeyTransition(open, event.key);
+        if (!transition.shouldConsume) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(transition.isOpen);
+    };
+
+    const canonicalValue = canonicalizeGeminiModel(value);
+    const selectedModelLabel = getGeminiModelLabel(canonicalValue);
+
     return (
-        <div ref={containerRef} className={className}>
+        <div ref={containerRef} className={className} onKeyDown={handleKeyDown}>
             {disabled ? (
                 <div>
-                    <p className="text-sm text-gray-800">{getGeminiModelLabel(value)}</p>
+                    <p className="text-sm text-gray-800">{selectedModelLabel}</p>
                     <button
                         type="button"
                         onClick={() => setOpen(o => !o)}
@@ -72,14 +97,14 @@ export const ModelComboboxSelect: React.FC<ModelComboboxSelectProps> = ({
                     aria-expanded={open}
                     className="w-full inline-flex items-center justify-between gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-800 bg-white border border-gray-300 hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400"
                 >
-                    <span className="text-left truncate">{getGeminiModelLabel(value)}</span>
+                    <span className="text-left truncate">{selectedModelLabel}</span>
                     <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`} />
                 </button>
             )}
             {open && (
                 <div className="mt-2">
                     <ModelComparisonTable
-                        selectedModel={value}
+                        selectedModel={canonicalValue}
                         onSelect={disabled ? undefined : handleSelect}
                     />
                 </div>

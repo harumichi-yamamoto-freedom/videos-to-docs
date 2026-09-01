@@ -241,11 +241,9 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                                         {prompt.content.substring(0, 100)}
                                         {prompt.content.length > 100 ? '...' : ''}
                                     </p>
-                                    {prompt.model && (
-                                        <p className="text-xs text-gray-400 mt-1">
-                                            Geminiモデル: {getGeminiModelLabel(prompt.model)}
-                                        </p>
-                                    )}
+                                    <p className="text-xs text-gray-400 mt-1">
+                                        Geminiモデル: {getGeminiModelLabel(prompt.model)}
+                                    </p>
                                 </div>
                             </div>
                         ))}

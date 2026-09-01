@@ -18,7 +18,10 @@ import { getCurrentUserId, getOwnerType } from './auth';
 import { logAudit } from './auditLog';
 import { validatePromptSize, getDefaultPrompts } from './adminSettings';
 import { updateUserStats } from './userManagement';
-import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
+import {
+    canonicalizeGeminiModel,
+    GEMINI_DEFAULT_MODEL_SENTINEL,
+} from '../constants/geminiModels';
 import { createLogger } from './logger';
 
 const promptsLogger = createLogger('prompts');
@@ -61,7 +64,7 @@ async function ensureDefaultPromptExists(
     await setDoc(promptRef, {
         name: template.name,
         content: template.content,
-        model: template.model || DEFAULT_GEMINI_MODEL,
+        model: canonicalizeGeminiModel(template.model),
         isDefault: true,
         ownerType,
         ownerId,
@@ -194,7 +197,7 @@ async function findExistingPromptsByBaseName(
                     id: docSnapshot.id,
                     name: data.name,
                     content: data.content,
-                    model: data.model || DEFAULT_GEMINI_MODEL,
+                    model: canonicalizeGeminiModel(data.model),
                     isDefault: data.isDefault || false,
                     ownerType: ownerType as 'guest' | 'user',
                     ownerId: ownerId,
@@ -279,7 +282,7 @@ async function addDefaultPrompt(
     await setDoc(promptRef, {
         name: newName,
         content: template.content,
-        model: template.model || DEFAULT_GEMINI_MODEL,
+        model: canonicalizeGeminiModel(template.model),
         isDefault: true,
         ownerType,
         ownerId,
@@ -335,7 +338,7 @@ export async function createPrompt(
     name: string,
     content: string,
     isDefault: boolean = false,
-    model: string = DEFAULT_GEMINI_MODEL
+    model: string = GEMINI_DEFAULT_MODEL_SENTINEL
 ): Promise<string> {
     const userId = getCurrentUserId();
     const ownerType = getOwnerType();
@@ -433,7 +436,7 @@ export async function getPrompts(): Promise<Prompt[]> {
                 id: docSnapshot.id,
                 name: data.name,
                 content: data.content,
-                model: data.model || DEFAULT_GEMINI_MODEL,
+                model: canonicalizeGeminiModel(data.model),
                 isDefault: data.isDefault || false,
                 ownerType: ownerType as 'guest' | 'user',
                 ownerId: ownerId,
@@ -471,7 +474,7 @@ export async function getPromptsByOwnerId(ownerId: string, limitCount: number = 
                 id: docSnapshot.id,
                 name: data.name,
                 content: data.content,
-                model: data.model || DEFAULT_GEMINI_MODEL,
+                model: canonicalizeGeminiModel(data.model),
                 isDefault: data.isDefault || false,
                 ownerType: data.ownerType || 'user',
                 ownerId: data.ownerId || ownerId,
@@ -592,4 +595,3 @@ export async function syncGuestDefaultPrompts(): Promise<void> {
         throw new Error('ゲストデフォルトプロンプトの同期に失敗しました');
     }
 }
-

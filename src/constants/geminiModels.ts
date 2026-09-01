@@ -47,6 +47,30 @@ export interface GeminiModelOption {
 }
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash';
+export const GEMINI_DEFAULT_MODEL_SENTINEL = 'default';
+
+/**
+ * Firestore/UI で扱うモデル値を canonical な保存表現へ揃える。
+ * 具体的なモデル ID は未知の値や前後空白も含め、入力を加工しない。
+ */
+export function canonicalizeGeminiModel(model?: string | null): string {
+    if (model == null) {
+        return GEMINI_DEFAULT_MODEL_SENTINEL;
+    }
+
+    const normalizedModel = model.trim();
+    if (!normalizedModel || normalizedModel === GEMINI_DEFAULT_MODEL_SENTINEL) {
+        return GEMINI_DEFAULT_MODEL_SENTINEL;
+    }
+    return model;
+}
+
+export function resolveGeminiModel(model?: string | null): string {
+    const canonicalModel = canonicalizeGeminiModel(model);
+    return canonicalModel === GEMINI_DEFAULT_MODEL_SENTINEL
+        ? DEFAULT_GEMINI_MODEL
+        : canonicalModel;
+}
 
 // 配列順 = ドロップダウン・比較表での表示順。新しい世代のモデルを上に並べる。
 export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
@@ -191,8 +215,14 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
 
 const GEMINI_MODEL_MAP = new Map(GEMINI_MODEL_OPTIONS.map(option => [option.value, option]));
 
-export function getGeminiModelLabel(model: string): string {
-    return GEMINI_MODEL_MAP.get(model)?.label || model;
+export function getGeminiModelLabel(model?: string | null): string {
+    const canonicalModel = canonicalizeGeminiModel(model);
+    if (canonicalModel === GEMINI_DEFAULT_MODEL_SENTINEL) {
+        const defaultModelLabel = GEMINI_MODEL_MAP.get(DEFAULT_GEMINI_MODEL)?.label
+            ?? DEFAULT_GEMINI_MODEL;
+        return `デフォルト（${defaultModelLabel}）`;
+    }
+    return GEMINI_MODEL_MAP.get(canonicalModel)?.label || canonicalModel;
 }
 
 const PRICE_FORMATTER = new Intl.NumberFormat('en-US', {
@@ -203,7 +233,7 @@ const PRICE_FORMATTER = new Intl.NumberFormat('en-US', {
 });
 
 export function getGeminiPricingLabelShort(model: string): string | undefined {
-    const pricing = GEMINI_MODEL_MAP.get(model)?.pricing;
+    const pricing = GEMINI_MODEL_MAP.get(resolveGeminiModel(model))?.pricing;
     if (!pricing) return undefined;
     return `入力 ${PRICE_FORMATTER.format(pricing.inputPerMTok)} / 出力 ${PRICE_FORMATTER.format(pricing.outputPerMTok)}`;
 }
