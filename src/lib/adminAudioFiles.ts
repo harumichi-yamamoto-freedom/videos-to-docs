@@ -53,7 +53,7 @@ export async function getAllAudioTranscriptions(): Promise<AudioTranscriptionDoc
                 id: docSnapshot.id,
                 title: data.title || data.fileName,
                 fileName: data.fileName,
-                transcription: data.transcription,
+                transcription: data.transcription ?? data.text ?? '',
                 promptName: data.promptName || '不明',
                 ownerType: data.ownerType || 'guest',
                 ownerId: data.ownerId || 'GUEST',
