@@ -4,16 +4,14 @@ import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'rea
 import {
     getAdminSettings,
     updateAdminSettings,
-    AdminSettings,
-    DefaultPromptTemplate,
-    getDefaultPrompts,
-    updateDefaultPrompts
+    retryGuestDefaultPromptsSync,
 } from '@/lib/adminSettings';
+import type { AdminSettings, DefaultPromptTemplate } from '@/lib/adminSettings';
 import { Save, Plus, Trash2 } from 'lucide-react';
 import { getCurrentUserId } from '@/lib/auth';
 import { logAudit } from '@/lib/auditLog';
 import DefaultPromptEditModal from './DefaultPromptEditModal';
-import { SettingsPanelRef } from '@/app/admin/page';
+import type { SettingsPanelRef } from '@/app/admin/page';
 import { createLogger } from '@/lib/logger';
 import { getGeminiModelLabel } from '@/constants/geminiModels';
 import {
@@ -22,6 +20,11 @@ import {
 } from '@/constants/geminiThinking';
 
 const adminSettingsPanelLogger = createLogger('AdminSettingsPanel');
+
+type Feedback = {
+    kind: 'success' | 'warning' | 'error';
+    message: string;
+};
 
 function getThinkingLevelLabel(level: DefaultPromptTemplate['thinkingLevel']): string {
     const canonicalLevel = canonicalizeThinkingLevel(level);
@@ -35,6 +38,10 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
     const [originalPrompts, setOriginalPrompts] = useState<DefaultPromptTemplate[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [feedback, setFeedback] = useState<Feedback | null>(null);
+    const [guestSyncFailed, setGuestSyncFailed] = useState(false);
+    const [syncingGuestPrompts, setSyncingGuestPrompts] = useState(false);
 
     // モーダル関連
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -48,17 +55,34 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
     const loadSettings = async () => {
         try {
             setLoading(true);
-            const [settingsData, promptsData] = await Promise.all([
-                getAdminSettings(),
-                getDefaultPrompts()
-            ]);
+            setLoadError(null);
+            setFeedback(null);
+            setGuestSyncFailed(false);
+            setSettings(null);
+            setOriginalSettings(null);
+            setDefaultPrompts([]);
+            setOriginalPrompts([]);
+            const settingsData = await getAdminSettings();
+            const promptsData = settingsData.defaultPrompts ?? [];
             setSettings(settingsData);
             setDefaultPrompts(promptsData);
             setOriginalSettings(settingsData);
             setOriginalPrompts(JSON.parse(JSON.stringify(promptsData)));
+            const syncUnresolved = settingsData.lastGuestSyncStatus === 'failed'
+                || settingsData.lastGuestSyncStatus === 'pending';
+            setGuestSyncFailed(syncUnresolved);
+
+            if (syncUnresolved) {
+                setFeedback({
+                    kind: 'warning',
+                    message: settingsData.lastGuestSyncStatus === 'failed'
+                        ? '前回のゲストユーザー向けデフォルトプロンプト同期が失敗しています。'
+                        : 'ゲストユーザー向けデフォルトプロンプト同期が完了していません。',
+                });
+            }
         } catch (error) {
             adminSettingsPanelLogger.error('設定の読み込みに失敗', error);
-            alert('設定の取得に失敗しました');
+            setLoadError('設定を読み込めませんでした。編集を開始するには再試行してください。');
         } finally {
             setLoading(false);
         }
@@ -85,33 +109,89 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
     const handleSave = async () => {
         if (!settings) return;
 
+        // 同名テンプレートは決定論的IDが衝突しゲスト同期で1件に上書きされるため保存前に拒否する。
+        const trimmedNames = defaultPrompts.map(prompt => prompt.name.trim());
+        const duplicateName = trimmedNames.find(
+            (name, index) => name !== '' && trimmedNames.indexOf(name) !== index,
+        );
+        if (duplicateName) {
+            setFeedback({
+                kind: 'error',
+                message: `デフォルトプロンプト名「${duplicateName}」が重複しています。名前は一意にしてください。`,
+            });
+            return;
+        }
+
         try {
             setSaving(true);
+            setFeedback(null);
             const userId = getCurrentUserId();
+            const settingsToSave: AdminSettings = {
+                ...settings,
+                defaultPrompts,
+            };
 
-            // 設定とデフォルトプロンプトを両方保存
-            await Promise.all([
-                updateAdminSettings(settings, userId),
-                updateDefaultPrompts(defaultPrompts, userId)
-            ]);
-
-            // 監査ログに必要な情報だけを抽出
-            await logAudit('admin_settings_update', 'settings', 'config', {
-                maxPromptSize: settings.maxPromptSize,
-                maxDocumentSize: settings.maxDocumentSize,
-                defaultPromptsCount: defaultPrompts.length,
-            });
-
-            // 保存成功後、オリジナルの値を更新
-            setOriginalSettings(settings);
+            const result = await updateAdminSettings(settingsToSave, userId);
+            setSettings(settingsToSave);
+            setOriginalSettings(settingsToSave);
             setOriginalPrompts(JSON.parse(JSON.stringify(defaultPrompts)));
+            const syncFailed = result.guestPromptsSync === 'failed';
+            setGuestSyncFailed(syncFailed);
+            setFeedback(syncFailed
+                ? {
+                    kind: 'warning',
+                    message: '設定は保存しましたが、ゲストユーザーのデフォルトプロンプトを同期できませんでした。',
+                }
+                : {
+                    kind: 'success',
+                    message: '設定を保存しました。',
+                });
 
-            alert('設定を保存しました');
+            try {
+                await logAudit('admin_settings_update', 'settings', 'config', {
+                    maxPromptSize: settings.maxPromptSize,
+                    maxDocumentSize: settings.maxDocumentSize,
+                    defaultPromptsCount: defaultPrompts.length,
+                });
+            } catch (auditError) {
+                adminSettingsPanelLogger.error('設定保存の監査ログ記録に失敗', auditError);
+                setFeedback({
+                    kind: 'warning',
+                    message: syncFailed
+                        ? '設定は保存しましたが、ゲストユーザーのデフォルトプロンプト同期と監査ログ記録に失敗しました。'
+                        : '設定は保存しましたが、監査ログを記録できませんでした。',
+                });
+            }
         } catch (error) {
             adminSettingsPanelLogger.error('設定の保存に失敗', error);
-            alert('設定の保存に失敗しました');
+            setFeedback({
+                kind: 'error',
+                message: '設定を保存できませんでした。入力内容を確認して、再試行してください。',
+            });
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleRetryGuestSync = async () => {
+        try {
+            setSyncingGuestPrompts(true);
+            setFeedback(null);
+            await retryGuestDefaultPromptsSync(getCurrentUserId());
+            setGuestSyncFailed(false);
+            setFeedback({
+                kind: 'success',
+                message: 'ゲストユーザーのデフォルトプロンプトを同期しました。',
+            });
+        } catch (error) {
+            adminSettingsPanelLogger.error('ゲストデフォルトプロンプトの再同期に失敗', error);
+            setGuestSyncFailed(true);
+            setFeedback({
+                kind: 'error',
+                message: 'ゲストユーザーのデフォルトプロンプトを同期できませんでした。再試行してください。',
+            });
+        } finally {
+            setSyncingGuestPrompts(false);
         }
     };
 
@@ -153,11 +233,32 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
         setDefaultPrompts(defaultPrompts.filter((_, i) => i !== index));
     };
 
-    if (loading || !settings) {
+    if (loading) {
         return (
             <div className="text-center py-12">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
                 <p className="text-gray-600">読み込み中...</p>
+            </div>
+        );
+    }
+
+    if (loadError || !settings) {
+        return (
+            <div>
+                <div className="mb-6">
+                    <h2 className="text-2xl font-bold text-gray-900">システム設定</h2>
+                    <p className="text-gray-600 text-sm mt-1">プロンプトと文書のサイズ上限、デフォルトプロンプトを設定</p>
+                </div>
+                <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-800">
+                    <p className="font-medium">{loadError ?? '設定を読み込めませんでした。'}</p>
+                    <button
+                        type="button"
+                        onClick={loadSettings}
+                        className="mt-4 rounded-lg bg-red-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-800"
+                    >
+                        読み込みを再試行
+                    </button>
+                </div>
             </div>
         );
     }
@@ -168,6 +269,30 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                 <h2 className="text-2xl font-bold text-gray-900">システム設定</h2>
                 <p className="text-gray-600 text-sm mt-1">プロンプトと文書のサイズ上限、デフォルトプロンプトを設定</p>
             </div>
+
+            {feedback && (
+                <div
+                    role={feedback.kind === 'success' ? 'status' : 'alert'}
+                    className={`mb-6 rounded-lg border p-4 ${feedback.kind === 'success'
+                        ? 'border-green-200 bg-green-50 text-green-800'
+                        : feedback.kind === 'warning'
+                            ? 'border-amber-200 bg-amber-50 text-amber-800'
+                            : 'border-red-200 bg-red-50 text-red-800'
+                        }`}
+                >
+                    <p className="font-medium">{feedback.message}</p>
+                    {guestSyncFailed && (
+                        <button
+                            type="button"
+                            onClick={handleRetryGuestSync}
+                            disabled={syncingGuestPrompts}
+                            className="mt-3 rounded-lg bg-amber-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            {syncingGuestPrompts ? '同期中...' : '同期を再試行'}
+                        </button>
+                    )}
+                </div>
+            )}
 
             <div className="space-y-6">
                 {/* プロンプトサイズ上限 */}
@@ -280,7 +405,7 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                     {!hasUnsavedChanges() && <div></div>}
                     <button
                         onClick={handleSave}
-                        disabled={saving || !hasUnsavedChanges()}
+                        disabled={saving || syncingGuestPrompts || !hasUnsavedChanges()}
                         className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Save className="w-5 h-5" />

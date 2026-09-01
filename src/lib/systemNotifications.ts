@@ -1,5 +1,7 @@
 import {
     addDoc,
+    arrayRemove,
+    arrayUnion,
     collection,
     deleteDoc,
     doc,
@@ -127,20 +129,18 @@ export function subscribeToDismissals(
 
 export async function dismissNotification(uid: string, notificationId: string): Promise<void> {
     const ref = doc(db, DISMISSALS_COLLECTION, uid);
-    const snap = await getDoc(ref);
-    const existing = (snap.data() as DismissalsDoc | undefined)?.dismissedIds ?? [];
-    if (existing.includes(notificationId)) return;
-    await setDoc(ref, { uid, dismissedIds: [...existing, notificationId] }, { merge: true });
+    await setDoc(
+        ref,
+        { uid, dismissedIds: arrayUnion(notificationId) },
+        { merge: true },
+    );
 }
 
 export async function undismissNotification(uid: string, notificationId: string): Promise<void> {
     const ref = doc(db, DISMISSALS_COLLECTION, uid);
-    const snap = await getDoc(ref);
-    const existing = (snap.data() as DismissalsDoc | undefined)?.dismissedIds ?? [];
-    if (!existing.includes(notificationId)) return;
     await setDoc(
         ref,
-        { uid, dismissedIds: existing.filter(id => id !== notificationId) },
+        { uid, dismissedIds: arrayRemove(notificationId) },
         { merge: true },
     );
 }

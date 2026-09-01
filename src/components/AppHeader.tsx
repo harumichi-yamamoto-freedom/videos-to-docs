@@ -5,13 +5,12 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { useAdmin } from '@/hooks/useAdmin';
 import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User, Edit3, Bell, Menu, X } from 'lucide-react';
-import { signOutNow, deleteAccount } from '@/lib/auth';
-import { getUserDeletionInfo } from '@/lib/accountDeletion';
+import { signOutNow } from '@/lib/auth';
 import { createLogger } from '@/lib/logger';
 import AuthModal from './AuthModal';
 import PasswordChangeModal from './PasswordChangeModal';
-import ReauthModal from './ReauthModal';
 import DisplayNameModal from './DisplayNameModal';
+import { useAccountDeletionFlow } from './AccountDeletionFlow';
 import { subscribeToPendingSubordinateRelationships } from '@/lib/relationships';
 import { useSystemNotifications } from '@/hooks/useSystemNotifications';
 
@@ -31,7 +30,6 @@ export const AppHeader: React.FC = () => {
     const [showDropdown, setShowDropdown] = useState(false);
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [showPasswordModal, setShowPasswordModal] = useState(false);
-    const [showReauthModal, setShowReauthModal] = useState(false);
     const [showDisplayNameModal, setShowDisplayNameModal] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -43,6 +41,7 @@ export const AppHeader: React.FC = () => {
     const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
     const desktopNavRef = useRef<HTMLElement>(null);
     const [pendingSubordinateCount, setPendingSubordinateCount] = useState(0);
+    const { beginAccountDeletion, accountDeletionDialog } = useAccountDeletionFlow(user);
 
     // ドロップダウンの外側クリック、または Esc キーで閉じる
     useEffect(() => {
@@ -205,67 +204,10 @@ export const AppHeader: React.FC = () => {
         setShowPasswordModal(true);
     };
 
-    const handleDeleteAccount = async () => {
+    const handleDeleteAccount = () => {
         setShowDropdown(false);
         closeMobileMenu();
-
-        if (!user) return;
-
-        try {
-            const deletionInfo = await getUserDeletionInfo(user.uid);
-            const confirmMessage = `本当にアカウントを削除しますか？
-
-⚠️ 警告:
-- この操作は取り消せません
-- プロンプト: ${deletionInfo.promptCount}件
-- 文書: ${deletionInfo.documentCount}件
-- 合計 ${deletionInfo.promptCount + deletionInfo.documentCount}件のデータがすべて削除されます
-
-削除を続けるには「削除」と入力してください`;
-
-            const confirmation = prompt(confirmMessage);
-            if (confirmation !== '削除') {
-                return;
-            }
-
-            setShowReauthModal(true);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'アカウント削除の準備中にエラーが発生しました';
-            alert('アカウント削除の準備中にエラーが発生しました:\n' + message);
-            appHeaderLogger.error('アカウント削除準備に失敗', error, { userId: user?.uid });
-        }
-    };
-
-    const performDeletion = async () => {
-        try {
-            await deleteAccount();
-            alert('アカウントとすべてのデータを削除しました');
-        } catch (error) {
-            appHeaderLogger.error('アカウント削除に失敗', error, { userId: user?.uid });
-            const firebaseError = error as { code?: string; message?: string };
-            if (firebaseError.code === 'auth/requires-recent-login') {
-                throw error;
-            }
-            const message = firebaseError.message || 'アカウントの削除に失敗しました';
-            alert('アカウントの削除に失敗しました:\n' + message);
-            throw error;
-        }
-    };
-
-    const handleReauthSuccess = async () => {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        try {
-            await performDeletion();
-        } catch (error) {
-            appHeaderLogger.error('再認証後の削除に失敗', error, { userId: user?.uid });
-            const firebaseError = error as { code?: string; message?: string };
-            if (firebaseError.code === 'auth/requires-recent-login') {
-                alert('⚠️ データは削除されましたが、アカウント削除で問題が発生しました。\n\nアカウントを完全に削除するには：\n1. ページをリロード\n2. 再度ログイン（データは既に削除済み）\n3. すぐにアカウント削除を実行');
-            } else {
-                const message = firebaseError.message || 'エラーが発生しました';
-                alert('エラーが発生しました:\n' + message);
-            }
-        }
+        void beginAccountDeletion();
     };
 
     const isEmailProvider = user?.providerData.some(p => p.providerId === 'password') || false;
@@ -721,17 +663,13 @@ export const AppHeader: React.FC = () => {
                         isOpen={showPasswordModal}
                         onClose={() => setShowPasswordModal(false)}
                     />
-                    <ReauthModal
-                        isOpen={showReauthModal}
-                        onClose={() => setShowReauthModal(false)}
-                        onSuccess={handleReauthSuccess}
-                    />
                     <DisplayNameModal
                         isOpen={showDisplayNameModal}
                         onClose={() => setShowDisplayNameModal(false)}
                     />
                 </>
             )}
+            {accountDeletionDialog}
         </header>
     );
 };
