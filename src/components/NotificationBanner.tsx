@@ -10,6 +10,12 @@ import { createLogger } from '@/lib/logger';
 
 const bannerLogger = createLogger('NotificationBanner');
 
+const PUBLISHED_DATE_FORMATTER = new Intl.DateTimeFormat('ja-JP', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+});
+
 const SEVERITY_STYLE: Record<SystemNotification['severity'], {
     container: string;
     iconColor: string;
@@ -70,6 +76,9 @@ export const NotificationBanner: React.FC = () => {
                         <Icon className={`w-4 h-4 flex-shrink-0 ${style.iconColor}`} />
                         <span className="text-sm font-medium text-gray-900 truncate flex-1">
                             {notification.title}
+                        </span>
+                        <span className="text-xs text-gray-500 flex-shrink-0">
+                            {PUBLISHED_DATE_FORMATTER.format(notification.publishedAt)}
                         </span>
                         {user?.uid && (
                             <button
