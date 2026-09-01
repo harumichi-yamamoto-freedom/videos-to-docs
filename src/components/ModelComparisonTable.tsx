@@ -1,7 +1,13 @@
 'use client';
 
 import React from 'react';
-import { GEMINI_MODEL_OPTIONS, getGeminiPricingLabelShort } from '@/constants/geminiModels';
+import {
+    GEMINI_DEFAULT_MODEL_SENTINEL,
+    GEMINI_MODEL_OPTIONS,
+    getGeminiModelLabel,
+    getGeminiPricingLabelShort,
+    resolveGeminiModel,
+} from '@/constants/geminiModels';
 
 interface ModelComparisonTableProps {
     selectedModel?: string;
@@ -34,6 +40,14 @@ export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({ sele
     // selectable と onSelectFn を一緒に確定させることで、後段の非null断言を避ける。
     const onSelectFn = onSelect;
     const selectable = typeof onSelectFn === 'function';
+    const resolvedDefaultModel = resolveGeminiModel(GEMINI_DEFAULT_MODEL_SENTINEL);
+    const defaultOption = {
+        value: GEMINI_DEFAULT_MODEL_SENTINEL,
+        label: `デフォルト（現在: ${getGeminiModelLabel(resolvedDefaultModel)}）`,
+        description: 'アプリの推奨モデルに自動追従します',
+    };
+    const comparisonOptions = [defaultOption, ...GEMINI_MODEL_OPTIONS];
+
     return (
         <div className="overflow-x-auto border border-gray-200 rounded-lg bg-white">
             <table className="w-full text-xs" role={selectable ? 'listbox' : undefined} aria-label={selectable ? 'モデルを選択' : undefined}>
@@ -63,10 +77,13 @@ export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({ sele
                     </tr>
                 </thead>
                 <tbody>
-                    {GEMINI_MODEL_OPTIONS.map(option => {
+                    {comparisonOptions.map(option => {
                         const isSelected = option.value === selectedModel;
-                        const b = option.benchmark;
-                        const priceLabel = getGeminiPricingLabelShort(option.value);
+                        const isDefaultOption = option.value === GEMINI_DEFAULT_MODEL_SENTINEL;
+                        const metadataModel = resolveGeminiModel(option.value);
+                        const metadata = GEMINI_MODEL_OPTIONS.find(candidate => candidate.value === metadataModel);
+                        const b = metadata?.benchmark;
+                        const priceLabel = getGeminiPricingLabelShort(metadataModel);
                         return (
                             <tr
                                 key={option.value}
@@ -88,7 +105,17 @@ export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({ sele
                                             <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500" aria-label="選択中" />
                                         )}
                                         <span>{option.label}</span>
+                                        {isDefaultOption && (
+                                            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                                                現在の既定
+                                            </span>
+                                        )}
                                     </div>
+                                    {isDefaultOption && (
+                                        <div className="mt-1 text-[11px] font-normal text-gray-500 whitespace-normal">
+                                            {option.description}
+                                        </div>
+                                    )}
                                 </td>
                                 <td className="px-3 py-4">
                                     {b ? <RatingBar rating={b.recognitionQuality} label="動画・音声の認識力" /> : <span className="text-gray-400">-</span>}

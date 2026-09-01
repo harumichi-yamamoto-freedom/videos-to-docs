@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Prompt, getPrompts, createPrompt, updatePrompt, deletePrompt, initializeDefaultPrompts } from '@/lib/prompts';
 import { Plus, Edit2, Trash2, Save, X } from 'lucide-react';
-import { DEFAULT_GEMINI_MODEL, getGeminiModelLabel } from '@/constants/geminiModels';
+import { GEMINI_DEFAULT_MODEL_SENTINEL, getGeminiModelLabel } from '@/constants/geminiModels';
 import { ModelComboboxSelect } from './ModelComboboxSelect';
 import { createLogger } from '@/lib/logger';
 
@@ -15,7 +15,7 @@ export const PromptManager: React.FC = () => {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editName, setEditName] = useState('');
     const [editContent, setEditContent] = useState('');
-    const [editModel, setEditModel] = useState(DEFAULT_GEMINI_MODEL);
+    const [editModel, setEditModel] = useState(GEMINI_DEFAULT_MODEL_SENTINEL);
     const [isCreating, setIsCreating] = useState(false);
 
     // プロンプト一覧を読み込み
@@ -41,7 +41,7 @@ export const PromptManager: React.FC = () => {
         setIsCreating(true);
         setEditName('');
         setEditContent('');
-        setEditModel(DEFAULT_GEMINI_MODEL);
+        setEditModel(GEMINI_DEFAULT_MODEL_SENTINEL);
     };
 
     // 新規作成保存
@@ -57,7 +57,7 @@ export const PromptManager: React.FC = () => {
             setIsCreating(false);
             setEditName('');
             setEditContent('');
-            setEditModel(DEFAULT_GEMINI_MODEL);
+            setEditModel(GEMINI_DEFAULT_MODEL_SENTINEL);
         } catch {
             alert('プロンプトの作成に失敗しました');
         }
@@ -77,7 +77,7 @@ export const PromptManager: React.FC = () => {
             await updatePrompt(promptId, { name: editName, content: editContent, model: editModel });
             await loadPrompts();
             setEditingId(null);
-            setEditModel(DEFAULT_GEMINI_MODEL);
+            setEditModel(GEMINI_DEFAULT_MODEL_SENTINEL);
         } catch {
             alert('プロンプトの更新に失敗しました');
         }
@@ -144,7 +144,7 @@ export const PromptManager: React.FC = () => {
                                 setIsCreating(false);
                                 setEditName('');
                                 setEditContent('');
-                                setEditModel(DEFAULT_GEMINI_MODEL);
+                                setEditModel(GEMINI_DEFAULT_MODEL_SENTINEL);
                             }}
                             className="flex items-center space-x-1 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
                         >
@@ -189,7 +189,7 @@ export const PromptManager: React.FC = () => {
                                     <button
                                         onClick={() => {
                                             setEditingId(null);
-                                            setEditModel(DEFAULT_GEMINI_MODEL);
+                                            setEditModel(GEMINI_DEFAULT_MODEL_SENTINEL);
                                         }}
                                         className="flex items-center space-x-1 px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600"
                                     >
@@ -249,4 +249,3 @@ export const PromptManager: React.FC = () => {
         </div>
     );
 };
-

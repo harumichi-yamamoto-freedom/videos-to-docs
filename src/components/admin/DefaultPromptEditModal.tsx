@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { X, Trash2, Eye, FileText, Check } from 'lucide-react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import { DefaultPromptTemplate } from '@/lib/adminSettings';
-import { DEFAULT_GEMINI_MODEL } from '@/constants/geminiModels';
+import { canonicalizeGeminiModel } from '@/constants/geminiModels';
 import { ModelComboboxSelect } from '../ModelComboboxSelect';
 
 type CodeProps = React.HTMLAttributes<HTMLElement> & { inline?: boolean };
@@ -87,7 +87,7 @@ export default function DefaultPromptEditModal({
 
     const initialName = prompt?.name || '';
     const initialContent = prompt?.content || '';
-    const initialModel = prompt?.model || DEFAULT_GEMINI_MODEL;
+    const initialModel = canonicalizeGeminiModel(prompt?.model);
 
     const [title, setTitle] = useState(initialName);
     const [content, setContent] = useState(initialContent);
@@ -142,7 +142,11 @@ export default function DefaultPromptEditModal({
 
         try {
             setSaving(true);
-            onSave({ name: editedTitle.trim(), content: editedContent.trim(), model: editedModel });
+            onSave({
+                name: editedTitle.trim(),
+                content: editedContent.trim(),
+                model: canonicalizeGeminiModel(editedModel),
+            });
             // 保存後にstateを更新して表示モードに遷移
             setTitle(editedTitle);
             setContent(editedContent);

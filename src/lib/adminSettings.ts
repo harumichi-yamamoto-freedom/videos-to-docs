@@ -4,7 +4,10 @@
 
 import { db } from './firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { DEFAULT_GEMINI_MODEL } from '../constants/geminiModels';
+import {
+    canonicalizeGeminiModel,
+    GEMINI_DEFAULT_MODEL_SENTINEL,
+} from '../constants/geminiModels';
 import { createLogger } from './logger';
 
 const adminSettingsLogger = createLogger('adminSettings');
@@ -62,19 +65,19 @@ export const INITIAL_DEFAULT_PROMPTS: DefaultPromptTemplate[] = [
 ...
 
 出力は正しく作成された資料のみを表示し、その他の説明や追加情報は不要です`,
-        model: DEFAULT_GEMINI_MODEL,
+        model: GEMINI_DEFAULT_MODEL_SENTINEL,
     },
     {
         name: '希望条件',
         content: `あなたは世界最高のコンサルタントとして、打ち合わせのトランスクリプトから重複なく、漏れなく情報を収集し、顧客の希望条件をまとめてください。
 利用者は住宅・不動産業界のプロフェッショナルです。その為ディティールにこだわって最高のアウトプットを作成する必要があります。
 書式はマークダウン形式で出力してください。`,
-        model: DEFAULT_GEMINI_MODEL,
+        model: GEMINI_DEFAULT_MODEL_SENTINEL,
     },
     {
         name: 'お客様情報',
         content: `お客様情報を一覧で出力して`,
-        model: DEFAULT_GEMINI_MODEL,
+        model: GEMINI_DEFAULT_MODEL_SENTINEL,
     },
     {
         name: 'ヒヤッとアラートサンプル',
@@ -158,7 +161,7 @@ export const INITIAL_DEFAULT_PROMPTS: DefaultPromptTemplate[] = [
 - 憶測は避け、必ず"会話上の根拠（抜粋）"に紐づける。
 - 守秘に配慮し、個人を特定できる情報や不要な評価語は書かない。
 `,
-        model: DEFAULT_GEMINI_MODEL,
+        model: GEMINI_DEFAULT_MODEL_SENTINEL,
     },
 ];
 
@@ -171,6 +174,25 @@ const DEFAULT_SETTINGS: AdminSettings = {
     },
     defaultPrompts: INITIAL_DEFAULT_PROMPTS,
 };
+
+function canonicalizeDefaultPromptModels(
+    prompts: DefaultPromptTemplate[],
+): DefaultPromptTemplate[] {
+    return prompts.map(prompt => ({
+        ...prompt,
+        model: canonicalizeGeminiModel(prompt.model),
+    }));
+}
+
+function withCanonicalDefaultPromptModels(
+    settings: AdminSettings,
+    prompts: DefaultPromptTemplate[],
+): AdminSettings {
+    return {
+        ...settings,
+        defaultPrompts: canonicalizeDefaultPromptModels(prompts),
+    };
+}
 
 /**
  * 管理者設定を取得
@@ -185,7 +207,7 @@ export async function getAdminSettings(): Promise<AdminSettings> {
             const data = docSnap.data() as AdminSettings;
 
             // デフォルトプロンプトが未設定の場合、初期値を設定
-            if (!data.defaultPrompts) {
+            if (data.defaultPrompts == null) {
                 adminSettingsLogger.info('デフォルトプロンプトが未設定のため初期値を設定', {
                     configId: 'config',
                 });
@@ -197,10 +219,12 @@ export async function getAdminSettings(): Promise<AdminSettings> {
                     },
                     { merge: true }
                 );
-                data.defaultPrompts = INITIAL_DEFAULT_PROMPTS;
             }
 
-            return data;
+            return withCanonicalDefaultPromptModels(
+                data,
+                data.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
+            );
         }
 
         // 設定が存在しない場合、デフォルト設定を保存
@@ -210,10 +234,16 @@ export async function getAdminSettings(): Promise<AdminSettings> {
             updatedAt: serverTimestamp(),
         });
 
-        return DEFAULT_SETTINGS;
+        return withCanonicalDefaultPromptModels(
+            DEFAULT_SETTINGS,
+            DEFAULT_SETTINGS.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
+        );
     } catch (error) {
         adminSettingsLogger.error('管理者設定の取得に失敗', error);
-        return DEFAULT_SETTINGS;
+        return withCanonicalDefaultPromptModels(
+            DEFAULT_SETTINGS,
+            DEFAULT_SETTINGS.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
+        );
     }
 }
 
@@ -275,7 +305,7 @@ export async function validateDocumentSize(content: string): Promise<{ valid: bo
 export async function getDefaultPrompts(): Promise<DefaultPromptTemplate[]> {
     try {
         const settings = await getAdminSettings();
-        return settings.defaultPrompts || INITIAL_DEFAULT_PROMPTS;
+        return settings.defaultPrompts ?? canonicalizeDefaultPromptModels(INITIAL_DEFAULT_PROMPTS);
     } catch (error) {
         adminSettingsLogger.error('デフォルトプロンプトの取得に失敗', error);
         return INITIAL_DEFAULT_PROMPTS;
@@ -317,4 +347,3 @@ export async function updateDefaultPrompts(
         throw new Error('デフォルトプロンプトの更新に失敗しました');
     }
 }
-

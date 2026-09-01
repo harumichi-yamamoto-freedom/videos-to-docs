@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
 import { createPrompt } from '@/lib/prompts';
-import { DEFAULT_GEMINI_MODEL } from '@/constants/geminiModels';
+import { GEMINI_DEFAULT_MODEL_SENTINEL } from '@/constants/geminiModels';
 import { ModelComboboxSelect } from './ModelComboboxSelect';
 import { createLogger } from '@/lib/logger';
 
@@ -22,7 +22,7 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
 }) => {
     const [name, setName] = useState('');
     const [content, setContent] = useState('');
-    const [model, setModel] = useState(DEFAULT_GEMINI_MODEL);
+    const [model, setModel] = useState(GEMINI_DEFAULT_MODEL_SENTINEL);
     const [saving, setSaving] = useState(false);
 
     if (!isOpen) return null;
@@ -38,7 +38,7 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
             await createPrompt(name, content, false, model);
             setName('');
             setContent('');
-            setModel(DEFAULT_GEMINI_MODEL);
+            setModel(GEMINI_DEFAULT_MODEL_SENTINEL);
             onSave();
             onClose();
         } catch (error) {
@@ -52,7 +52,7 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
     const handleClose = () => {
         setName('');
         setContent('');
-        setModel(DEFAULT_GEMINI_MODEL);
+        setModel(GEMINI_DEFAULT_MODEL_SENTINEL);
         onClose();
     };
 
@@ -142,4 +142,3 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
         </div>
     );
 };
-
