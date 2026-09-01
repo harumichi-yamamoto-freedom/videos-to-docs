@@ -490,13 +490,13 @@ describe('DocumentDetailPanel', () => {
 
         const selectedTree = DocumentDetailPanel({ document }) as React.ReactNode;
         expect(findPdfPreview(selectedTree)?.props.className).toBe(
-            'pdf-preview pdf-theme-minimal pdf-font-zen shadow',
+            'pdf-preview pdf-theme-minimal pdf-font-gothic shadow',
         );
         expect(findPrintPortal(selectedTree)?.props.theme).toBe('minimal');
     });
 
     it('PDF フォントは auto を既定とし、テーマ推奨へ解決して画面プレビューに反映する', () => {
-        mockPanelState({ pdfTheme: 'sumi' });
+        mockPanelState({ pdfTheme: 'architect' });
 
         const tree = DocumentDetailPanel({ document }) as React.ReactNode;
         const select = findPdfFontSelect(tree);
@@ -506,7 +506,7 @@ describe('DocumentDetailPanel', () => {
         expect(select).not.toBeNull();
         expect(select?.props.value).toBe('auto');
         expect(findPdfPreview(tree)?.props.className).toBe(
-            'pdf-preview pdf-theme-sumi pdf-font-shippori shadow',
+            'pdf-preview pdf-theme-architect pdf-font-zen shadow',
         );
         expect(portal?.props.font).toBe('auto');
     });
@@ -643,7 +643,7 @@ describe('DocumentPrintPortal PDF テーマ', () => {
         }) as unknown as React.ReactElement<{ className: string }>;
 
         expect(portal.props.className).toBe(
-            'pdf-print-root pdf-theme-minimal pdf-font-zen',
+            'pdf-print-root pdf-theme-minimal pdf-font-gothic',
         );
     });
 

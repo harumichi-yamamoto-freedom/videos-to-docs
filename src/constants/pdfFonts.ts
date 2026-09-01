@@ -45,17 +45,20 @@ export type ConcretePdfFontId = Exclude<PdfFontId, 'auto'>;
 
 export const DEFAULT_PDF_FONT_ID: PdfFontId = 'auto';
 
-/** 'auto' 選択時に各テーマへ充てる推奨フォント。 */
+/** 'auto' 選択時に各テーマへ充てる推奨フォント。
+ * 2026-09-01 3審実測: 非ゴシック既定は5テーマで中央値が退行(明朝系は小級数で
+ * 線が細く読み負け・改ページ位置も移動)したため、architect(zen・+4)以外は
+ * gothic 既定。他書体はプルダウンからの明示選択で利用可能。 */
 export const PDF_THEME_RECOMMENDED_FONT: Record<PdfThemeId, ConcretePdfFontId> =
     {
         editorial: 'gothic',
-        minimal: 'zen',
-        classic: 'mincho',
+        minimal: 'gothic',
+        classic: 'gothic',
         rich: 'gothic',
-        sumi: 'shippori',
+        sumi: 'gothic',
         navy: 'gothic',
-        amber: 'maru',
-        sakura: 'maru',
+        amber: 'gothic',
+        sakura: 'gothic',
         consulting: 'gothic',
         architect: 'zen',
     };
