@@ -52,12 +52,26 @@
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h2 {
-  margin: 8mm 0 3mm;
-  padding-left: 3mm;
-  border-left: 1mm solid #8b5cf6;
-  font-size: 14.5pt;
+  margin: 8mm 0 2.5mm;
+  padding-left: 2.5mm;
+  border-left: 0.45mm solid #9ca3af;
+  font-size: 12.5pt;
   line-height: 1.5;
-  letter-spacing: 0.025em;
+  letter-spacing: 0.02em;
+}
+
+/* 本文・要点・引用を伴う章は、要約や技術メモなどの補助ブロックより強く示す。 */
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote) {
+  margin-top: 14mm;
+  margin-bottom: 3mm;
+  padding-left: 3mm;
+  border-left-width: 1.1mm;
+  border-left-color: #6d28d9;
+  font-size: 15pt;
+  line-height: 1.45;
+  letter-spacing: 0.03em;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h3 {
@@ -81,11 +95,15 @@
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown p {
   margin: 0 0 3.5mm;
+  text-align: left;
+  word-spacing: normal;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :is(ul, ol) {
-  margin: 0 0 4mm;
+  margin: 0 0 3mm;
   padding-left: 1.8em;
+  text-align: left;
+  word-spacing: normal;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown li {
@@ -94,7 +112,20 @@
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown li + li {
-  margin-top: 1.2mm;
+  margin-top: 0.7mm;
+}
+
+/* 導入文と要点一覧を寄せ、一覧と引用の間には役割の切り替わりを残す。 */
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  p:has(+ :is(ul, ol)) {
+  margin-bottom: 2mm;
+}
+
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  :is(ul, ol):has(+ blockquote) {
+  margin-bottom: 3.5mm;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown a {
@@ -171,9 +202,11 @@
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown blockquote {
-  margin: 5mm 0;
+  margin: 0 0 6mm;
   padding: 2.5mm 3mm 2.5mm 4mm;
   border-left: 1mm solid #a78bfa;
   background: #faf7ff;
   color: #374151;
+  text-align: left;
+  word-spacing: normal;
 }

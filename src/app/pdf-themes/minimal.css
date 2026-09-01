@@ -11,6 +11,11 @@
 :where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-document {
   color: var(--pdf-ink);
   background: #ffffff;
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    sans-serif;
   font-size: 10pt;
   font-weight: 400;
   line-height: 1.78;
@@ -31,10 +36,11 @@
 :where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-document__title {
   margin: 0;
   color: var(--pdf-ink);
-  font-size: 16.5pt;
-  font-weight: 700;
-  line-height: 1.38;
-  letter-spacing: 0.04em;
+  font-size: 15.5pt;
+  font-weight: 600;
+  line-height: 1.44;
+  letter-spacing: 0.055em;
+  text-wrap: balance;
   font-feature-settings: "palt" 1;
   font-kerning: normal;
 }
@@ -73,7 +79,7 @@
 }
 
 :where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown h2 {
-  margin: 8.5mm 0 3.2mm;
+  margin: 9.8mm 0 3mm;
   padding-top: 2.2mm;
   border-top: 0.2mm solid var(--pdf-rule);
   font-size: 12.5pt;
@@ -116,6 +122,15 @@
   margin: 0 0 3.4mm;
   text-align: justify;
   text-justify: inter-character;
+  text-wrap: pretty;
+  word-spacing: -0.015em;
+  line-break: strict;
+}
+
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol)) {
+  margin-top: 12.5mm;
 }
 
 :where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
@@ -196,8 +211,42 @@
   font-variant-numeric: tabular-nums;
 }
 
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child) {
+  table-layout: fixed;
+}
+
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(1) {
+  width: 18%;
+}
+
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(2) {
+  width: 41%;
+}
+
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(3) {
+  width: 24%;
+}
+
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(4) {
+  width: 17%;
+}
+
 :where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown :is(th, td) {
-  padding: 2mm 2.2mm;
+  padding: 2.55mm 2.35mm;
   border: 0;
   border-bottom: 0.2mm solid var(--pdf-hairline);
 }

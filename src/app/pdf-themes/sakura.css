@@ -11,13 +11,15 @@
   --pdf-sakura-muted: #6f6469;
   --pdf-sakura-deep: #754454;
   --pdf-sakura-accent: #aa6077;
-  --pdf-sakura-blush: #f7e9ed;
-  --pdf-sakura-whisper: #fcf7f8;
-  --pdf-sakura-gray: #f4f2f3;
-  --pdf-sakura-rule: #d8cbd0;
-  --pdf-sakura-rule-soft: #ece5e7;
+  --pdf-sakura-petal: #f2d7df;
+  --pdf-sakura-blush: #f8e7eb;
+  --pdf-sakura-whisper: #fdf3f5;
+  --pdf-sakura-code: #f1e8eb;
+  --pdf-sakura-gray: #f5f0f2;
+  --pdf-sakura-rule: #d4c2c8;
+  --pdf-sakura-rule-soft: #e8dce0;
   --pdf-sakura-rule-strong: #ab989f;
-  --pdf-sakura-paper: #ffffff;
+  --pdf-sakura-paper: #fffaf9;
 
   color: var(--pdf-sakura-ink);
   background: var(--pdf-sakura-paper);
@@ -30,8 +32,8 @@
     sans-serif;
   font-size: 10.2pt;
   font-weight: 400;
-  line-height: 1.8;
-  letter-spacing: 0.012em;
+  line-height: 1.74;
+  letter-spacing: 0.002em;
   font-kerning: normal;
 }
 
@@ -40,15 +42,15 @@
   .pdf-document__header {
   position: relative;
   margin: 0 0 9.5mm;
-  padding: 5mm 5.5mm 5.2mm;
+  padding: 6.2mm 6.2mm 6.4mm;
   border: 0.2mm solid var(--pdf-sakura-rule);
   border-top: 0.55mm solid var(--pdf-sakura-ink-soft);
   border-radius: 1.8mm;
   background: linear-gradient(
     108deg,
-    var(--pdf-sakura-whisper) 0%,
-    var(--pdf-sakura-paper) 64%,
-    var(--pdf-sakura-gray) 100%
+    var(--pdf-sakura-petal) 0%,
+    var(--pdf-sakura-blush) 46%,
+    var(--pdf-sakura-whisper) 100%
   );
 }
 
@@ -76,10 +78,10 @@
     YuGothic,
     Meiryo,
     sans-serif;
-  font-size: 24.5pt;
-  font-weight: 700;
-  line-height: 1.3;
-  letter-spacing: 0.012em;
+  font-size: 21.5pt;
+  font-weight: 600;
+  line-height: 1.36;
+  letter-spacing: 0.006em;
   font-feature-settings: "palt" 1;
   text-wrap: balance;
 }
@@ -126,11 +128,39 @@
   overflow-wrap: anywhere;
 }
 
+/* The core page counter remains centered; this short label supplies context. */
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura):not(
+    .pdf-preview
+  )
+  .pdf-document::after {
+  content: "SAKURA · お客様ご提案資料";
+  position: fixed;
+  right: 0;
+  bottom: -16.2mm;
+  width: 49mm;
+  padding-top: 2.7mm;
+  border-top: 0.18mm solid var(--pdf-sakura-rule-soft);
+  color: var(--pdf-sakura-muted);
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 7.1pt;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-align: right;
+  white-space: nowrap;
+}
+
 /* This rail makes the article complete even when the document band is absent. */
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown {
   position: relative;
-  padding-top: 4.4mm;
+  padding: 4.4mm 6mm 0;
   border-top: 0.38mm solid var(--pdf-sakura-ink-soft);
   color: var(--pdf-sakura-ink);
 }
@@ -166,38 +196,76 @@
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown h1 {
-  margin: 10.5mm 0 4.8mm;
-  padding: 3.2mm 4.4mm 3.3mm 5.2mm;
+  margin: 9.2mm 0 5.2mm;
+  padding: 4.3mm 5mm 4.5mm 5.4mm;
   border: 0.2mm solid var(--pdf-sakura-rule);
   border-left: 1.05mm solid var(--pdf-sakura-accent);
   border-bottom: 0.48mm solid var(--pdf-sakura-ink-soft);
   border-radius: 0 1.5mm 1.5mm 0;
   background: linear-gradient(
     100deg,
-    var(--pdf-sakura-blush) 0%,
-    var(--pdf-sakura-whisper) 58%,
-    var(--pdf-sakura-gray) 100%
+    var(--pdf-sakura-petal) 0%,
+    var(--pdf-sakura-blush) 52%,
+    var(--pdf-sakura-whisper) 100%
   );
-  font-size: 21.5pt;
-  line-height: 1.34;
-  letter-spacing: 0.014em;
+  font-size: 18.8pt;
+  font-weight: 600;
+  line-height: 1.42;
+  letter-spacing: 0.006em;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown h2 {
-  margin: 8.5mm 0 3.5mm;
-  padding: 1.7mm 2.8mm 1.8mm 4.5mm;
-  border-left: 0.82mm solid var(--pdf-sakura-accent);
-  border-bottom: 0.25mm solid var(--pdf-sakura-rule-strong);
+  margin: 7.2mm 0 3.3mm;
+  padding: 1.5mm 2.6mm 1.6mm 4mm;
+  border-left: 0.68mm solid var(--pdf-sakura-accent);
+  border-bottom: 0.2mm solid var(--pdf-sakura-rule);
   background: linear-gradient(
     90deg,
-    var(--pdf-sakura-whisper) 0%,
-    var(--pdf-sakura-paper) 78%
+    var(--pdf-sakura-blush) 0%,
+    var(--pdf-sakura-paper) 82%
   );
   color: var(--pdf-sakura-deep);
-  font-size: 15.2pt;
-  line-height: 1.42;
-  letter-spacing: 0.022em;
+  font-size: 14.2pt;
+  font-weight: 600;
+  line-height: 1.46;
+  letter-spacing: 0.012em;
+}
+
+/* The opening summary is a major information panel, not a repeated section. */
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown
+  > h1
+  + h2 {
+  margin-top: 6.2mm;
+  padding: 2.5mm 3.3mm 2.6mm 4.3mm;
+  border: 0.22mm solid var(--pdf-sakura-rule-strong);
+  border-left: 0.92mm solid var(--pdf-sakura-deep);
+  border-bottom-width: 0.42mm;
+  border-radius: 0 1.3mm 1.3mm 0;
+  background: linear-gradient(
+    100deg,
+    var(--pdf-sakura-petal) 0%,
+    var(--pdf-sakura-blush) 62%,
+    var(--pdf-sakura-whisper) 100%
+  );
+  color: var(--pdf-sakura-ink);
+  font-size: 15pt;
+  font-weight: 700;
+}
+
+/* A table followed by a heading conventionally begins the technical note. */
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown
+  > table
+  + h2 {
+  border-bottom-style: dashed;
+  background: linear-gradient(
+    90deg,
+    var(--pdf-sakura-code) 0%,
+    var(--pdf-sakura-whisper) 72%,
+    var(--pdf-sakura-paper) 100%
+  );
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
@@ -209,7 +277,7 @@
   color: var(--pdf-sakura-ink-soft);
   font-size: 12.3pt;
   line-height: 1.5;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.014em;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
@@ -229,7 +297,7 @@
   border-left: 0.4mm solid var(--pdf-sakura-rule-strong);
   font-size: 10.8pt;
   line-height: 1.56;
-  letter-spacing: 0.038em;
+  letter-spacing: 0.018em;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
@@ -240,7 +308,7 @@
   color: var(--pdf-sakura-deep);
   font-size: 9.8pt;
   line-height: 1.6;
-  letter-spacing: 0.065em;
+  letter-spacing: 0.025em;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
@@ -251,27 +319,27 @@
   color: var(--pdf-sakura-muted);
   font-size: 9.2pt;
   line-height: 1.62;
-  letter-spacing: 0.075em;
+  letter-spacing: 0.03em;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown p {
-  margin: 0 0 3.8mm;
+  margin: 0 0 3.5mm;
   color: var(--pdf-sakura-ink);
-  line-height: 1.8;
+  line-height: 1.74;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown > p:first-child {
   color: var(--pdf-sakura-ink-soft);
   font-size: 10.7pt;
-  line-height: 1.84;
+  line-height: 1.78;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown :is(ul, ol) {
-  margin: 0 0 4.5mm;
-  padding-left: 1.9em;
+  margin: 0 0 4.2mm;
+  padding-left: 1.72em;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
@@ -287,34 +355,37 @@
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown ul ul {
   list-style-type: circle;
+  padding-left: 1.58em;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown ul ul ul {
   list-style-type: square;
+  padding-left: 1.52em;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown li {
   margin: 0;
   color: var(--pdf-sakura-ink);
-  line-height: 1.76;
+  line-height: 1.7;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown li + li {
-  margin-top: 1.15mm;
+  margin-top: 0.9mm;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown li > :is(ul, ol) {
-  margin: 1.3mm 0 0.8mm;
+  margin: 1.1mm 0 0.65mm;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown ul > li::marker {
   color: var(--pdf-sakura-accent);
   font-weight: 700;
+  font-size: 0.9em;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
@@ -362,8 +433,8 @@
   border-radius: 1.5mm;
   background: var(--pdf-sakura-paper);
   color: var(--pdf-sakura-ink);
-  font-size: 8.6pt;
-  line-height: 1.55;
+  font-size: 9.15pt;
+  line-height: 1.58;
   font-variant-numeric: tabular-nums;
 }
 
@@ -380,9 +451,9 @@
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown :is(th, td) {
-  padding: 2.1mm 2.4mm;
+  padding: 2.25mm 2.5mm;
   border: 0;
-  border-bottom: 0.2mm solid var(--pdf-sakura-rule);
+  border-bottom: 0.25mm solid var(--pdf-sakura-rule);
   color: var(--pdf-sakura-ink);
   vertical-align: top;
   text-align: left;
@@ -394,14 +465,15 @@
   border-bottom: 0.58mm solid var(--pdf-sakura-ink-soft);
   background: linear-gradient(
     105deg,
-    var(--pdf-sakura-blush) 0%,
+    var(--pdf-sakura-petal) 0%,
+    var(--pdf-sakura-blush) 62%,
     var(--pdf-sakura-gray) 100%
   );
   color: var(--pdf-sakura-ink);
-  font-size: 8.15pt;
+  font-size: 9.05pt;
   font-weight: 700;
   line-height: 1.46;
-  letter-spacing: 0.035em;
+  letter-spacing: 0.018em;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
@@ -417,6 +489,31 @@
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown tr:nth-child(even) td {
   background: var(--pdf-sakura-whisper);
+}
+
+/* Keep action ownership and due dates readable in four-column summary tables. */
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown
+  :is(th, td):nth-child(3) {
+  width: 19%;
+  border-left-color: var(--pdf-sakura-rule-strong);
+  font-weight: 600;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown
+  :is(th, td):nth-child(4) {
+  width: 16%;
+  color: var(--pdf-sakura-deep);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown
+  tbody
+  :is(td:nth-child(3), td:nth-child(4)) {
+  background: var(--pdf-sakura-blush);
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
@@ -443,15 +540,15 @@
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown pre {
   margin: 5.8mm 0;
-  padding: 3.7mm 4mm;
-  border: 0.2mm solid var(--pdf-sakura-rule);
-  border-top: 0.35mm solid var(--pdf-sakura-rule-strong);
-  border-left: 1mm solid var(--pdf-sakura-accent);
+  padding: 4mm 4.3mm;
+  border: 0.3mm solid var(--pdf-sakura-rule-strong);
+  border-top: 0.48mm solid var(--pdf-sakura-ink-soft);
+  border-left: 0.9mm solid var(--pdf-sakura-accent);
   border-radius: 0 1.6mm 1.6mm 0;
   background: linear-gradient(
     105deg,
-    var(--pdf-sakura-gray) 0%,
-    var(--pdf-sakura-whisper) 100%
+    var(--pdf-sakura-code) 0%,
+    var(--pdf-sakura-blush) 100%
   );
   color: var(--pdf-sakura-ink);
   font-family:
@@ -460,8 +557,9 @@
     "Yu Gothic",
     Meiryo,
     monospace;
-  font-size: 8.2pt;
-  line-height: 1.62;
+  font-size: 9.1pt;
+  font-weight: 500;
+  line-height: 1.72;
   letter-spacing: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -485,14 +583,15 @@
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
   .pdf-markdown :not(pre) > code {
-  padding: 0.25mm 0.95mm;
-  border: 0.2mm solid var(--pdf-sakura-rule);
-  border-left: 0.58mm solid var(--pdf-sakura-accent);
-  border-radius: 0 0.8mm 0.8mm 0;
+  padding: 0.3mm 0.78mm 0.34mm;
+  border: 0.2mm solid var(--pdf-sakura-rule-strong);
+  border-radius: 0.75mm;
   background: var(--pdf-sakura-blush);
   color: var(--pdf-sakura-deep);
-  font-size: 0.88em;
-  line-height: 1;
+  font-size: 0.94em;
+  font-weight: 500;
+  line-height: 1.28;
+  vertical-align: 0.02em;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
@@ -507,9 +606,9 @@
   border-radius: 0 1.6mm 1.6mm 0;
   background: linear-gradient(
     105deg,
-    var(--pdf-sakura-blush) 0%,
-    var(--pdf-sakura-whisper) 62%,
-    var(--pdf-sakura-gray) 100%
+    var(--pdf-sakura-petal) 0%,
+    var(--pdf-sakura-blush) 58%,
+    var(--pdf-sakura-whisper) 100%
   );
   color: var(--pdf-sakura-ink-soft);
   font-size: 10.35pt;
@@ -517,6 +616,46 @@
   line-height: 1.76;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+}
+
+/* The final section closes the proposal with a calm, substantial takeaway. */
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown
+  > h2:last-of-type:has(+ p:last-child) {
+  margin-top: 8.5mm;
+  margin-bottom: 0;
+  padding: 3mm 4mm 2.5mm;
+  border: 0.28mm solid var(--pdf-sakura-rule-strong);
+  border-bottom: 0;
+  border-left: 1.05mm solid var(--pdf-sakura-deep);
+  border-radius: 1.5mm 1.5mm 0 0;
+  background: linear-gradient(
+    100deg,
+    var(--pdf-sakura-petal) 0%,
+    var(--pdf-sakura-blush) 58%,
+    var(--pdf-sakura-whisper) 100%
+  );
+  color: var(--pdf-sakura-ink);
+  font-size: 15.4pt;
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown
+  > h2:last-of-type:has(+ p:last-child)
+  + p {
+  min-height: 19mm;
+  margin: 0;
+  padding: 2.8mm 4mm 4mm;
+  border: 0.28mm solid var(--pdf-sakura-rule-strong);
+  border-top: 0.2mm solid var(--pdf-sakura-rule);
+  border-left: 1.05mm solid var(--pdf-sakura-deep);
+  border-radius: 0 0 1.5mm 1.5mm;
+  background: var(--pdf-sakura-whisper);
+  color: var(--pdf-sakura-ink-soft);
+  font-size: 10.7pt;
+  font-weight: 500;
+  line-height: 1.78;
 }
 
 :where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)

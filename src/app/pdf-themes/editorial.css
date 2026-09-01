@@ -18,7 +18,7 @@
   font-size: 10.2pt;
   font-weight: 400;
   line-height: 1.78;
-  letter-spacing: 0.012em;
+  letter-spacing: 0.008em;
   font-kerning: normal;
 }
 
@@ -129,7 +129,7 @@
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown h2 {
   position: relative;
-  margin: 8.8mm 0 3.4mm;
+  margin: 7mm 0 2.8mm;
   padding-left: 4mm;
   font-size: 15.5pt;
   line-height: 1.4;
@@ -145,6 +145,70 @@
   width: 0.8mm;
   border-radius: 1mm;
   background: var(--pdf-violet);
+}
+
+/* A heading immediately introducing code is a supporting label, not a section peer. */
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > h2:has(+ pre) {
+  margin: 5mm 0 2.2mm;
+  padding: 0 0 1.4mm 4mm;
+  border-bottom: 0.2mm solid var(--pdf-rule);
+  color: var(--pdf-muted);
+  font-size: 8.4pt;
+  line-height: 1.45;
+  letter-spacing: 0.1em;
+}
+
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > h2:has(+ pre)::before {
+  top: 50%;
+  bottom: auto;
+  width: 1.7mm;
+  height: 1.7mm;
+  border: 0.22mm solid currentColor;
+  border-radius: 0;
+  background: transparent;
+  transform: translateY(-70%) rotate(45deg);
+}
+
+/* The closing heading and paragraph form one compact, grayscale-safe summary card. */
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > h2:last-of-type:has(+ p:last-child) {
+  margin: 7.5mm 0 0;
+  padding: 3mm 4mm 1.3mm;
+  border: 0.25mm solid var(--pdf-rule-strong);
+  border-bottom: 0;
+  border-left: 0.85mm solid var(--pdf-violet);
+  border-radius: 1.6mm 1.6mm 0 0;
+  background: var(--pdf-violet-whisper);
+  font-size: 12.8pt;
+  line-height: 1.4;
+}
+
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > h2:last-of-type:has(+ p:last-child)::before {
+  content: none;
+}
+
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > h2:last-of-type
+  + p:last-child {
+  min-height: 16mm;
+  margin: 0;
+  padding: 0 4mm 3.2mm;
+  border: 0.25mm solid var(--pdf-rule-strong);
+  border-top: 0;
+  border-left: 0.85mm solid var(--pdf-violet);
+  border-radius: 0 0 1.6mm 1.6mm;
+  background: var(--pdf-violet-whisper);
+  color: var(--pdf-ink-soft);
+  font-size: 10.3pt;
+  line-height: 1.65;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown h3 {
@@ -179,7 +243,11 @@
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown p {
-  margin: 0 0 3.8mm;
+  margin: 0 0 3.2mm;
+  line-break: strict;
+  word-break: auto-phrase;
+  overflow-wrap: normal;
+  text-wrap: pretty;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown > p:first-child {
@@ -191,7 +259,7 @@
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   :is(ul, ol) {
-  margin: 0 0 4.4mm;
+  margin: 0 0 3.6mm;
   padding-left: 1.9em;
 }
 
@@ -202,6 +270,10 @@
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown li {
   margin: 0;
   line-height: 1.74;
+  line-break: strict;
+  word-break: auto-phrase;
+  overflow-wrap: normal;
+  text-wrap: pretty;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown li::marker {
@@ -249,7 +321,7 @@
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown table {
-  margin: 5.8mm 0;
+  margin: 4.8mm 0;
   border: 0.25mm solid var(--pdf-rule-strong);
   border-top: 0.9mm solid var(--pdf-violet);
   border-collapse: separate;
@@ -279,11 +351,49 @@
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown th + th {
-  border-left: 0.2mm solid #5d5266;
+  border-left: 0;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown td + td {
-  border-left: 0.2mm solid var(--pdf-rule-soft);
+  border-left: 0;
+}
+
+/* Four-column action tables reserve the broadest measure for the description. */
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child) {
+  table-layout: fixed;
+}
+
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(1) {
+  width: 25%;
+}
+
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(2) {
+  width: 44%;
+}
+
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(3) {
+  width: 18%;
+  padding-inline: 1.8mm;
+}
+
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(4) {
+  width: 13%;
+  padding-inline: 1.6mm;
+  white-space: nowrap;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
@@ -336,7 +446,7 @@
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown pre {
-  margin: 5.8mm 0;
+  margin: 4.6mm 0;
   padding: 3.8mm 4mm;
   border: 0.2mm solid var(--pdf-rule);
   border-left: 1.1mm solid var(--pdf-violet);
@@ -372,32 +482,23 @@
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown blockquote {
   position: relative;
-  margin: 5.8mm 0;
-  padding: 3.6mm 4.2mm 3.4mm 10.5mm;
+  margin: 3.4mm 0;
+  padding: 2.6mm 3.6mm;
   border: 0.2mm solid var(--pdf-rule);
-  border-left: 1.1mm solid var(--pdf-violet);
+  border-left: 0.85mm solid var(--pdf-violet);
   border-radius: 0 1.6mm 1.6mm 0;
   background: var(--pdf-violet-soft);
   color: var(--pdf-ink-soft);
-  font-size: 10.4pt;
-  line-height: 1.74;
+  font-size: 10pt;
+  line-height: 1.68;
+  line-break: strict;
+  word-break: auto-phrase;
+  overflow-wrap: normal;
+  text-wrap: pretty;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown blockquote::before {
-  content: "“";
-  position: absolute;
-  top: 1.7mm;
-  left: 3.1mm;
-  color: var(--pdf-violet-deep);
-  font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
-    "Hiragino Sans",
-    "Yu Gothic",
-    Meiryo,
-    sans-serif;
-  font-size: 24pt;
-  font-weight: 700;
-  line-height: 1;
+  content: none;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown img {

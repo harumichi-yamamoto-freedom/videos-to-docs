@@ -8,15 +8,21 @@
   --pdf-amber-ink-soft: #51443b;
   --pdf-amber-muted: #706158;
   --pdf-amber-wood: #4a342a;
+  --pdf-amber-deep: #68401f;
   --pdf-amber-terracotta-deep: #7a3f2b;
   --pdf-amber-terracotta: #9a5237;
-  --pdf-amber-gold: #b8742a;
-  --pdf-amber-paper: #fffdfa;
-  --pdf-amber-sand: #fbf7f1;
-  --pdf-amber-clay: #f6ede4;
-  --pdf-amber-rule: #d8c8bb;
-  --pdf-amber-rule-soft: #ebe1d8;
-  --pdf-amber-rule-strong: #a98c78;
+  --pdf-amber-gold: #b97824;
+  --pdf-amber-paper: #fffdf8;
+  --pdf-amber-sand: #fbf3e6;
+  --pdf-amber-clay: #f3e3cd;
+  --pdf-amber-rule: #cdb99f;
+  --pdf-amber-rule-soft: #eadcc9;
+  --pdf-amber-rule-strong: var(--pdf-amber-deep);
+  --pdf-amber-component-bg: var(--pdf-amber-sand);
+  --pdf-amber-component-rule: var(--pdf-amber-rule-soft);
+  --pdf-amber-component-accent: var(--pdf-amber-deep);
+  --pdf-amber-component-rail: 0.7mm;
+  --pdf-amber-component-radius: 0.8mm;
 
   color: var(--pdf-amber-ink);
   background: var(--pdf-amber-paper);
@@ -27,39 +33,38 @@
     YuGothic,
     Meiryo,
     sans-serif;
-  font-size: 10.2pt;
+  font-size: 10pt;
   font-weight: 400;
-  line-height: 1.78;
-  letter-spacing: 0.012em;
+  line-height: 1.82;
+  letter-spacing: 0.018em;
   font-kerning: normal;
+  line-break: strict;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+  text-autospace: normal;
+  text-spacing-trim: trim-start;
 }
 
-/* The optional metadata header and a standalone body share one timber rail. */
+/* The title is a complete frame; no split top ornament competes with its box. */
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-document__header {
-  position: relative;
-  margin: 0 0 9.5mm;
-  padding: 5mm 0 0;
-  border-top: 0.35mm solid var(--pdf-amber-wood);
+  margin: 0 0 10.5mm;
+  padding: 2.5mm 0 0;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-document__header::before {
-  content: "";
-  position: absolute;
-  top: -0.78mm;
-  left: 0;
-  width: 34mm;
-  height: 1.05mm;
-  border: 0.18mm solid var(--pdf-amber-wood);
-  background: var(--pdf-amber-terracotta);
+  content: none;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-document__title {
   margin: 0 0 4.6mm;
-  padding: 0 0 3mm;
-  border-bottom: 0.25mm solid var(--pdf-amber-rule-strong);
+  padding: 3.2mm 4mm 3.4mm;
+  border: 0.3mm solid var(--pdf-amber-deep);
+  border-radius: 0.8mm;
+  background: var(--pdf-amber-sand);
   color: var(--pdf-amber-ink);
   font-family:
     var(--font-noto-sans-jp, "Noto Sans JP"),
@@ -121,24 +126,15 @@
   overflow-wrap: anywhere;
 }
 
-/* The body owns its opening ornament so metadata-free documents feel complete. */
+/* Metadata-free documents open directly with the same closed h1 treatment. */
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber) .pdf-markdown {
-  position: relative;
-  padding-top: 4.2mm;
-  border-top: 0.35mm solid var(--pdf-amber-wood);
+  padding-top: 0;
   color: var(--pdf-amber-ink);
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-markdown::before {
-  content: "";
-  position: absolute;
-  top: -0.78mm;
-  left: 0;
-  width: 34mm;
-  height: 1.05mm;
-  border: 0.18mm solid var(--pdf-amber-wood);
-  background: var(--pdf-amber-terracotta);
+  content: none;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
@@ -187,10 +183,8 @@
   position: relative;
   margin: 10.5mm 0 4.8mm;
   padding: 3mm 3.8mm 2.8mm 4.5mm;
-  border: 0.2mm solid var(--pdf-amber-rule);
-  border-left: 1.05mm solid var(--pdf-amber-terracotta-deep);
-  border-bottom: 0.55mm solid var(--pdf-amber-wood);
-  border-radius: 0 0.8mm 0.8mm 0;
+  border: 0.3mm solid var(--pdf-amber-deep);
+  border-radius: 0.8mm;
   background: var(--pdf-amber-sand);
   font-size: 21pt;
   line-height: 1.33;
@@ -208,15 +202,25 @@
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-markdown h2 {
-  margin: 8.5mm 0 3.5mm;
-  padding: 1.2mm 0 1.35mm 4mm;
-  border-left: 0.85mm solid var(--pdf-amber-terracotta);
-  border-bottom: 0.25mm solid var(--pdf-amber-rule-strong);
-  background: var(--pdf-amber-sand);
-  color: var(--pdf-amber-terracotta-deep);
+  margin: 9.3mm 0 3.8mm;
+  padding: 0.9mm 0 1.1mm 3.2mm;
+  border-left: 0.4mm solid var(--pdf-amber-rule);
+  border-bottom: 0.2mm solid var(--pdf-amber-rule);
+  background: transparent;
+  color: var(--pdf-amber-deep);
   font-size: 15.2pt;
   line-height: 1.42;
   letter-spacing: 0.02em;
+}
+
+/* The summary and conclusion anchor the document more strongly than body sections. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:is(:first-of-type, :last-of-type) {
+  padding: 1.15mm 2.8mm 1.3mm 3.6mm;
+  border-left: 0.75mm solid var(--pdf-amber-deep);
+  border-bottom-color: var(--pdf-amber-deep);
+  background: var(--pdf-amber-clay);
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
@@ -232,12 +236,7 @@
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-markdown h3::after {
-  content: "";
-  position: absolute;
-  bottom: -0.25mm;
-  left: 0;
-  width: 19mm;
-  border-top: 0.55mm solid var(--pdf-amber-terracotta);
+  content: none;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
@@ -287,10 +286,14 @@
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-markdown p {
-  margin: 0 0 3.7mm;
+  margin: 0 0 4mm;
   color: var(--pdf-amber-ink);
-  font-size: 10.2pt;
-  line-height: 1.8;
+  font-size: 10pt;
+  line-height: 1.86;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
@@ -333,7 +336,11 @@
   .pdf-markdown li {
   margin: 0;
   color: var(--pdf-amber-ink);
-  line-height: 1.75;
+  line-height: 1.8;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
@@ -397,11 +404,11 @@
   width: 100%;
   max-width: 100%;
   margin: 5.8mm 0;
-  border: 0.25mm solid var(--pdf-amber-rule-strong);
-  border-top: 0.9mm solid var(--pdf-amber-terracotta-deep);
+  border: 0.2mm solid var(--pdf-amber-component-rule);
+  border-top: 0.65mm solid var(--pdf-amber-component-accent);
   border-collapse: separate;
   border-spacing: 0;
-  border-radius: 0.8mm;
+  border-radius: var(--pdf-amber-component-radius);
   background: var(--pdf-amber-paper);
   color: var(--pdf-amber-ink);
   font-size: 8.6pt;
@@ -414,11 +421,13 @@
   :is(th, td) {
   padding: 2.1mm 2.4mm;
   border: 0;
-  border-bottom: 0.2mm solid var(--pdf-amber-rule);
+  border-bottom: 0.2mm solid var(--pdf-amber-rule-soft);
   color: var(--pdf-amber-ink);
   vertical-align: top;
   text-align: left;
-  overflow-wrap: anywhere;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
@@ -434,7 +443,7 @@
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-markdown thead th {
-  border-bottom: 0.6mm solid var(--pdf-amber-wood);
+  border-bottom: 0.45mm solid var(--pdf-amber-component-accent);
   background: var(--pdf-amber-clay);
   color: var(--pdf-amber-wood);
   font-size: 8.15pt;
@@ -443,12 +452,12 @@
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-markdown th + th {
-  border-left: 0.2mm solid var(--pdf-amber-rule-strong);
+  border-left: 0;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-markdown td + td {
-  border-left: 0.2mm solid var(--pdf-amber-rule-soft);
+  border-left: 0;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
@@ -483,11 +492,11 @@
   .pdf-markdown pre {
   margin: 5.7mm 0;
   padding: 3.7mm 4mm;
-  border: 0.2mm solid var(--pdf-amber-rule);
-  border-top: 0.35mm solid var(--pdf-amber-gold);
-  border-left: 1mm solid var(--pdf-amber-wood);
-  border-radius: 0 0.8mm 0.8mm 0;
-  background: var(--pdf-amber-sand);
+  border: 0.2mm solid var(--pdf-amber-component-rule);
+  border-left: var(--pdf-amber-component-rail) solid
+    var(--pdf-amber-component-accent);
+  border-radius: var(--pdf-amber-component-radius);
+  background: var(--pdf-amber-component-bg);
   color: var(--pdf-amber-ink);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
@@ -539,16 +548,21 @@
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-markdown blockquote {
   position: relative;
-  margin: 5.7mm 0;
+  margin: 6.1mm 0;
   padding: 3.5mm 4.2mm 3.3mm 9.5mm;
-  border: 0.2mm solid var(--pdf-amber-rule);
-  border-left: 1.05mm solid var(--pdf-amber-terracotta-deep);
-  border-radius: 0 0.8mm 0.8mm 0;
-  background: var(--pdf-amber-sand);
+  border: 0.2mm solid var(--pdf-amber-component-rule);
+  border-left: var(--pdf-amber-component-rail) solid
+    var(--pdf-amber-component-accent);
+  border-radius: var(--pdf-amber-component-radius);
+  background: var(--pdf-amber-component-bg);
   color: var(--pdf-amber-ink-soft);
-  font-size: 10.35pt;
+  font-size: 10.1pt;
   font-style: normal;
   line-height: 1.76;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
