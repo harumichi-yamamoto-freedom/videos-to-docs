@@ -59,7 +59,8 @@ async function ensureDefaultPromptExists(
     template: DefaultPromptTemplate,
     ownerId: string,
     ownerType: 'guest' | 'user',
-    createdBy: string
+    createdBy: string,
+    requireCurrentOwner: boolean = false,
 ): Promise<void> {
     const docId = generateDefaultPromptId(ownerId, template.name);
     const promptRef = doc(db, 'prompts', docId);
@@ -67,6 +68,22 @@ async function ensureDefaultPromptExists(
 
     if (existingDoc.exists()) {
         return;
+    }
+
+    // 初期化の待機中に認証主体が変わっていた場合、旧世代の処理からは書き込まない。
+    // getDoc より後、setDoc の直前で確認することで、待機中の認証変更も検知する。
+    if (requireCurrentOwner) {
+        const currentOwnerType = getOwnerType();
+        const currentOwnerId = getCurrentUserId();
+        if (currentOwnerType !== ownerType || currentOwnerId !== ownerId) {
+            promptsLogger.info('認証主体が変わったためデフォルトプロンプトの初期化を中断', {
+                expectedOwnerType: ownerType,
+                expectedOwnerId: ownerId,
+                currentOwnerType,
+                currentOwnerId,
+            });
+            return;
+        }
     }
 
     await setDoc(promptRef, {
@@ -87,12 +104,19 @@ async function ensureDefaultPromptsForOwner(
     ownerId: string,
     ownerType: 'guest' | 'user',
     createdBy: string,
-    templates?: DefaultPromptTemplate[]
+    templates?: DefaultPromptTemplate[],
+    requireCurrentOwner: boolean = false,
 ): Promise<void> {
     const defaultPromptTemplates = templates ?? (await getDefaultPrompts());
     await Promise.all(
         defaultPromptTemplates.map((template) =>
-            ensureDefaultPromptExists(template, ownerId, ownerType, createdBy)
+            ensureDefaultPromptExists(
+                template,
+                ownerId,
+                ownerType,
+                createdBy,
+                requireCurrentOwner,
+            )
         )
     );
 }
@@ -118,19 +142,34 @@ export interface Prompt {
  * ユーザーが所有しているプロンプトが0個の場合、そのユーザー専有のデフォルトプロンプトを作成
  * ゲストの場合もゲスト共有のデフォルトプロンプトを作成
  */
-export async function initializeDefaultPrompts(): Promise<void> {
+export async function initializeDefaultPrompts(
+    ownerType: 'guest' | 'user',
+    ownerId: string,
+): Promise<void> {
     try {
-        const existingPrompts = await getPrompts();
+        const ownerPromptsQuery = query(
+            collection(db, 'prompts'),
+            where('ownerType', '==', ownerType),
+            where('ownerId', '==', ownerId),
+            limit(1),
+        );
+        const existingPrompts = await getDocs(ownerPromptsQuery);
 
         // 現在のユーザーが所有しているプロンプトが0個の場合のみ、デフォルトプロンプトを作成
-        if (existingPrompts.length === 0) {
-            const userId = getCurrentUserId();
-            const ownerType = getOwnerType();
-
-            await ensureDefaultPromptsForOwner(userId, ownerType, userId);
+        if (existingPrompts.empty) {
+            await ensureDefaultPromptsForOwner(
+                ownerId,
+                ownerType,
+                ownerId,
+                undefined,
+                true,
+            );
         }
     } catch (error) {
-        promptsLogger.error('デフォルトプロンプトの初期化に失敗', error);
+        promptsLogger.error('デフォルトプロンプトの初期化に失敗', error, {
+            ownerType,
+            ownerId,
+        });
     }
 }
 

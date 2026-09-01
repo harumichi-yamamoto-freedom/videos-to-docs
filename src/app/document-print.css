@@ -373,3 +373,13 @@ body.pdf-export-active > .pdf-print-root {
     page-break-inside: avoid;
   }
 }
+
+@media screen and (max-width: 639px) {
+  .pdf-preview.pdf-preview--reading {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    box-shadow: none;
+  }
+}
