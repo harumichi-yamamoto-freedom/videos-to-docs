@@ -6,10 +6,22 @@ import type { Transcription } from '@/lib/firestore';
 import { formatPdfDateTime } from '@/lib/pdfExport';
 import { MarkdownDocument } from '@/components/MarkdownDocument';
 import { getGeminiModelLabel } from '../constants/geminiModels';
+import { THINKING_LEVELS } from '../constants/geminiThinking';
 import {
     normalizePdfThemeId,
     type PdfThemeId,
 } from '../constants/pdfThemes';
+
+function getThinkingLevelLabel(level: string): string {
+    const normalizedLevel = level.trim().toLowerCase();
+    if (normalizedLevel === 'unspecified') {
+        return '未指定';
+    }
+
+    return (
+        THINKING_LEVELS.find(option => option.id === normalizedLevel)?.label ?? level
+    );
+}
 
 export type DocumentPrintPortalProps = {
     document: Transcription;
@@ -49,6 +61,8 @@ export function DocumentPrintPortal({
                                     <dd>
                                         {getGeminiModelLabel(document.generatedByModel)}
                                         {document.modelSelection === 'default' && '（デフォルト選択）'}
+                                        {document.generatedByThinkingLevel &&
+                                            `・思考: ${getThinkingLevelLabel(document.generatedByThinkingLevel)}`}
                                     </dd>
                                 </>
                             )}

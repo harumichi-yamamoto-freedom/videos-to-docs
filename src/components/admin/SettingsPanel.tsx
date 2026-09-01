@@ -16,8 +16,17 @@ import DefaultPromptEditModal from './DefaultPromptEditModal';
 import { SettingsPanelRef } from '@/app/admin/page';
 import { createLogger } from '@/lib/logger';
 import { getGeminiModelLabel } from '@/constants/geminiModels';
+import {
+    canonicalizeThinkingLevel,
+    THINKING_LEVELS,
+} from '@/constants/geminiThinking';
 
 const adminSettingsPanelLogger = createLogger('AdminSettingsPanel');
+
+function getThinkingLevelLabel(level: DefaultPromptTemplate['thinkingLevel']): string {
+    const canonicalLevel = canonicalizeThinkingLevel(level);
+    return THINKING_LEVELS.find(option => option.id === canonicalLevel)?.label ?? canonicalLevel;
+}
 
 const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
     const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -241,9 +250,14 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                                         {prompt.content.substring(0, 100)}
                                         {prompt.content.length > 100 ? '...' : ''}
                                     </p>
-                                    <p className="text-xs text-gray-400 mt-1">
-                                        Geminiモデル: {getGeminiModelLabel(prompt.model)}
-                                    </p>
+                                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400">
+                                        <span>
+                                            Geminiモデル: {getGeminiModelLabel(prompt.model)}
+                                        </span>
+                                        <span>
+                                            思考レベル: {getThinkingLevelLabel(prompt.thinkingLevel)}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                         ))}

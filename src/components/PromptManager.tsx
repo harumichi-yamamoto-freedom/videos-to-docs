@@ -4,10 +4,48 @@ import React, { useState, useEffect } from 'react';
 import { Prompt, getPrompts, createPrompt, updatePrompt, deletePrompt, initializeDefaultPrompts } from '@/lib/prompts';
 import { Plus, Edit2, Trash2, Save, X } from 'lucide-react';
 import { GEMINI_DEFAULT_MODEL_SENTINEL, getGeminiModelLabel } from '@/constants/geminiModels';
+import {
+    THINKING_LEVELS,
+    canonicalizeThinkingLevel,
+    type GeminiThinkingLevel,
+} from '@/constants/geminiThinking';
 import { ModelComboboxSelect } from './ModelComboboxSelect';
 import { createLogger } from '@/lib/logger';
 
 const promptManagerLogger = createLogger('PromptManager');
+
+interface ThinkingLevelSelectProps {
+    id: string;
+    value: GeminiThinkingLevel;
+    onChange: (value: GeminiThinkingLevel) => void;
+}
+
+const ThinkingLevelSelect: React.FC<ThinkingLevelSelectProps> = ({
+    id,
+    value,
+    onChange,
+}) => (
+    <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(canonicalizeThinkingLevel(event.target.value))}
+        className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm text-gray-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+    >
+        {THINKING_LEVELS.map(level => (
+            <option key={level.id} value={level.id}>
+                {level.description
+                    ? `${level.label}（${level.description}）`
+                    : level.label}
+            </option>
+        ))}
+    </select>
+);
+
+function getThinkingLevelOption(level?: string | null) {
+    const canonicalLevel = canonicalizeThinkingLevel(level);
+    return THINKING_LEVELS.find(option => option.id === canonicalLevel)
+        ?? THINKING_LEVELS[0];
+}
 
 export const PromptManager: React.FC = () => {
     const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -16,6 +54,8 @@ export const PromptManager: React.FC = () => {
     const [editName, setEditName] = useState('');
     const [editContent, setEditContent] = useState('');
     const [editModel, setEditModel] = useState(GEMINI_DEFAULT_MODEL_SENTINEL);
+    const [editThinkingLevel, setEditThinkingLevel] =
+        useState<GeminiThinkingLevel>('default');
     const [isCreating, setIsCreating] = useState(false);
 
     // プロンプト一覧を読み込み
@@ -42,6 +82,7 @@ export const PromptManager: React.FC = () => {
         setEditName('');
         setEditContent('');
         setEditModel(GEMINI_DEFAULT_MODEL_SENTINEL);
+        setEditThinkingLevel('default');
     };
 
     // 新規作成保存
@@ -52,12 +93,19 @@ export const PromptManager: React.FC = () => {
         }
 
         try {
-            await createPrompt(editName, editContent, false, editModel);
+            await createPrompt(
+                editName,
+                editContent,
+                false,
+                editModel,
+                editThinkingLevel,
+            );
             await loadPrompts();
             setIsCreating(false);
             setEditName('');
             setEditContent('');
             setEditModel(GEMINI_DEFAULT_MODEL_SENTINEL);
+            setEditThinkingLevel('default');
         } catch {
             alert('プロンプトの作成に失敗しました');
         }
@@ -69,15 +117,22 @@ export const PromptManager: React.FC = () => {
         setEditName(prompt.name);
         setEditContent(prompt.content);
         setEditModel(prompt.model);
+        setEditThinkingLevel(canonicalizeThinkingLevel(prompt.thinkingLevel));
     };
 
     // 編集保存
     const handleSaveEdit = async (promptId: string) => {
         try {
-            await updatePrompt(promptId, { name: editName, content: editContent, model: editModel });
+            await updatePrompt(promptId, {
+                name: editName,
+                content: editContent,
+                model: editModel,
+                thinkingLevel: editThinkingLevel,
+            });
             await loadPrompts();
             setEditingId(null);
             setEditModel(GEMINI_DEFAULT_MODEL_SENTINEL);
+            setEditThinkingLevel('default');
         } catch {
             alert('プロンプトの更新に失敗しました');
         }
@@ -130,7 +185,27 @@ export const PromptManager: React.FC = () => {
                         rows={8}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 font-mono text-sm"
                     />
-                    <ModelComboboxSelect value={editModel} onChange={setEditModel} className="mb-3" />
+                    <div className="grid grid-cols-1 gap-3 mb-3 md:grid-cols-2">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                使用するGeminiモデル
+                            </label>
+                            <ModelComboboxSelect value={editModel} onChange={setEditModel} />
+                        </div>
+                        <div>
+                            <label
+                                htmlFor="prompt-manager-create-thinking-level"
+                                className="block text-sm font-medium text-gray-700 mb-2"
+                            >
+                                思考レベル
+                            </label>
+                            <ThinkingLevelSelect
+                                id="prompt-manager-create-thinking-level"
+                                value={editThinkingLevel}
+                                onChange={setEditThinkingLevel}
+                            />
+                        </div>
+                    </div>
                     <div className="flex space-x-2">
                         <button
                             onClick={handleSaveNew}
@@ -145,6 +220,7 @@ export const PromptManager: React.FC = () => {
                                 setEditName('');
                                 setEditContent('');
                                 setEditModel(GEMINI_DEFAULT_MODEL_SENTINEL);
+                                setEditThinkingLevel('default');
                             }}
                             className="flex items-center space-x-1 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
                         >
@@ -177,7 +253,30 @@ export const PromptManager: React.FC = () => {
                                     rows={8}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 font-mono text-sm"
                                 />
-                                <ModelComboboxSelect value={editModel} onChange={setEditModel} className="mb-3" />
+                                <div className="grid grid-cols-1 gap-3 mb-3 md:grid-cols-2">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            使用するGeminiモデル
+                                        </label>
+                                        <ModelComboboxSelect
+                                            value={editModel}
+                                            onChange={setEditModel}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label
+                                            htmlFor={`prompt-manager-edit-thinking-level-${prompt.id}`}
+                                            className="block text-sm font-medium text-gray-700 mb-2"
+                                        >
+                                            思考レベル
+                                        </label>
+                                        <ThinkingLevelSelect
+                                            id={`prompt-manager-edit-thinking-level-${prompt.id}`}
+                                            value={editThinkingLevel}
+                                            onChange={setEditThinkingLevel}
+                                        />
+                                    </div>
+                                </div>
                                 <div className="flex space-x-2">
                                     <button
                                         onClick={() => handleSaveEdit(prompt.id!)}
@@ -190,6 +289,7 @@ export const PromptManager: React.FC = () => {
                                         onClick={() => {
                                             setEditingId(null);
                                             setEditModel(GEMINI_DEFAULT_MODEL_SENTINEL);
+                                            setEditThinkingLevel('default');
                                         }}
                                         className="flex items-center space-x-1 px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600"
                                     >
@@ -212,6 +312,12 @@ export const PromptManager: React.FC = () => {
                                         )}
                                         <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded">
                                             {getGeminiModelLabel(prompt.model)}
+                                        </span>
+                                        <span
+                                            className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded"
+                                            title={getThinkingLevelOption(prompt.thinkingLevel).description}
+                                        >
+                                            思考: {getThinkingLevelOption(prompt.thinkingLevel).label}
                                         </span>
                                     </div>
                                     </div>

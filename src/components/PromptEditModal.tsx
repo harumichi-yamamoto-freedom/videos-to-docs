@@ -4,6 +4,11 @@ import React, { useCallback, useEffect, useReducer, useState } from 'react';
 import { Prompt, updatePrompt, deletePrompt } from '@/lib/prompts';
 import { ContentEditModal } from './ContentEditModal';
 import { canonicalizeGeminiModel } from '@/constants/geminiModels';
+import {
+    THINKING_LEVELS,
+    canonicalizeThinkingLevel,
+    type GeminiThinkingLevel,
+} from '@/constants/geminiThinking';
 import { ModelComboboxSelect } from './ModelComboboxSelect';
 
 interface PromptEditModalProps {
@@ -17,14 +22,21 @@ interface PromptEditModalProps {
 export interface PromptModelEditSessionState {
     selectedModel: string;
     savedModel: string;
+    selectedThinkingLevel: GeminiThinkingLevel;
+    savedThinkingLevel: GeminiThinkingLevel;
     isViewMode: boolean;
 }
 
 export type PromptModelEditSessionAction =
     | { type: 'select'; model: string }
+    | { type: 'selectThinkingLevel'; thinkingLevel: string }
     | { type: 'saveSucceeded' }
     | { type: 'viewModeChanged'; isViewMode: boolean }
-    | { type: 'reset'; savedModel: string };
+    | {
+        type: 'reset';
+        savedModel: string;
+        savedThinkingLevel: string | null | undefined;
+    };
 
 export function reducePromptModelEditSession(
     state: PromptModelEditSessionState,
@@ -36,10 +48,16 @@ export function reducePromptModelEditSession(
                 ...state,
                 selectedModel: canonicalizeGeminiModel(action.model),
             };
+        case 'selectThinkingLevel':
+            return {
+                ...state,
+                selectedThinkingLevel: canonicalizeThinkingLevel(action.thinkingLevel),
+            };
         case 'saveSucceeded':
             return {
                 ...state,
                 savedModel: state.selectedModel,
+                savedThinkingLevel: state.selectedThinkingLevel,
             };
         case 'viewModeChanged': {
             if (action.isViewMode === state.isViewMode) return state;
@@ -52,13 +70,21 @@ export function reducePromptModelEditSession(
                 selectedModel: returnedToViewMode
                     ? state.savedModel
                     : state.selectedModel,
+                selectedThinkingLevel: returnedToViewMode
+                    ? state.savedThinkingLevel
+                    : state.selectedThinkingLevel,
             };
         }
         case 'reset': {
             const savedModel = canonicalizeGeminiModel(action.savedModel);
+            const savedThinkingLevel = canonicalizeThinkingLevel(
+                action.savedThinkingLevel,
+            );
             return {
                 selectedModel: savedModel,
                 savedModel,
+                selectedThinkingLevel: savedThinkingLevel,
+                savedThinkingLevel,
                 isViewMode: true,
             };
         }
@@ -66,24 +92,29 @@ export function reducePromptModelEditSession(
 }
 
 export function hasPromptModelChanges(state: PromptModelEditSessionState): boolean {
-    return state.selectedModel !== state.savedModel;
+    return state.selectedModel !== state.savedModel
+        || state.selectedThinkingLevel !== state.savedThinkingLevel;
 }
 
 interface PromptModelFieldProps {
     selectedModel: string;
+    selectedThinkingLevel: GeminiThinkingLevel;
     isEditable: boolean;
     isViewMode: boolean;
     saving: boolean;
     onSelect: (model: string) => void;
+    onThinkingLevelSelect: (thinkingLevel: string) => void;
     onViewModeChange: (isViewMode: boolean) => void;
 }
 
 const PromptModelField: React.FC<PromptModelFieldProps> = ({
     selectedModel,
+    selectedThinkingLevel,
     isEditable,
     isViewMode,
     saving,
     onSelect,
+    onThinkingLevelSelect,
     onViewModeChange,
 }) => {
     useEffect(() => {
@@ -91,15 +122,40 @@ const PromptModelField: React.FC<PromptModelFieldProps> = ({
     }, [isViewMode, onViewModeChange]);
 
     return (
-        <div className="space-y-2">
-            <label className="block text-sm font-semibold text-gray-700">
-                使用するGeminiモデル
-            </label>
-            <ModelComboboxSelect
-                value={selectedModel}
-                onChange={onSelect}
-                disabled={!isEditable || saving || isViewMode}
-            />
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+                <label className="block text-sm font-semibold text-gray-700">
+                    使用するGeminiモデル
+                </label>
+                <ModelComboboxSelect
+                    value={selectedModel}
+                    onChange={onSelect}
+                    disabled={!isEditable || saving || isViewMode}
+                />
+            </div>
+            <div className="space-y-2">
+                <label
+                    htmlFor="prompt-edit-thinking-level"
+                    className="block text-sm font-semibold text-gray-700"
+                >
+                    思考レベル
+                </label>
+                <select
+                    id="prompt-edit-thinking-level"
+                    value={selectedThinkingLevel}
+                    onChange={(event) => onThinkingLevelSelect(event.target.value)}
+                    disabled={!isEditable || saving || isViewMode}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm text-gray-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-700"
+                >
+                    {THINKING_LEVELS.map(level => (
+                        <option key={level.id} value={level.id}>
+                            {level.description
+                                ? `${level.label}（${level.description}）`
+                                : level.label}
+                        </option>
+                    ))}
+                </select>
+            </div>
         </div>
     );
 };
@@ -112,11 +168,14 @@ export const PromptEditModal: React.FC<PromptEditModalProps> = ({
     onDelete,
 }) => {
     const savedModel = canonicalizeGeminiModel(prompt?.model);
+    const savedThinkingLevel = canonicalizeThinkingLevel(prompt?.thinkingLevel);
     const [modelSession, dispatchModelSession] = useReducer(
         reducePromptModelEditSession,
         {
             selectedModel: savedModel,
             savedModel,
+            selectedThinkingLevel: savedThinkingLevel,
+            savedThinkingLevel,
             isViewMode: true,
         },
     );
@@ -128,12 +187,20 @@ export const PromptEditModal: React.FC<PromptEditModalProps> = ({
     if (sessionKey !== lastSessionKey) {
         setLastSessionKey(sessionKey);
         if (isOpen) {
-            dispatchModelSession({ type: 'reset', savedModel });
+            dispatchModelSession({
+                type: 'reset',
+                savedModel,
+                savedThinkingLevel,
+            });
         }
     }
 
     const handleModelSelect = useCallback((model: string) => {
         dispatchModelSession({ type: 'select', model });
+    }, []);
+
+    const handleThinkingLevelSelect = useCallback((thinkingLevel: string) => {
+        dispatchModelSession({ type: 'selectThinkingLevel', thinkingLevel });
     }, []);
 
     const handleViewModeChange = useCallback((nextIsViewMode: boolean) => {
@@ -155,6 +222,7 @@ export const PromptEditModal: React.FC<PromptEditModalProps> = ({
             name: title,
             content,
             model: modelSession.selectedModel,
+            thinkingLevel: modelSession.selectedThinkingLevel,
         });
         await onSave();
         dispatchModelSession({ type: 'saveSucceeded' });
@@ -173,7 +241,11 @@ export const PromptEditModal: React.FC<PromptEditModalProps> = ({
                 return;
             }
         }
-        dispatchModelSession({ type: 'reset', savedModel });
+        dispatchModelSession({
+            type: 'reset',
+            savedModel,
+            savedThinkingLevel,
+        });
         onClose();
     };
 
@@ -216,10 +288,12 @@ export const PromptEditModal: React.FC<PromptEditModalProps> = ({
                 return (
                     <PromptModelField
                         selectedModel={modelSession.selectedModel}
+                        selectedThinkingLevel={modelSession.selectedThinkingLevel}
                         isEditable={isEditable}
                         isViewMode={isViewMode}
                         saving={saving}
                         onSelect={handleModelSelect}
+                        onThinkingLevelSelect={handleThinkingLevelSelect}
                         onViewModeChange={handleViewModeChange}
                     />
                 );

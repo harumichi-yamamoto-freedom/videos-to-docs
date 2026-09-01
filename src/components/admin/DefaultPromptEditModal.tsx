@@ -5,6 +5,10 @@ import { X, Trash2, Eye, FileText, Check } from 'lucide-react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import { DefaultPromptTemplate } from '@/lib/adminSettings';
 import { canonicalizeGeminiModel } from '@/constants/geminiModels';
+import {
+    canonicalizeThinkingLevel,
+    THINKING_LEVELS,
+} from '@/constants/geminiThinking';
 import { ModelComboboxSelect } from '../ModelComboboxSelect';
 
 type CodeProps = React.HTMLAttributes<HTMLElement> & { inline?: boolean };
@@ -88,14 +92,17 @@ export default function DefaultPromptEditModal({
     const initialName = prompt?.name || '';
     const initialContent = prompt?.content || '';
     const initialModel = canonicalizeGeminiModel(prompt?.model);
+    const initialThinkingLevel = canonicalizeThinkingLevel(prompt?.thinkingLevel);
 
     const [title, setTitle] = useState(initialName);
     const [content, setContent] = useState(initialContent);
     const [selectedModel, setSelectedModel] = useState(initialModel);
+    const [selectedThinkingLevel, setSelectedThinkingLevel] = useState(initialThinkingLevel);
     const [isViewMode, setIsViewMode] = useState(mode === 'create' ? false : true);
     const [editedTitle, setEditedTitle] = useState(initialName);
     const [editedContent, setEditedContent] = useState(initialContent);
     const [editedModel, setEditedModel] = useState(initialModel);
+    const [editedThinkingLevel, setEditedThinkingLevel] = useState(initialThinkingLevel);
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [saving, setSaving] = useState(false);
 
@@ -104,10 +111,12 @@ export default function DefaultPromptEditModal({
         setTitle(initialName);
         setContent(initialContent);
         setSelectedModel(initialModel);
+        setSelectedThinkingLevel(initialThinkingLevel);
         setEditedTitle(initialName);
         setEditedContent(initialContent);
         setEditedModel(initialModel);
-    }, [initialName, initialContent, initialModel]);
+        setEditedThinkingLevel(initialThinkingLevel);
+    }, [initialName, initialContent, initialModel, initialThinkingLevel]);
 
     // モーダルが開かれたときにリセット
     useEffect(() => {
@@ -115,10 +124,12 @@ export default function DefaultPromptEditModal({
             setEditedTitle(initialName);
             setEditedContent(initialContent);
             setEditedModel(initialModel);
+            setSelectedThinkingLevel(initialThinkingLevel);
+            setEditedThinkingLevel(initialThinkingLevel);
             setIsViewMode(mode === 'create' ? false : true);
             setIsEditingTitle(false);
         }
-    }, [isOpen, initialName, initialContent, initialModel, mode]);
+    }, [isOpen, initialName, initialContent, initialModel, initialThinkingLevel, mode]);
 
     // 編集モードに切り替えたときにタイトルも編集可能にする
     useEffect(() => {
@@ -132,7 +143,11 @@ export default function DefaultPromptEditModal({
     if (!isOpen) return null;
 
     // 変更があるかどうかをチェック
-    const hasChanges = editedTitle !== title || editedContent !== content || editedModel !== selectedModel;
+    const hasChanges =
+        editedTitle !== title ||
+        editedContent !== content ||
+        editedModel !== selectedModel ||
+        editedThinkingLevel !== selectedThinkingLevel;
 
     const handleSave = async () => {
         if (!editedTitle.trim() || !editedContent.trim()) {
@@ -146,11 +161,13 @@ export default function DefaultPromptEditModal({
                 name: editedTitle.trim(),
                 content: editedContent.trim(),
                 model: canonicalizeGeminiModel(editedModel),
+                thinkingLevel: canonicalizeThinkingLevel(editedThinkingLevel),
             });
             // 保存後にstateを更新して表示モードに遷移
             setTitle(editedTitle);
             setContent(editedContent);
             setSelectedModel(editedModel);
+            setSelectedThinkingLevel(canonicalizeThinkingLevel(editedThinkingLevel));
             setIsViewMode(true);
             onClose();
         } catch {
@@ -169,6 +186,7 @@ export default function DefaultPromptEditModal({
         setEditedTitle(title);
         setEditedContent(content);
         setEditedModel(selectedModel);
+        setEditedThinkingLevel(selectedThinkingLevel);
         setIsViewMode(true);
     };
 
@@ -190,6 +208,7 @@ export default function DefaultPromptEditModal({
         setEditedTitle(title);
         setEditedContent(content);
         setEditedModel(selectedModel);
+        setEditedThinkingLevel(selectedThinkingLevel);
         setIsViewMode(true);
     };
 
@@ -305,16 +324,45 @@ export default function DefaultPromptEditModal({
                         )}
                     </div>
 
-                    {/* Geminiモデル選択 */}
-                    <div className="mt-6">
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">
-                            使用するGeminiモデル
-                        </label>
-                        <ModelComboboxSelect
-                            value={isViewMode ? selectedModel : editedModel}
-                            onChange={setEditedModel}
-                            disabled={isViewMode || saving}
-                        />
+                    <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+                        {/* Geminiモデル選択 */}
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                使用するGeminiモデル
+                            </label>
+                            <ModelComboboxSelect
+                                value={isViewMode ? selectedModel : editedModel}
+                                onChange={setEditedModel}
+                                disabled={isViewMode || saving}
+                            />
+                        </div>
+
+                        {/* 思考レベル選択 */}
+                        <div>
+                            <label
+                                htmlFor="default-prompt-thinking-level"
+                                className="block text-sm font-semibold text-gray-700 mb-2"
+                            >
+                                思考レベル
+                            </label>
+                            <select
+                                id="default-prompt-thinking-level"
+                                value={isViewMode ? selectedThinkingLevel : editedThinkingLevel}
+                                onChange={(e) =>
+                                    setEditedThinkingLevel(canonicalizeThinkingLevel(e.target.value))
+                                }
+                                disabled={isViewMode || saving}
+                                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100 disabled:text-gray-600"
+                            >
+                                {THINKING_LEVELS.map(level => (
+                                    <option key={level.id} value={level.id}>
+                                        {level.description
+                                            ? `${level.label}（${level.description}）`
+                                            : level.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
 
                     {/* 警告メッセージ（本文の下） */}

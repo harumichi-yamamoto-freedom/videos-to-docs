@@ -10,6 +10,7 @@ import {
 } from './geminiModels';
 
 vi.mock('@/constants/geminiModels', async () => import('./geminiModels'));
+vi.mock('@/constants/geminiThinking', async () => import('./geminiThinking'));
 
 vi.mock('@/lib/prompts', () => ({
     updatePrompt: vi.fn(),
@@ -179,11 +180,14 @@ describe('getModelComboboxKeyTransition', () => {
 });
 
 const FIXED_MODEL = 'gemini-2.5-pro';
+const FIXED_THINKING_LEVEL = 'high';
 
 function createPromptModelSession(): PromptModelEditSessionState {
     return {
         selectedModel: GEMINI_DEFAULT_MODEL_SENTINEL,
         savedModel: GEMINI_DEFAULT_MODEL_SENTINEL,
+        selectedThinkingLevel: 'default',
+        savedThinkingLevel: 'default',
         isViewMode: true,
     };
 }
@@ -199,6 +203,16 @@ describe('reducePromptModelEditSession', () => {
         expect(hasPromptModelChanges(state)).toBe(true);
     });
 
+    it('思考レベル選択をdirtyとして扱う', () => {
+        const state = reducePromptModelEditSession(createPromptModelSession(), {
+            type: 'selectThinkingLevel',
+            thinkingLevel: FIXED_THINKING_LEVEL,
+        });
+
+        expect(state.selectedThinkingLevel).toBe(FIXED_THINKING_LEVEL);
+        expect(hasPromptModelChanges(state)).toBe(true);
+    });
+
     it('未保存の編集から表示へ戻ると保存値へリセットする', () => {
         const editing = reducePromptModelEditSession(createPromptModelSession(), {
             type: 'viewModeChanged',
@@ -208,13 +222,18 @@ describe('reducePromptModelEditSession', () => {
             type: 'select',
             model: FIXED_MODEL,
         });
+        const thinkingChanged = reducePromptModelEditSession(changed, {
+            type: 'selectThinkingLevel',
+            thinkingLevel: FIXED_THINKING_LEVEL,
+        });
 
-        const returnedToView = reducePromptModelEditSession(changed, {
+        const returnedToView = reducePromptModelEditSession(thinkingChanged, {
             type: 'viewModeChanged',
             isViewMode: true,
         });
 
         expect(returnedToView.selectedModel).toBe(GEMINI_DEFAULT_MODEL_SENTINEL);
+        expect(returnedToView.selectedThinkingLevel).toBe('default');
         expect(hasPromptModelChanges(returnedToView)).toBe(false);
     });
 
@@ -227,7 +246,11 @@ describe('reducePromptModelEditSession', () => {
             type: 'select',
             model: FIXED_MODEL,
         });
-        const saved = reducePromptModelEditSession(changed, {
+        const thinkingChanged = reducePromptModelEditSession(changed, {
+            type: 'selectThinkingLevel',
+            thinkingLevel: FIXED_THINKING_LEVEL,
+        });
+        const saved = reducePromptModelEditSession(thinkingChanged, {
             type: 'saveSucceeded',
         });
 
@@ -238,13 +261,17 @@ describe('reducePromptModelEditSession', () => {
 
         expect(returnedToView.selectedModel).toBe(FIXED_MODEL);
         expect(returnedToView.savedModel).toBe(FIXED_MODEL);
+        expect(returnedToView.selectedThinkingLevel).toBe(FIXED_THINKING_LEVEL);
+        expect(returnedToView.savedThinkingLevel).toBe(FIXED_THINKING_LEVEL);
         expect(hasPromptModelChanges(returnedToView)).toBe(false);
     });
 
     it('表示から編集への遷移と同一モード通知では選択値を変えない', () => {
-        const state = {
+        const state: PromptModelEditSessionState = {
             selectedModel: FIXED_MODEL,
             savedModel: GEMINI_DEFAULT_MODEL_SENTINEL,
+            selectedThinkingLevel: FIXED_THINKING_LEVEL,
+            savedThinkingLevel: 'default',
             isViewMode: true,
         };
 
@@ -258,13 +285,15 @@ describe('reducePromptModelEditSession', () => {
         });
 
         expect(editing.selectedModel).toBe(FIXED_MODEL);
+        expect(editing.selectedThinkingLevel).toBe(FIXED_THINKING_LEVEL);
         expect(duplicate).toBe(editing);
     });
 
-    it('resetはdefault相当の保存値をcanonical sentinelへ揃える', () => {
+    it('resetはモデルと思考レベルのdefault相当値をcanonical値へ揃える', () => {
         const state = reducePromptModelEditSession(createPromptModelSession(), {
             type: 'reset',
             savedModel: ' default ',
+            savedThinkingLevel: ' unknown ',
         });
 
         expect(state).toEqual(createPromptModelSession());

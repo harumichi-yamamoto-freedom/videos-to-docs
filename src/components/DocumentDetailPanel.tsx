@@ -8,6 +8,7 @@ import { MarkdownDocument } from '@/components/MarkdownDocument';
 import { DocumentPrintPortal } from '@/components/DocumentPrintPortal';
 import { useDocumentPrint } from '@/hooks/useDocumentPrint';
 import { getGeminiModelLabel } from '../constants/geminiModels';
+import { THINKING_LEVELS } from '../constants/geminiThinking';
 import {
     DEFAULT_PDF_THEME_ID,
     normalizePdfThemeId,
@@ -18,6 +19,17 @@ import {
 const documentDetailLogger = createLogger('DocumentDetailPanel');
 const PDF_INCLUDE_METADATA_STORAGE_KEY = 'pdfIncludeMetadata';
 const PDF_THEME_STORAGE_KEY = 'pdfTheme';
+
+function getThinkingLevelLabel(level: string): string {
+    const normalizedLevel = level.trim().toLowerCase();
+    if (normalizedLevel === 'unspecified') {
+        return '未指定';
+    }
+
+    return (
+        THINKING_LEVELS.find(option => option.id === normalizedLevel)?.label ?? level
+    );
+}
 
 interface DocumentDetailPanelProps {
     document: Transcription | null;
@@ -213,6 +225,8 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                                 <p>
                                     使用モデル: {getGeminiModelLabel(document.generatedByModel)}
                                     {document.modelSelection === 'default' && '（デフォルト選択）'}
+                                    {document.generatedByThinkingLevel &&
+                                        `・思考: ${getThinkingLevelLabel(document.generatedByThinkingLevel)}`}
                                 </p>
                             )}
                         </div>

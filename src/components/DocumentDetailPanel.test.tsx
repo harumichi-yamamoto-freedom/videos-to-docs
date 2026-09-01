@@ -254,6 +254,72 @@ describe('DocumentDetailPanel', () => {
         );
     });
 
+    it('記録された思考レベルを表示名に変換して使用モデル行へ表示する', () => {
+        mockPanelState();
+
+        const tree = DocumentDetailPanel({
+            document: {
+                ...document,
+                generatedByModel: 'gemini-3.7-flash',
+                generatedByThinkingLevel: 'HIGH',
+                modelSelection: 'pinned',
+            },
+        }) as React.ReactNode;
+
+        expect(getText(tree)).toContain(
+            '使用モデル: Gemini 3.7 Flash・思考: 高',
+        );
+    });
+
+    it('思考レベルが unspecified の文書には未指定と表示する', () => {
+        mockPanelState();
+
+        const tree = DocumentDetailPanel({
+            document: {
+                ...document,
+                generatedByModel: 'gemini-2.5-pro',
+                generatedByThinkingLevel: 'unspecified',
+                modelSelection: 'pinned',
+            },
+        }) as React.ReactNode;
+
+        expect(getText(tree)).toContain(
+            '使用モデル: Gemini 2.5 Pro・思考: 未指定',
+        );
+    });
+
+    it('思考レベルの記録がない過去文書では思考表示を添えない', () => {
+        mockPanelState();
+
+        const tree = DocumentDetailPanel({
+            document: {
+                ...document,
+                generatedByModel: 'gemini-3.7-flash',
+                modelSelection: 'pinned',
+            },
+        }) as React.ReactNode;
+
+        expect(getText(tree)).not.toContain('思考:');
+    });
+
+    it('未知の思考レベルは自動へ丸めず記録値を表示する', () => {
+        mockPanelState();
+
+        const tree = DocumentDetailPanel({
+            document: {
+                ...document,
+                generatedByModel: 'gemini-3.7-flash',
+                generatedByThinkingLevel: 'FUTURE',
+                modelSelection: 'pinned',
+            },
+        }) as React.ReactNode;
+
+        expect(getText(tree)).toContain(
+            '使用モデル: Gemini 3.7 Flash・思考: FUTURE',
+        );
+        expect(getText(tree)).not.toContain('思考: 自動');
+    });
+
     it('モデルの記録がない過去文書では使用モデル行を表示しない', () => {
         mockPanelState();
 
@@ -427,7 +493,7 @@ describe('DocumentPrintPortal PDF テーマ', () => {
         expect(portal.props.className).toBe('pdf-print-root pdf-theme-editorial');
     });
 
-    it('文書情報に解決済みモデル名とデフォルト選択の注記を表示する', async () => {
+    it('文書情報に解決済みモデル名・デフォルト選択の注記・思考レベルを表示する', async () => {
         const { DocumentPrintPortal: ActualDocumentPrintPortal } =
             await vi.importActual<typeof import('./DocumentPrintPortal')>(
                 './DocumentPrintPortal',
@@ -437,6 +503,7 @@ describe('DocumentPrintPortal PDF テーマ', () => {
             document: {
                 ...document,
                 generatedByModel: 'gemini-3.7-flash',
+                generatedByThinkingLevel: 'MEDIUM',
                 modelSelection: 'default',
             },
             active: true,
@@ -444,8 +511,49 @@ describe('DocumentPrintPortal PDF テーマ', () => {
         }) as unknown as React.ReactNode;
 
         expect(getText(portal)).toContain(
-            '使用モデルGemini 3.7 Flash（デフォルト選択）',
+            '使用モデルGemini 3.7 Flash（デフォルト選択）・思考: 標準',
         );
+    });
+
+    it('文書情報の unspecified 思考レベルは未指定と表示する', async () => {
+        const { DocumentPrintPortal: ActualDocumentPrintPortal } =
+            await vi.importActual<typeof import('./DocumentPrintPortal')>(
+                './DocumentPrintPortal',
+            );
+
+        const portal = ActualDocumentPrintPortal({
+            document: {
+                ...document,
+                generatedByModel: 'gemini-2.5-pro',
+                generatedByThinkingLevel: 'unspecified',
+                modelSelection: 'pinned',
+            },
+            active: true,
+            includeMetadata: true,
+        }) as unknown as React.ReactNode;
+
+        expect(getText(portal)).toContain(
+            '使用モデルGemini 2.5 Pro・思考: 未指定',
+        );
+    });
+
+    it('文書情報に思考レベルの記録がなければ思考表示を添えない', async () => {
+        const { DocumentPrintPortal: ActualDocumentPrintPortal } =
+            await vi.importActual<typeof import('./DocumentPrintPortal')>(
+                './DocumentPrintPortal',
+            );
+
+        const portal = ActualDocumentPrintPortal({
+            document: {
+                ...document,
+                generatedByModel: 'gemini-3.7-flash',
+                modelSelection: 'pinned',
+            },
+            active: true,
+            includeMetadata: true,
+        }) as unknown as React.ReactNode;
+
+        expect(getText(portal)).not.toContain('思考:');
     });
 
     it('文書情報を含めない場合は使用モデルを表示しない', async () => {

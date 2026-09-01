@@ -4,6 +4,11 @@ import React, { useState } from 'react';
 import { X, Save } from 'lucide-react';
 import { createPrompt } from '@/lib/prompts';
 import { GEMINI_DEFAULT_MODEL_SENTINEL } from '@/constants/geminiModels';
+import {
+    THINKING_LEVELS,
+    canonicalizeThinkingLevel,
+    type GeminiThinkingLevel,
+} from '@/constants/geminiThinking';
 import { ModelComboboxSelect } from './ModelComboboxSelect';
 import { createLogger } from '@/lib/logger';
 
@@ -23,6 +28,9 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
     const [name, setName] = useState('');
     const [content, setContent] = useState('');
     const [model, setModel] = useState(GEMINI_DEFAULT_MODEL_SENTINEL);
+    const [thinkingLevel, setThinkingLevel] = useState<GeminiThinkingLevel>(
+        'default',
+    );
     const [saving, setSaving] = useState(false);
 
     if (!isOpen) return null;
@@ -35,10 +43,11 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
 
         try {
             setSaving(true);
-            await createPrompt(name, content, false, model);
+            await createPrompt(name, content, false, model, thinkingLevel);
             setName('');
             setContent('');
             setModel(GEMINI_DEFAULT_MODEL_SENTINEL);
+            setThinkingLevel('default');
             onSave();
             onClose();
         } catch (error) {
@@ -53,6 +62,7 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
         setName('');
         setContent('');
         setModel(GEMINI_DEFAULT_MODEL_SENTINEL);
+        setThinkingLevel('default');
         onClose();
     };
 
@@ -110,12 +120,42 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
                             />
                         </div>
 
-                        {/* Geminiモデル */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                使用するGeminiモデル
-                            </label>
-                            <ModelComboboxSelect value={model} onChange={setModel} />
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            {/* Geminiモデル */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    使用するGeminiモデル
+                                </label>
+                                <ModelComboboxSelect value={model} onChange={setModel} />
+                            </div>
+
+                            {/* 思考レベル */}
+                            <div>
+                                <label
+                                    htmlFor="prompt-create-thinking-level"
+                                    className="block text-sm font-medium text-gray-700 mb-2"
+                                >
+                                    思考レベル
+                                </label>
+                                <select
+                                    id="prompt-create-thinking-level"
+                                    value={thinkingLevel}
+                                    onChange={(event) => {
+                                        setThinkingLevel(
+                                            canonicalizeThinkingLevel(event.target.value),
+                                        );
+                                    }}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm text-gray-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                >
+                                    {THINKING_LEVELS.map(level => (
+                                        <option key={level.id} value={level.id}>
+                                            {level.description
+                                                ? `${level.label}（${level.description}）`
+                                                : level.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
                     </div>
                 </div>
