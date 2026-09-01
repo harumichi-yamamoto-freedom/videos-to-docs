@@ -39,6 +39,16 @@ export const PDF_THEMES = [
         label: 'さくら',
         description: '桜色の優しい配色。お客様への提案に合う柔らかな印象',
     },
+    {
+        id: 'consulting',
+        label: 'コンサルタント',
+        description: '濃紺と余白の規律。戦略資料にふさわしい明晰さと権威',
+    },
+    {
+        id: 'architect',
+        label: '設計士',
+        description: '図面のような精密な罫と墨の階調。製図ブルーの基準線',
+    },
 ] as const;
 
 export type PdfThemeId = (typeof PDF_THEMES)[number]['id'];
