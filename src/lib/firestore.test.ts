@@ -290,6 +290,59 @@ describe('firestore', () => {
                 modelSelection: 'default',
             });
         });
+
+        it('期待する所有者と実際の書き込み先が違えば保存しない', async () => {
+            mocks.getCurrentUserId.mockReturnValue('user-2');
+
+            const rejection = await saveTranscription(
+                'recording.wav',
+                '新規文書の本文',
+                '議事録',
+                'audio',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                'user-1',
+            ).catch((error: unknown) => error as Error);
+
+            expect(rejection).toBeInstanceOf(Error);
+            expect((rejection as Error).message).toContain('ログイン状態が処理の開始時から変わった');
+            // U5: 画面に出る文言に生のUIDを載せない
+            expect((rejection as Error).message).not.toContain('user-1');
+            expect((rejection as Error).message).not.toContain('user-2');
+            // 突き合わせに要る値はログにだけ残す
+            expect(mocks.addDoc).not.toHaveBeenCalled();
+            expect(mocks.updateUserStats).not.toHaveBeenCalled();
+        });
+
+        it('期待する所有者と一致すればそのUIDで保存する', async () => {
+            mocks.getCurrentUserId.mockReturnValue('user-1');
+
+            await saveTranscription(
+                'recording.wav',
+                '新規文書の本文',
+                '議事録',
+                'audio',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                'user-1',
+            );
+
+            expect(mocks.addDoc).toHaveBeenCalledOnce();
+            expect(mocks.addDoc.mock.calls[0][1]).toMatchObject({
+                ownerId: 'user-1',
+                createdBy: 'user-1',
+            });
+        });
     });
 
     describe('updateTranscriptionContent', () => {

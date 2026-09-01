@@ -1,71 +1,155 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Prompt, getPrompts } from '@/lib/prompts';
 import { useAuth } from './useAuth';
 import { createLogger } from '@/lib/logger';
 
 const promptManagementLogger = createLogger('usePromptManagement');
 
+export type PromptLoadStatus = 'idle' | 'loading' | 'success' | 'error';
+
+interface PromptLoadResult {
+    /** この結果がどの認証状態のものか。現在の認証と異なる結果は表示に使わない */
+    authKey: string | null;
+    prompts: Prompt[];
+    status: PromptLoadStatus;
+    error: string | null;
+}
+
+/** 認証状態の変化や後発リクエストによって破棄された読み込みを表す */
+class StalePromptLoadError extends Error {
+    constructor() {
+        super('認証状態が変更されたため、プロンプトの読み込みを中止しました。');
+        this.name = 'StalePromptLoadError';
+    }
+}
+
+const getErrorMessage = (error: unknown) =>
+    error instanceof Error ? error.message : 'プロンプト一覧の読み込みに失敗しました。';
+
 export const usePromptManagement = () => {
     const { user, loading } = useAuth();
-    const [availablePrompts, setAvailablePrompts] = useState<Prompt[]>([]);
+    const authKey = loading ? null : (user?.uid ?? 'GUEST');
+
+    const [result, setResult] = useState<PromptLoadResult>({
+        authKey: null,
+        prompts: [],
+        status: 'idle',
+        error: null,
+    });
     const [bulkSelectedPromptIds, setBulkSelectedPromptIds] = useState<string[]>([]);
+    // 認証が変わるたびに effect のクリーンアップが番号を進めるので、
+    // 古い認証で始まった読み込みは番号の不一致で判別できる
+    const requestSequenceRef = useRef(0);
+    const selectionTouchedForAuthRef = useRef(false);
+
+    // 別の認証状態で取得した一覧は表示しない（他ユーザーのプロンプトを残さない）
+    const isResultCurrent = result.authKey === authKey;
+    const availablePrompts = authKey === null || !isResultCurrent ? [] : result.prompts;
+    // V5: 認証が未解決の間は結果が確定していない。idle と言い切らず読み込み中として扱う
+    const status: PromptLoadStatus = authKey === null
+        ? 'loading'
+        : (isResultCurrent ? result.status : 'loading');
+    const error = authKey !== null && isResultCurrent ? result.error : null;
+
+    const loadPrompts = useCallback(async (): Promise<Prompt[]> => {
+        if (authKey === null) {
+            throw new StalePromptLoadError();
+        }
+
+        const requestSequence = ++requestSequenceRef.current;
+
+        let prompts: Prompt[];
+        try {
+            prompts = await getPrompts();
+        } catch (loadError) {
+            // H10: 取得失敗を空配列の成功として扱わない。選択は触らずエラーとして残す
+            if (requestSequence === requestSequenceRef.current) {
+                setResult({
+                    authKey,
+                    prompts: [],
+                    status: 'error',
+                    error: getErrorMessage(loadError),
+                });
+                promptManagementLogger.error('プロンプト一覧の読み込みに失敗', loadError, {
+                    userId: user?.uid,
+                });
+            }
+            throw loadError;
+        }
+
+        if (requestSequence !== requestSequenceRef.current) {
+            throw new StalePromptLoadError();
+        }
+
+        setResult({ authKey, prompts, status: 'success', error: null });
+
+        // 成功したときだけ選択を整理する
+        setBulkSelectedPromptIds(previousIds => {
+            const validIds = new Set(prompts.flatMap(prompt => (prompt.id ? [prompt.id] : [])));
+            const nextIds = previousIds.filter(id => validIds.has(id));
+
+            if (nextIds.length === 0 && !selectionTouchedForAuthRef.current && prompts[0]?.id) {
+                return [prompts[0].id];
+            }
+
+            return nextIds;
+        });
+
+        return prompts;
+    }, [authKey, user?.uid]);
 
     useEffect(() => {
-        if (!loading) {
-            loadPrompts();
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user, loading]);
+        if (authKey === null) return;
 
-    const loadPrompts = async () => {
-        try {
-            const prompts = await getPrompts();
-            setAvailablePrompts(prompts);
+        // 認証が変わったら、既定プロンプトの自動選択をやり直せる状態に戻す
+        selectionTouchedForAuthRef.current = false;
 
-            // デフォルトで最初のプロンプトを選択
-            if (prompts.length > 0 && bulkSelectedPromptIds.length === 0) {
-                setBulkSelectedPromptIds([prompts[0].id!]);
-            }
-        } catch (error) {
-            promptManagementLogger.error('プロンプト一覧の読み込みに失敗', error);
-        }
-    };
-
-    // 外部から呼び出せる再読み込み関数
-    const reloadPrompts = async (): Promise<Prompt[]> => {
-        try {
-            const prompts = await getPrompts();
-            setAvailablePrompts(prompts);
-
-            // 削除されたプロンプトを選択から除外
-            setBulkSelectedPromptIds(prev => {
-                const validIds = prompts.map(p => p.id!);
-                return prev.filter(id => validIds.includes(id));
-            });
-
-            return prompts;
-        } catch (error) {
-            promptManagementLogger.error('プロンプト一覧の再読み込みに失敗', error);
-            return [];
-        }
-    };
-
-    const toggleBulkPrompt = (promptId: string) => {
-        setBulkSelectedPromptIds(prev => {
-            if (prev.includes(promptId)) {
-                return prev.filter(id => id !== promptId);
-            } else {
-                return [...prev, promptId];
-            }
+        // loadPrompts は await の後でしか状態を更新しないため、同期的な再レンダリングは起きない
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        void loadPrompts().catch(() => {
+            // 状態は loadPrompts が設定済み。ここでは未処理の Promise 拒否だけを防ぐ
         });
-    };
+
+        return () => {
+            requestSequenceRef.current += 1;
+        };
+    }, [authKey, loadPrompts]);
+
+    /** 例外を投げずに結果だけ返す再試行。失敗時は null */
+    const retry = useCallback(async (): Promise<Prompt[] | null> => {
+        // 認証が変わった直後は表示側が既に loading と解釈しているため、
+        // 同じ認証状態での再試行だけを「読み込み中」に落とす
+        setResult(previous =>
+            previous.authKey === authKey
+                ? { ...previous, status: 'loading', error: null }
+                : previous
+        );
+
+        try {
+            return await loadPrompts();
+        } catch {
+            return null;
+        }
+    }, [authKey, loadPrompts]);
+
+    const toggleBulkPrompt = useCallback((promptId: string) => {
+        selectionTouchedForAuthRef.current = true;
+        setBulkSelectedPromptIds(previousIds =>
+            previousIds.includes(promptId)
+                ? previousIds.filter(id => id !== promptId)
+                : [...previousIds, promptId]
+        );
+    }, []);
 
     return {
+        data: availablePrompts,
+        status,
+        error,
+        retry,
         availablePrompts,
         bulkSelectedPromptIds,
         toggleBulkPrompt,
-        reloadPrompts,
+        /** 成功時のみプロンプト配列を返す。失敗時は null（空配列を成功として扱わない） */
+        reloadPrompts: retry,
     };
 };
-
-
