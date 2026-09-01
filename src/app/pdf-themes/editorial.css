@@ -15,11 +15,19 @@
 
   color: var(--pdf-ink);
   background: #ffffff;
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
   font-size: 10.2pt;
   font-weight: 400;
   line-height: 1.78;
   letter-spacing: 0.008em;
   font-kerning: normal;
+  text-autospace: normal;
 }
 
 /* オプションのメタ帯にも本文と同じ編集記号を与える。 */
@@ -147,6 +155,13 @@
   background: var(--pdf-violet);
 }
 
+/* Full editorial sections get enough approach space to begin as a coherent unit. */
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > h2:has(+ p + :is(ul, ol) + blockquote) {
+  margin-top: 12.5mm;
+}
+
 /* A heading immediately introducing code is a supporting label, not a section peer. */
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
@@ -177,8 +192,8 @@
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   > h2:last-of-type:has(+ p:last-child) {
-  margin: 7.5mm 0 0;
-  padding: 3mm 4mm 1.3mm;
+  margin: 6.8mm 0 0;
+  padding: 2.6mm 4mm 1.1mm;
   border: 0.25mm solid var(--pdf-rule-strong);
   border-bottom: 0;
   border-left: 0.85mm solid var(--pdf-violet);
@@ -198,9 +213,9 @@
   .pdf-markdown
   > h2:last-of-type
   + p:last-child {
-  min-height: 16mm;
+  min-height: 12mm;
   margin: 0;
-  padding: 0 4mm 3.2mm;
+  padding: 0 4mm 2.7mm;
   border: 0.25mm solid var(--pdf-rule-strong);
   border-top: 0;
   border-left: 0.85mm solid var(--pdf-violet);
@@ -243,11 +258,21 @@
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown p {
-  margin: 0 0 3.2mm;
+  margin: 0 0 2.9mm;
   line-break: strict;
   word-break: auto-phrase;
   overflow-wrap: normal;
+  word-spacing: 0.025em;
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures contextual;
   text-wrap: pretty;
+}
+
+/* Pull an introductory paragraph toward its first point without flattening the section rhythm. */
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > p:has(+ :is(ul, ol)) {
+  margin-bottom: 1.8mm;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown > p:first-child {
@@ -259,7 +284,7 @@
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   :is(ul, ol) {
-  margin: 0 0 3.6mm;
+  margin: 0 0 3.2mm;
   padding-left: 1.9em;
 }
 
@@ -269,10 +294,11 @@
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown li {
   margin: 0;
-  line-height: 1.74;
+  line-height: 1.72;
   line-break: strict;
   word-break: auto-phrase;
   overflow-wrap: normal;
+  word-spacing: 0.02em;
   text-wrap: pretty;
 }
 
@@ -282,14 +308,14 @@
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown li + li {
-  margin-top: 1.2mm;
+  margin-top: 0.9mm;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   li
   > :is(ul, ol) {
-  margin: 1.4mm 0 0.8mm;
+  margin: 1.2mm 0 0.7mm;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
@@ -321,7 +347,7 @@
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown table {
-  margin: 4.8mm 0;
+  margin: 4.4mm 0;
   border: 0.25mm solid var(--pdf-rule-strong);
   border-top: 0.9mm solid var(--pdf-violet);
   border-collapse: separate;
@@ -335,7 +361,7 @@
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   :is(th, td) {
-  padding: 2.1mm 2.4mm;
+  padding: 1.9mm 2.2mm;
   border: 0;
   border-bottom: 0.2mm solid var(--pdf-rule);
 }
@@ -369,30 +395,33 @@
   .pdf-markdown
   table:has(thead th:nth-child(4):last-child)
   :is(th, td):nth-child(1) {
-  width: 25%;
+  width: 22%;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   table:has(thead th:nth-child(4):last-child)
   :is(th, td):nth-child(2) {
-  width: 44%;
+  width: 53%;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   table:has(thead th:nth-child(4):last-child)
   :is(th, td):nth-child(3) {
-  width: 18%;
-  padding-inline: 1.8mm;
+  width: 15%;
+  padding-inline: 1.5mm;
+  text-align: left;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   table:has(thead th:nth-child(4):last-child)
   :is(th, td):nth-child(4) {
-  width: 13%;
-  padding-inline: 1.6mm;
+  width: 10%;
+  padding-inline: 1.2mm;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -446,11 +475,11 @@
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown pre {
-  margin: 4.6mm 0;
-  padding: 3.8mm 4mm;
-  border: 0.2mm solid var(--pdf-rule);
-  border-left: 1.1mm solid var(--pdf-violet);
-  border-radius: 0 1.7mm 1.7mm 0;
+  margin: 4.2mm 0;
+  padding: 3.4mm 3.8mm;
+  border: 0.2mm solid var(--pdf-rule-strong);
+  border-left: 0.85mm solid var(--pdf-violet);
+  border-radius: 1.1mm;
   background: var(--pdf-code);
   color: var(--pdf-code-ink);
   font-family:
@@ -459,8 +488,8 @@
     "Yu Gothic",
     Meiryo,
     monospace;
-  font-size: 8.2pt;
-  line-height: 1.62;
+  font-size: 9pt;
+  line-height: 1.7;
   letter-spacing: 0;
 }
 
@@ -469,32 +498,39 @@
   :not(pre)
   > code {
   padding: 0.25mm 1mm;
-  border: 0.2mm solid var(--pdf-rule);
-  border-left: 0.6mm solid var(--pdf-violet);
-  border-radius: 0 0.8mm 0.8mm 0;
+  border: 0.2mm solid var(--pdf-rule-strong);
+  border-left: 0.7mm solid var(--pdf-violet);
+  border-radius: 0.8mm;
   background: var(--pdf-code);
   color: var(--pdf-code-ink);
-  font-size: 0.88em;
-  line-height: 1;
+  font-size: 0.9em;
+  line-height: 1.2;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown blockquote {
   position: relative;
-  margin: 3.4mm 0;
-  padding: 2.6mm 3.6mm;
-  border: 0.2mm solid var(--pdf-rule);
-  border-left: 0.85mm solid var(--pdf-violet);
-  border-radius: 0 1.6mm 1.6mm 0;
-  background: var(--pdf-violet-soft);
+  margin: 2.8mm 0;
+  padding: 2.1mm 0 2.1mm 3.3mm;
+  border: 0;
+  border-left: 0.65mm solid var(--pdf-violet);
+  border-radius: 0;
+  background: transparent;
   color: var(--pdf-ink-soft);
-  font-size: 10pt;
-  line-height: 1.68;
+  font-size: 9.9pt;
+  line-height: 1.64;
   line-break: strict;
   word-break: auto-phrase;
   overflow-wrap: normal;
   text-wrap: pretty;
+}
+
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  blockquote
+  strong {
+  color: var(--pdf-violet-deep);
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown blockquote::before {

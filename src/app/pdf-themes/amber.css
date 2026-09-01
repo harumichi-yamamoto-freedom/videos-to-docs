@@ -8,19 +8,19 @@
   --pdf-amber-ink-soft: #51443b;
   --pdf-amber-muted: #706158;
   --pdf-amber-wood: #4a342a;
-  --pdf-amber-deep: #68401f;
-  --pdf-amber-terracotta-deep: #7a3f2b;
-  --pdf-amber-terracotta: #9a5237;
-  --pdf-amber-gold: #b97824;
-  --pdf-amber-paper: #fffdf8;
-  --pdf-amber-sand: #fbf3e6;
-  --pdf-amber-clay: #f3e3cd;
-  --pdf-amber-rule: #cdb99f;
-  --pdf-amber-rule-soft: #eadcc9;
+  --pdf-amber-deep: #633717;
+  --pdf-amber-terracotta-deep: #793823;
+  --pdf-amber-terracotta: #a34f31;
+  --pdf-amber-gold: #b66c1e;
+  --pdf-amber-paper: #fffaf3;
+  --pdf-amber-sand: #f8ead7;
+  --pdf-amber-clay: #eac7a2;
+  --pdf-amber-rule: #c18f6c;
+  --pdf-amber-rule-soft: #e3c8ab;
   --pdf-amber-rule-strong: var(--pdf-amber-deep);
   --pdf-amber-component-bg: var(--pdf-amber-sand);
   --pdf-amber-component-rule: var(--pdf-amber-rule-soft);
-  --pdf-amber-component-accent: var(--pdf-amber-deep);
+  --pdf-amber-component-accent: var(--pdf-amber-terracotta-deep);
   --pdf-amber-component-rail: 0.7mm;
   --pdf-amber-component-radius: 0.8mm;
 
@@ -62,7 +62,7 @@
   .pdf-document__title {
   margin: 0 0 4.6mm;
   padding: 3.2mm 4mm 3.4mm;
-  border: 0.3mm solid var(--pdf-amber-deep);
+  border: 0.3mm solid var(--pdf-amber-terracotta-deep);
   border-radius: 0.8mm;
   background: var(--pdf-amber-sand);
   color: var(--pdf-amber-ink);
@@ -183,7 +183,7 @@
   position: relative;
   margin: 10.5mm 0 4.8mm;
   padding: 3mm 3.8mm 2.8mm 4.5mm;
-  border: 0.3mm solid var(--pdf-amber-deep);
+  border: 0.3mm solid var(--pdf-amber-terracotta-deep);
   border-radius: 0.8mm;
   background: var(--pdf-amber-sand);
   font-size: 21pt;
@@ -197,17 +197,17 @@
   display: block;
   width: 24mm;
   margin-top: 2.2mm;
-  border-top: 0.65mm solid var(--pdf-amber-gold);
+  border-top: 0.65mm solid var(--pdf-amber-terracotta);
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-markdown h2 {
   margin: 9.3mm 0 3.8mm;
   padding: 0.9mm 0 1.1mm 3.2mm;
-  border-left: 0.4mm solid var(--pdf-amber-rule);
-  border-bottom: 0.2mm solid var(--pdf-amber-rule);
+  border-left: 0.65mm solid var(--pdf-amber-terracotta);
+  border-bottom: 0.25mm solid var(--pdf-amber-rule);
   background: transparent;
-  color: var(--pdf-amber-deep);
+  color: var(--pdf-amber-terracotta-deep);
   font-size: 15.2pt;
   line-height: 1.42;
   letter-spacing: 0.02em;
@@ -218,9 +218,58 @@
   .pdf-markdown
   h2:is(:first-of-type, :last-of-type) {
   padding: 1.15mm 2.8mm 1.3mm 3.6mm;
-  border-left: 0.75mm solid var(--pdf-amber-deep);
-  border-bottom-color: var(--pdf-amber-deep);
+  border-left: 0.85mm solid var(--pdf-amber-terracotta-deep);
+  border-bottom-color: var(--pdf-amber-terracotta-deep);
   background: var(--pdf-amber-clay);
+}
+
+/* Code-led notes are auxiliary; a short, quiet rule separates them from sections. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:has(+ pre) {
+  width: fit-content;
+  min-width: 42mm;
+  max-width: 100%;
+  margin: 7.6mm 0 3.1mm;
+  padding: 0.45mm 0.8mm 0.65mm 2.5mm;
+  border-left-width: 0.35mm;
+  border-bottom: 0.2mm solid var(--pdf-amber-rule);
+  background: transparent;
+  color: var(--pdf-amber-ink-soft);
+  font-size: 10.9pt;
+  line-height: 1.5;
+  letter-spacing: 0.055em;
+}
+
+/* Repeated meeting sections breathe evenly and distribute the two-page flow. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote) {
+  margin: 11.7mm 0 4.4mm;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote)
+  + p {
+  margin-bottom: 4.8mm;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote)
+  + p
+  + :is(ul, ol) {
+  margin-bottom: 5.2mm;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote)
+  + p
+  + :is(ul, ol)
+  + blockquote {
+  margin: 7mm 0;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
@@ -411,15 +460,15 @@
   border-radius: var(--pdf-amber-component-radius);
   background: var(--pdf-amber-paper);
   color: var(--pdf-amber-ink);
-  font-size: 8.6pt;
-  line-height: 1.54;
+  font-size: 9.2pt;
+  line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
   .pdf-markdown
   :is(th, td) {
-  padding: 2.1mm 2.4mm;
+  padding: 2.6mm 2.5mm;
   border: 0;
   border-bottom: 0.2mm solid var(--pdf-amber-rule-soft);
   color: var(--pdf-amber-ink);
@@ -446,8 +495,24 @@
   border-bottom: 0.45mm solid var(--pdf-amber-component-accent);
   background: var(--pdf-amber-clay);
   color: var(--pdf-amber-wood);
-  font-size: 8.15pt;
-  line-height: 1.46;
+  font-size: 8.9pt;
+  line-height: 1.5;
+}
+
+/* Four-column action tables reserve calm, predictable tracks for owner and date. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  table:has(tr > :nth-child(4):last-child)
+  :is(th, td):nth-child(3) {
+  width: 19%;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  table:has(tr > :nth-child(4):last-child)
+  :is(th, td):nth-child(4) {
+  width: 15%;
+  font-variant-numeric: tabular-nums;
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
@@ -582,8 +647,8 @@
   left: 3mm;
   width: 2.4mm;
   height: 2.4mm;
-  border-top: 0.65mm solid var(--pdf-amber-terracotta);
-  border-left: 0.65mm solid var(--pdf-amber-terracotta);
+  border-top: 0.75mm solid var(--pdf-amber-terracotta-deep);
+  border-left: 0.75mm solid var(--pdf-amber-terracotta-deep);
 }
 
 :where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)

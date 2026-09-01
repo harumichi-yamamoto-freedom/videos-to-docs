@@ -11,8 +11,8 @@
   --sumi-wash-soft: #faf9f6;
   --sumi-shu: #c55445;
   --sumi-shu-deep: #8e3d33;
-  --sumi-heading-space-before: 9.2mm;
-  --sumi-heading-space-after: 3.8mm;
+  --sumi-heading-space-before: 10.4mm;
+  --sumi-heading-space-after: 4.2mm;
   --sumi-heading-inset: 4.2mm;
   --sumi-heading-rule: 0.55mm;
 
@@ -149,12 +149,12 @@
   .pdf-markdown h1 {
   position: relative;
   margin: 11mm 0 5.2mm;
-  padding: 0 6mm 3.2mm 7mm;
+  padding: 0 10mm 3.2mm 7mm;
   border-bottom: 0.24mm solid var(--sumi-ink-soft);
-  font-size: 19.2pt;
+  font-size: 18.4pt;
   font-weight: 500;
   line-height: 1.52;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.055em;
   overflow-wrap: anywhere;
 }
 
@@ -220,14 +220,14 @@
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown h2:last-of-type:not(:first-of-type) {
   position: relative;
-  margin: 9.8mm 0 0;
+  margin: 22mm 0 0;
   padding: 2.7mm 8mm 1.5mm 4.2mm;
   border-top: 0.58mm solid var(--sumi-ink);
   border-right: 0;
   border-bottom: 0;
-  border-left: 0.55mm solid var(--sumi-ink-soft);
+  border-left: 0.55mm solid var(--sumi-shu-deep);
   background: var(--sumi-wash-soft);
-  color: var(--sumi-ink);
+  color: var(--sumi-shu-deep);
   font-size: 12.3pt;
   font-weight: 600;
   line-height: 1.5;
@@ -295,9 +295,15 @@
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown p {
-  margin: 0 0 4.1mm;
-  text-align: justify;
-  text-justify: inter-character;
+  margin: 0 0 4.5mm;
+  text-align: start;
+  text-justify: auto;
+  letter-spacing: 0.012em;
+  word-spacing: normal;
+  line-break: strict;
+  word-break: auto-phrase;
+  overflow-wrap: normal;
+  text-wrap: pretty;
 }
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
@@ -455,6 +461,13 @@
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown table:has(thead th:nth-child(4):last-child)
+  tbody td:last-child {
+  color: var(--sumi-shu-deep);
+  font-weight: 600;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown table:has(thead th:nth-child(4):last-child)
   :is(th, td):first-child {
   width: 19%;
   padding-left: 1.2mm;
@@ -555,7 +568,7 @@
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown blockquote {
   position: relative;
-  margin: 5.8mm 0;
+  margin: 7.2mm 0;
   padding: 3.7mm 4.5mm 3.7mm 6.5mm;
   border: 0;
   border-left: 0.55mm solid var(--sumi-ink-soft);

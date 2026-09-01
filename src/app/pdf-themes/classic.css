@@ -1,7 +1,21 @@
 /* 8c171ca の従来デザインを、現行の共通印刷骨格へ移植する。 */
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document {
-  color: #111827;
+  --classic-ink: #17171a;
+  --classic-muted: #66656a;
+  --classic-accent: #665d73;
+  --classic-rule: #aaa7ad;
+  --classic-hairline: #d5d3d7;
+  --classic-wash: #f5f4f6;
+  --classic-rail-width: 0.45mm;
+  --classic-rail-inset: 3mm;
+  color: var(--classic-ink);
   background: #ffffff;
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--font-geist-sans, "Geist"),
+    "Yu Gothic",
+    Meiryo,
+    sans-serif;
   font-size: 10.5pt;
   font-weight: 400;
   line-height: 1.75;
@@ -11,12 +25,12 @@
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document__header {
   margin: 0 0 9mm;
   padding: 0 0 5mm;
-  border-bottom: 0.4mm solid #7c3aed;
+  border-bottom: 0.4mm solid var(--classic-accent);
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document__title {
   margin: 0 0 3mm;
-  color: #111827;
+  color: var(--classic-ink);
   font-size: 22pt;
   font-weight: 700;
   line-height: 1.35;
@@ -27,7 +41,7 @@
   grid-template-columns: max-content 1fr;
   gap: 0.8mm 3mm;
   margin: 0;
-  color: #6b7280;
+  color: var(--classic-muted);
   font-size: 8.5pt;
   line-height: 1.55;
 }
@@ -39,13 +53,13 @@
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
   .pdf-markdown
   :is(h1, h2, h3, h4, h5, h6) {
-  color: #111827;
+  color: var(--classic-ink);
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h1 {
   margin: 10mm 0 4mm;
   padding-bottom: 2mm;
-  border-bottom: 0.25mm solid #d1d5db;
+  border-bottom: 0.25mm solid var(--classic-rule);
   font-size: 18pt;
   line-height: 1.45;
   letter-spacing: 0.035em;
@@ -53,25 +67,29 @@
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h2 {
   margin: 8mm 0 2.5mm;
-  padding-left: 2.5mm;
-  border-left: 0.45mm solid #9ca3af;
+  padding-left: var(--classic-rail-inset);
+  border-left: var(--classic-rail-width) solid var(--classic-accent);
   font-size: 12.5pt;
   line-height: 1.5;
   letter-spacing: 0.02em;
 }
 
-/* 本文・要点・引用を伴う章は、要約や技術メモなどの補助ブロックより強く示す。 */
+/* 本文・要点・引用を伴う章は、余白と文字サイズだけで階層を示す。 */
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
   .pdf-markdown
   h2:has(+ p + :is(ul, ol) + blockquote) {
-  margin-top: 14mm;
+  margin-top: 11mm;
   margin-bottom: 3mm;
-  padding-left: 3mm;
-  border-left-width: 1.1mm;
-  border-left-color: #6d28d9;
-  font-size: 15pt;
+  font-size: 14pt;
   line-height: 1.45;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.025em;
+}
+
+/* 反復する議事セクションの2つ目を次の紙面へ送り、章単位を再配分する。 */
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  > :nth-child(2 of h2:has(+ p + :is(ul, ol) + blockquote)) {
+  margin-top: 40mm;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h3 {
@@ -97,6 +115,8 @@
   margin: 0 0 3.5mm;
   text-align: left;
   word-spacing: normal;
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :is(ul, ol) {
@@ -135,31 +155,34 @@
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown strong {
-  color: #111827;
+  color: var(--classic-ink);
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown hr {
   height: 0;
   margin: 7mm 0;
   border: 0;
-  border-top: 0.25mm solid #d1d5db;
+  border-top: 0.25mm solid var(--classic-rule);
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown table {
   margin: 5mm 0;
   border-collapse: collapse;
-  color: #111827;
+  border-top: var(--classic-rail-width) solid var(--classic-accent);
+  border-bottom: var(--classic-rail-width) solid var(--classic-accent);
+  color: var(--classic-ink);
   font-size: 8.7pt;
   line-height: 1.55;
+  font-variant-numeric: tabular-nums;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :is(th, td) {
   padding: 1.8mm 2mm;
-  border: 0.25mm solid #d1d5db;
+  border: 0.25mm solid var(--classic-hairline);
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown th {
-  background: #f3f4f6;
+  background: var(--classic-wash);
   font-weight: 700;
 }
 
@@ -172,12 +195,15 @@
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown pre {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
   margin: 4mm 0;
-  padding: 3mm;
-  border: 0.25mm solid #d1d5db;
+  padding: 2.4mm 3mm;
+  border: 0.25mm solid var(--classic-hairline);
   border-radius: 1.5mm;
-  background: #f6f8fa;
-  color: #1f2937;
+  background: var(--classic-wash);
+  color: var(--classic-ink);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
     var(--font-noto-sans-jp, "Noto Sans JP"),
@@ -186,14 +212,20 @@
     monospace;
   font-size: 8.3pt;
   line-height: 1.55;
+  font-variant-ligatures: none;
+  unicode-bidi: plaintext;
+}
+
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown pre > code {
+  font: inherit;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :not(pre) > code {
   padding: 0.2mm 1mm;
-  border: 0.2mm solid #e5e7eb;
+  border: 0.2mm solid var(--classic-hairline);
   border-radius: 0.8mm;
-  background: #f3f4f6;
-  color: #6d28d9;
+  background: var(--classic-wash);
+  color: var(--classic-accent);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
     var(--font-noto-sans-jp, "Noto Sans JP"),
@@ -202,11 +234,26 @@
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown blockquote {
-  margin: 0 0 6mm;
-  padding: 2.5mm 3mm 2.5mm 4mm;
-  border-left: 1mm solid #a78bfa;
-  background: #faf7ff;
-  color: #374151;
+  margin: 0 0 5mm;
+  padding: 2.5mm 3mm 2.5mm var(--classic-rail-inset);
+  border-left: var(--classic-rail-width) solid var(--classic-accent);
+  background: var(--classic-wash);
+  color: #3f3e43;
   text-align: left;
   word-spacing: normal;
+}
+
+/* 冒頭要約と末尾の確定情報を、同じ実務的な情報ブロックとして結ぶ。 */
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  h2:has(+ p + table)
+  + p,
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  h2:has(+ p:last-child)
+  + p:last-child {
+  margin-bottom: 4mm;
+  padding: 2.5mm 3mm 2.5mm var(--classic-rail-inset);
+  border-left: var(--classic-rail-width) solid var(--classic-accent);
+  background: var(--classic-wash);
 }
