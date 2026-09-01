@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { useAdmin } from '@/hooks/useAdmin';
 import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User, Edit3, Bell, Menu, X } from 'lucide-react';
@@ -14,6 +15,10 @@ import ReauthModal from './ReauthModal';
 import DisplayNameModal from './DisplayNameModal';
 import { subscribeToPendingSubordinateRelationships } from '@/lib/relationships';
 import { useSystemNotifications } from '@/hooks/useSystemNotifications';
+import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
+import { NavItem, NavItemButton } from '@/components/ui/NavItem';
+import { SIGN_IN_LABEL } from '@/components/ui/labels';
 
 type Tab = 'home' | 'documents' | 'team' | 'notifications' | 'admin';
 type TeamView = 'subordinates' | 'supervisors';
@@ -22,10 +27,18 @@ const isValidTeamView = (view: string | null): view is TeamView =>
 
 const appHeaderLogger = createLogger('AppHeader');
 
+const MENU_ITEM_CLASS =
+    'flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action focus-visible:ring-offset-1';
+const MENU_ITEM_DANGER_CLASS =
+    'flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-status-danger transition-colors hover:bg-status-danger-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-status-danger focus-visible:ring-offset-1';
+const CORNER_BADGE_CLASS =
+    'absolute -right-1 -top-1 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold shadow-elevation-persistent';
+const INLINE_BADGE_CLASS =
+    'inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-badge px-1 text-[10px] font-bold text-badge-foreground';
+
 export const AppHeader: React.FC = () => {
     const { user, loading: authLoading } = useAuth();
     const { isAdmin } = useAdmin();
-    const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const [showDropdown, setShowDropdown] = useState(false);
@@ -34,9 +47,11 @@ export const AppHeader: React.FC = () => {
     const [showReauthModal, setShowReauthModal] = useState(false);
     const [showDisplayNameModal, setShowDisplayNameModal] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const accountMenuButtonRef = useRef<HTMLButtonElement>(null);
 
     const [showTeamMenu, setShowTeamMenu] = useState(false);
     const teamMenuRef = useRef<HTMLDivElement>(null);
+    const teamMenuButtonRef = useRef<HTMLButtonElement>(null);
     const [showMobileMenu, setShowMobileMenu] = useState(false);
     const [showMobileTeamMenu, setShowMobileTeamMenu] = useState(false);
     const mobileMenuRef = useRef<HTMLDivElement>(null);
@@ -75,9 +90,16 @@ export const AppHeader: React.FC = () => {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key !== 'Escape') return;
 
-            setShowDropdown(false);
-            setShowTeamMenu(false);
-
+            // 閉じたメニューの中にフォーカスが残ると、次の Tab が文書先頭へ飛ぶ。
+            // 開いていたメニューを開いたトリガーへ戻す。
+            if (showDropdown) {
+                setShowDropdown(false);
+                window.requestAnimationFrame(() => accountMenuButtonRef.current?.focus());
+            }
+            if (showTeamMenu) {
+                setShowTeamMenu(false);
+                window.requestAnimationFrame(() => teamMenuButtonRef.current?.focus());
+            }
             if (showMobileMenu) {
                 setShowMobileMenu(false);
                 setShowMobileTeamMenu(false);
@@ -91,7 +113,7 @@ export const AppHeader: React.FC = () => {
             document.removeEventListener('pointerdown', handleClickOutside);
             document.removeEventListener('keydown', handleKeyDown);
         };
-    }, [showMobileMenu]);
+    }, [showDropdown, showMobileMenu, showTeamMenu]);
 
     // デスクトップ幅へ切り替えた後に、非表示のモバイルメニュー状態を残さない
     useEffect(() => {
@@ -102,7 +124,7 @@ export const AppHeader: React.FC = () => {
                 setShowMobileTeamMenu(false);
                 if (showMobileMenu) {
                     window.requestAnimationFrame(() => {
-                        desktopNavRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+                        desktopNavRef.current?.querySelector<HTMLElement>('a[href], button')?.focus();
                     });
                 }
                 return;
@@ -124,7 +146,11 @@ export const AppHeader: React.FC = () => {
     const pendingBadgeDisplay = effectivePendingCount > 99 ? '99+' : effectivePendingCount;
 
     // お知らせの未読数（dismiss されていない通知の件数）。未認証時は常に0。
-    const { notifications: systemNotifications, dismissedIds } = useSystemNotifications();
+    const {
+        notifications: systemNotifications,
+        dismissedIds,
+        error: notificationsError,
+    } = useSystemNotifications();
     const unreadNotificationCount = user?.uid
         ? systemNotifications.filter(n => !dismissedIds.includes(n.id)).length
         : 0;
@@ -155,42 +181,16 @@ export const AppHeader: React.FC = () => {
         return 'home';
     })();
 
-    const navigateToTab = (tab: Tab, view?: TeamView) => {
-        switch (tab) {
-            case 'home':
-                router.push('/home');
-                return;
-            case 'documents':
-                router.push('/documents');
-                return;
-            case 'team': {
-                const params = new URLSearchParams(searchParams.toString());
-                params.set('view', (view || currentTeamView) ?? 'subordinates');
-                router.push(`/team?${params.toString()}`);
-                return;
-            }
-            case 'notifications':
-                router.push('/notifications');
-                return;
-            case 'admin':
-                router.push('/admin');
-                return;
-        }
+    // チームは view クエリを持つため、現在のクエリを保ったまま view だけ差し替える。
+    const teamHref = (view: TeamView) => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set('view', view);
+        return `/team?${params.toString()}`;
     };
 
     const closeMobileMenu = () => {
         setShowMobileMenu(false);
         setShowMobileTeamMenu(false);
-    };
-
-    const handleMobileNavigate = (tab: Tab, view?: TeamView) => {
-        closeMobileMenu();
-        navigateToTab(tab, view);
-    };
-
-    const handleTeamMenuSelect = (view: TeamView) => {
-        navigateToTab('team', view);
-        setShowTeamMenu(false);
     };
 
     const handleLogout = async () => {
@@ -270,440 +270,425 @@ export const AppHeader: React.FC = () => {
 
     const isEmailProvider = user?.providerData.some(p => p.providerId === 'password') || false;
 
+    const pendingCornerBadge = effectivePendingCount > 0 ? (
+        <span className={`${CORNER_BADGE_CLASS} bg-badge text-badge-foreground`}>
+            <span aria-hidden="true">{pendingBadgeDisplay}</span>
+            <span className="sr-only">未処理の申請 {pendingBadgeDisplay} 件</span>
+        </span>
+    ) : undefined;
+
+    const pendingInlineBadge = effectivePendingCount > 0 ? (
+        <span className={INLINE_BADGE_CLASS}>
+            <span aria-hidden="true">{pendingBadgeDisplay}</span>
+            <span className="sr-only">未処理の申請 {pendingBadgeDisplay} 件</span>
+        </span>
+    ) : undefined;
+
+    // 購読が壊れている間の 0 件表示は「お知らせなし」と読めてしまうため、
+    // 件数の代わりに取得失敗を示す。
+    const notificationCornerBadge = notificationsError ? (
+        <span className={`${CORNER_BADGE_CLASS} bg-status-warning-bg text-status-warning ring-1 ring-status-warning-border`}>
+            <span aria-hidden="true">!</span>
+            <span className="sr-only">お知らせを取得できませんでした</span>
+        </span>
+    ) : unreadNotificationCount > 0 ? (
+        <span className={`${CORNER_BADGE_CLASS} bg-badge text-badge-foreground`}>
+            <span aria-hidden="true">{unreadNotificationBadge}</span>
+            <span className="sr-only">未読 {unreadNotificationBadge} 件</span>
+        </span>
+    ) : undefined;
+
+    const notificationInlineBadge = notificationsError ? (
+        <span className="inline-flex h-[18px] shrink-0 items-center justify-center rounded-full bg-status-warning-bg px-2 text-[10px] font-bold text-status-warning ring-1 ring-status-warning-border">
+            取得失敗
+        </span>
+    ) : unreadNotificationCount > 0 ? (
+        <span className={INLINE_BADGE_CLASS}>
+            <span aria-hidden="true">{unreadNotificationBadge}</span>
+            <span className="sr-only">未読 {unreadNotificationBadge} 件</span>
+        </span>
+    ) : undefined;
+
     return (
-        <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
-            <div className="container mx-auto px-4 max-w-7xl">
-                <div className="flex items-center justify-between h-20 py-2">
+        <header className="sticky top-0 z-40 border-b border-elevation-persistent-boundary bg-surface shadow-elevation-persistent">
+            <div className="container mx-auto max-w-7xl px-4">
+                <div className="grid h-20 grid-cols-[1fr_auto_1fr] items-center gap-3 py-2">
                     {/* 左側: ロゴとタイトル */}
-                    <div className="mr-3 flex min-w-0 flex-1 items-center space-x-3 lg:mr-0 lg:flex-initial">
-                        <div className="shrink-0 p-2 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl shadow-lg">
-                            <Music className="w-6 h-6 text-white" />
-                        </div>
-                        <div className="min-w-0">
-                            <h1
-                                aria-label="商談くんミニ（簡易版）"
-                                className="flex min-w-0 items-center gap-2 text-xl font-bold text-gray-900 sm:text-2xl"
+                    <div className="flex min-w-0 items-center">
+                        <Link
+                            href="/home"
+                            aria-label="商談くんミニ（簡易版）"
+                            className="flex min-w-0 items-center gap-3 rounded-xl py-1 pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action focus-visible:ring-offset-2"
+                        >
+                            <span
+                                aria-hidden="true"
+                                className="inline-flex shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 p-2 shadow-elevation-persistent"
                             >
-                                <span className="block truncate lg:hidden" aria-hidden="true">商談くんミニ</span>
-                                <span className="hidden truncate lg:block" aria-hidden="true">商談くんミニ（簡易版）</span>
-                            </h1>
-                        </div>
+                                <Music className="h-6 w-6 text-white" />
+                            </span>
+                            <span className="min-w-0 truncate text-xl font-bold text-text-primary sm:text-2xl">
+                                商談くんミニ
+                            </span>
+                            <span className="hidden shrink-0 rounded-full border border-brand-border bg-brand-subtle px-2 py-0.5 text-xs font-bold text-brand sm:inline">
+                                簡易版
+                            </span>
+                        </Link>
                     </div>
 
                     {/* 中央: タブ */}
-                    <nav ref={desktopNavRef} className="hidden items-center space-x-1 lg:flex lg:shrink-0">
-                        <button
-                            onClick={() => navigateToTab('home')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'home'
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'text-gray-600 hover:bg-gray-100'
-                                }`}
-                        >
-                            <Home className="w-4 h-4" />
+                    <nav
+                        ref={desktopNavRef}
+                        aria-label="メインナビゲーション"
+                        className="hidden items-center gap-1 lg:flex"
+                    >
+                        <NavItem href="/home" icon={Home} active={activeTab === 'home'}>
                             ホーム
-                        </button>
-                        <button
-                            onClick={() => navigateToTab('documents')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'documents'
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'text-gray-600 hover:bg-gray-100'
-                                }`}
-                        >
-                            <FileText className="w-4 h-4" />
+                        </NavItem>
+                        <NavItem href="/documents" icon={FileText} active={activeTab === 'documents'}>
                             文書
-                        </button>
+                        </NavItem>
                         <div className="relative" ref={teamMenuRef}>
-                            <button
-                                type="button"
+                            <NavItemButton
+                                ref={teamMenuButtonRef}
+                                icon={Users}
+                                active={activeTab === 'team'}
+                                badge={pendingCornerBadge}
+                                trailing={
+                                    <ChevronDown
+                                        className={`h-4 w-4 shrink-0 transition-transform ${showTeamMenu ? 'rotate-180' : ''}`}
+                                        aria-hidden="true"
+                                    />
+                                }
                                 onClick={() => {
                                     setShowTeamMenu((prev) => !prev);
                                 }}
                                 aria-expanded={showTeamMenu}
                                 aria-controls={showTeamMenu ? 'app-header-team-menu' : undefined}
-                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 relative whitespace-nowrap ${activeTab === 'team'
-                                    ? 'bg-blue-100 text-blue-700'
-                                    : 'text-gray-600 hover:bg-gray-100'
-                                    }`}
                             >
-                                <Users className="w-4 h-4" />
                                 チーム
-                                {effectivePendingCount > 0 && (
-                                    <span className="absolute -top-1 -right-1 inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold min-w-[18px] h-[18px] px-1 shadow">
-                                        {pendingBadgeDisplay}
-                                    </span>
-                                )}
-                                <ChevronDown
-                                    className={`w-4 h-4 transition-transform ${showTeamMenu ? 'rotate-180' : ''}`}
-                                />
-                            </button>
+                            </NavItemButton>
                             {showTeamMenu && (
-                                <div id="app-header-team-menu" className="absolute left-0 mt-2 w-40 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-40">
-                                    <button
-                                        onClick={() => handleTeamMenuSelect('subordinates')}
-                                        className={`w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-gray-50 ${currentTeamView === 'subordinates' ? 'text-blue-600 font-semibold' : 'text-gray-700'
-                                            }`}
+                                <div
+                                    id="app-header-team-menu"
+                                    className="absolute left-0 z-40 mt-2 w-44 rounded-lg border border-border bg-surface p-1 shadow-elevation-overlay"
+                                >
+                                    <NavItem
+                                        href={teamHref('subordinates')}
+                                        layout="block"
+                                        active={activeTab === 'team' && currentTeamView === 'subordinates'}
+                                        badge={pendingInlineBadge}
+                                        onClick={() => setShowTeamMenu(false)}
                                     >
-                                        <span>部下</span>
-                                        {effectivePendingCount > 0 && (
-                                            <span className="inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold min-w-[18px] h-[18px] px-1">
-                                                {pendingBadgeDisplay}
-                                            </span>
-                                        )}
-                                    </button>
-                                    <button
-                                        onClick={() => handleTeamMenuSelect('supervisors')}
-                                        className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 ${currentTeamView === 'supervisors' ? 'text-blue-600 font-semibold' : 'text-gray-700'
-                                            }`}
+                                        部下
+                                    </NavItem>
+                                    <NavItem
+                                        href={teamHref('supervisors')}
+                                        layout="block"
+                                        active={activeTab === 'team' && currentTeamView === 'supervisors'}
+                                        onClick={() => setShowTeamMenu(false)}
                                     >
                                         上司
-                                    </button>
+                                    </NavItem>
                                 </div>
                             )}
                         </div>
-                        <button
-                            onClick={() => navigateToTab('notifications')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 relative whitespace-nowrap ${activeTab === 'notifications'
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'text-gray-600 hover:bg-gray-100'
-                                }`}
+                        <NavItem
+                            href="/notifications"
+                            icon={Bell}
+                            active={activeTab === 'notifications'}
+                            badge={notificationCornerBadge}
                         >
-                            <Bell className="w-4 h-4" />
                             お知らせ
-                            {unreadNotificationCount > 0 && (
-                                <span className="absolute -top-1 -right-1 inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold min-w-[18px] h-[18px] px-1 shadow">
-                                    {unreadNotificationBadge}
-                                </span>
-                            )}
-                        </button>
+                        </NavItem>
                         {isAdmin && (
-                            <button
-                                onClick={() => navigateToTab('admin')}
-                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'admin'
-                                    ? 'bg-blue-100 text-blue-700'
-                                    : 'text-gray-600 hover:bg-gray-100'
-                                    }`}
-                            >
-                                <Shield className="w-4 h-4" />
+                            <NavItem href="/admin" icon={Shield} active={activeTab === 'admin'}>
                                 管理者画面
-                            </button>
+                            </NavItem>
                         )}
                     </nav>
 
                     {/* 右側: ユーザーメニュー */}
-                    <div className="hidden min-w-0 items-center lg:flex lg:shrink-0">
-                        {authLoading ? (
-                            <div className="px-4 py-2 text-gray-500 text-sm">読み込み中...</div>
-                        ) : user ? (
-                            <div className="relative" ref={dropdownRef}>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowDropdown(!showDropdown)}
-                                    aria-expanded={showDropdown}
-                                    aria-controls={showDropdown ? 'app-header-account-menu' : undefined}
-                                    className="flex min-w-0 items-center gap-2 px-4 py-2 bg-white hover:bg-gray-50 rounded-lg border border-gray-300 transition-colors text-sm"
-                                >
-                                    <User className="w-4 h-4 shrink-0 text-gray-600" />
-                                    <span
-                                        className="max-w-24 truncate text-gray-700 lg:max-w-48 xl:max-w-56"
-                                        title={user.displayName || user.email || 'ログイン中'}
-                                    >
-                                        {user.displayName || user.email || 'ログイン中'}
-                                    </span>
-                                    <ChevronDown className={`w-4 h-4 shrink-0 text-gray-500 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
-                                </button>
-
-                                {showDropdown && (
-                                    <div id="app-header-account-menu" className="absolute right-0 mt-2 w-60 bg-white rounded-lg shadow-xl border border-gray-200 py-1 z-50">
-                                        <div className="px-4 py-3 border-b border-gray-100">
-                                            <p className="text-xs text-gray-500">表示名</p>
-                                            <p className="truncate text-sm font-semibold text-gray-900" title={user.displayName || '未設定'}>
-                                                {user.displayName || '未設定'}
-                                            </p>
-                                            <p className="text-xs text-gray-500 mt-1 break-all">{user.email}</p>
-                                        </div>
-                                        <button
-                                            onClick={() => {
-                                                setShowDropdown(false);
-                                                setShowDisplayNameModal(true);
-                                            }}
-                                            className="w-full px-4 py-2 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm text-gray-700"
-                                        >
-                                            <Edit3 className="w-4 h-4 text-gray-600" />
-                                            表示名を編集
-                                        </button>
-                                        {isEmailProvider && (
-                                            <button
-                                                onClick={handlePasswordChange}
-                                                className="w-full px-4 py-2 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm text-gray-700"
-                                            >
-                                                <Key className="w-4 h-4 text-blue-600" />
-                                                パスワードを変更
-                                            </button>
-                                        )}
-                                        <button
-                                            onClick={handleLogout}
-                                            className="w-full px-4 py-2 text-left hover:bg-gray-50 transition-colors flex items-center gap-3 text-sm text-gray-700"
-                                        >
-                                            <LogOut className="w-4 h-4 text-gray-600" />
-                                            ログアウト
-                                        </button>
-                                        <div className="border-t border-gray-200 my-1"></div>
-                                        <button
-                                            onClick={handleDeleteAccount}
-                                            className="w-full px-4 py-2 text-left hover:bg-red-50 transition-colors flex items-center gap-3 text-sm text-red-600"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                            アカウントを削除
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <button
-                                onClick={() => setShowAuthModal(true)}
-                                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm"
-                            >
-                                ログイン / アカウント作成
-                            </button>
-                        )}
-                    </div>
-
-                    {/* モバイル: ナビゲーションとアカウント操作を集約 */}
-                    <div className="shrink-0 lg:hidden" ref={mobileMenuRef}>
-                        <button
-                            ref={mobileMenuButtonRef}
-                            type="button"
-                            onClick={() => {
-                                if (showMobileMenu) setShowMobileTeamMenu(false);
-                                setShowMobileMenu(!showMobileMenu);
-                                setShowDropdown(false);
-                                setShowTeamMenu(false);
-                            }}
-                            aria-label={showMobileMenu ? 'メニューを閉じる' : 'メニューを開く'}
-                            aria-expanded={showMobileMenu}
-                            aria-controls="app-header-mobile-menu"
-                            className={`inline-flex h-11 w-11 items-center justify-center rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${showMobileMenu
-                                ? 'border-blue-200 bg-blue-50 text-blue-700'
-                                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                                }`}
-                        >
-                            {showMobileMenu ? (
-                                <X className="h-5 w-5" aria-hidden="true" />
-                            ) : (
-                                <Menu className="h-5 w-5" aria-hidden="true" />
-                            )}
-                        </button>
-
-                        <div
-                            id="app-header-mobile-menu"
-                            aria-hidden={!showMobileMenu}
-                            inert={!showMobileMenu}
-                            className={`absolute inset-x-0 top-full z-50 max-h-[calc(100dvh-5rem)] overflow-y-auto overscroll-contain border-y border-gray-200 bg-white shadow-lg transition-all duration-150 ease-out motion-reduce:transition-none ${showMobileMenu
-                                ? 'visible translate-y-0 opacity-100'
-                                : 'invisible pointer-events-none -translate-y-1 opacity-0'
-                                }`}
-                        >
-                            <div className="container mx-auto max-w-7xl px-4 py-2">
-                                <nav aria-label="モバイルメインナビゲーション" className="space-y-1">
+                    <div className="flex min-w-0 items-center justify-end">
+                        <div className="hidden min-w-0 items-center lg:flex">
+                            {authLoading ? (
+                                <div className="px-4 py-2 text-sm text-muted">読み込み中...</div>
+                            ) : user ? (
+                                <div className="relative" ref={dropdownRef}>
                                     <button
+                                        ref={accountMenuButtonRef}
                                         type="button"
-                                        onClick={() => handleMobileNavigate('home')}
-                                        aria-current={activeTab === 'home' ? 'page' : undefined}
-                                        className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'home'
-                                            ? 'bg-blue-100 text-blue-700'
-                                            : 'text-gray-700 hover:bg-gray-100'
-                                            }`}
+                                        onClick={() => setShowDropdown(!showDropdown)}
+                                        aria-expanded={showDropdown}
+                                        aria-controls={showDropdown ? 'app-header-account-menu' : undefined}
+                                        className="flex min-h-11 min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action focus-visible:ring-offset-2"
                                     >
-                                        <Home className="h-5 w-5 shrink-0" aria-hidden="true" />
-                                        ホーム
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => handleMobileNavigate('documents')}
-                                        aria-current={activeTab === 'documents' ? 'page' : undefined}
-                                        className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'documents'
-                                            ? 'bg-blue-100 text-blue-700'
-                                            : 'text-gray-700 hover:bg-gray-100'
-                                            }`}
-                                    >
-                                        <FileText className="h-5 w-5 shrink-0" aria-hidden="true" />
-                                        文書
-                                    </button>
-
-                                    <div>
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowMobileTeamMenu((previous) => !previous)}
-                                            aria-expanded={showMobileTeamMenu}
-                                            aria-controls={showMobileTeamMenu ? 'app-header-mobile-team-menu' : undefined}
-                                            className={`flex min-h-11 w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'team'
-                                                ? 'bg-blue-100 text-blue-700'
-                                                : 'text-gray-700 hover:bg-gray-100'
-                                                }`}
+                                        <User className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+                                        <span
+                                            className="max-w-24 truncate lg:max-w-48 xl:max-w-56"
+                                            title={user.displayName || user.email || 'ログイン中'}
                                         >
-                                            <span className="flex min-w-0 items-center gap-3">
-                                                <Users className="h-5 w-5 shrink-0" aria-hidden="true" />
-                                                <span>チーム</span>
-                                            </span>
-                                            <span className="flex shrink-0 items-center gap-2">
-                                                {effectivePendingCount > 0 && (
-                                                    <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white shadow">
-                                                        {pendingBadgeDisplay}
-                                                    </span>
-                                                )}
-                                                <ChevronDown
-                                                    className={`h-4 w-4 transition-transform ${showMobileTeamMenu ? 'rotate-180' : ''}`}
-                                                    aria-hidden="true"
-                                                />
-                                            </span>
-                                        </button>
-
-                                        {showMobileTeamMenu && (
-                                            <div id="app-header-mobile-team-menu" className="ml-5 mt-1 space-y-1 border-l-2 border-blue-100 pl-3">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleMobileNavigate('team', 'subordinates')}
-                                                    aria-current={activeTab === 'team' && currentTeamView === 'subordinates' ? 'page' : undefined}
-                                                    className={`flex min-h-11 w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'team' && currentTeamView === 'subordinates'
-                                                        ? 'bg-blue-50 font-semibold text-blue-700'
-                                                        : 'text-gray-700 hover:bg-gray-100'
-                                                        }`}
-                                                >
-                                                    <span>部下</span>
-                                                    {effectivePendingCount > 0 && (
-                                                        <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
-                                                            {pendingBadgeDisplay}
-                                                        </span>
-                                                    )}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleMobileNavigate('team', 'supervisors')}
-                                                    aria-current={activeTab === 'team' && currentTeamView === 'supervisors' ? 'page' : undefined}
-                                                    className={`flex min-h-11 w-full items-center rounded-xl px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'team' && currentTeamView === 'supervisors'
-                                                        ? 'bg-blue-50 font-semibold text-blue-700'
-                                                        : 'text-gray-700 hover:bg-gray-100'
-                                                        }`}
-                                                >
-                                                    上司
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => handleMobileNavigate('notifications')}
-                                        aria-current={activeTab === 'notifications' ? 'page' : undefined}
-                                        className={`flex min-h-11 w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'notifications'
-                                            ? 'bg-blue-100 text-blue-700'
-                                            : 'text-gray-700 hover:bg-gray-100'
-                                            }`}
-                                    >
-                                        <span className="flex min-w-0 items-center gap-3">
-                                            <Bell className="h-5 w-5 shrink-0" aria-hidden="true" />
-                                            <span>お知らせ</span>
+                                            {user.displayName || user.email || 'ログイン中'}
                                         </span>
-                                        {unreadNotificationCount > 0 && (
-                                            <span className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white shadow">
-                                                {unreadNotificationBadge}
-                                            </span>
-                                        )}
+                                        <ChevronDown
+                                            className={`h-4 w-4 shrink-0 text-muted transition-transform ${showDropdown ? 'rotate-180' : ''}`}
+                                            aria-hidden="true"
+                                        />
                                     </button>
 
-                                    {isAdmin && (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleMobileNavigate('admin')}
-                                            aria-current={activeTab === 'admin' ? 'page' : undefined}
-                                            className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'admin'
-                                                ? 'bg-blue-100 text-blue-700'
-                                                : 'text-gray-700 hover:bg-gray-100'
-                                                }`}
+                                    {showDropdown && (
+                                        <div
+                                            id="app-header-account-menu"
+                                            className="absolute right-0 z-50 mt-2 w-60 rounded-lg border border-border bg-surface p-1 shadow-elevation-overlay"
                                         >
-                                            <Shield className="h-5 w-5 shrink-0" aria-hidden="true" />
-                                            管理者画面
-                                        </button>
-                                    )}
-                                </nav>
-
-                                <div className="mt-2 border-t border-gray-200 pt-2">
-                                    {authLoading ? (
-                                        <div role="status" className="flex min-h-11 items-center px-3 text-sm text-gray-500">
-                                            読み込み中...
-                                        </div>
-                                    ) : user ? (
-                                        <>
-                                            <div className="mb-1 flex min-w-0 items-center gap-3 rounded-xl bg-gray-50 px-3 py-3">
-                                                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-gray-600 shadow-sm ring-1 ring-gray-200">
-                                                    <User className="h-4 w-4" aria-hidden="true" />
-                                                </span>
-                                                <div className="min-w-0 flex-1">
-                                                    <p
-                                                        className="max-w-full truncate text-sm font-semibold text-gray-900"
-                                                        title={user.displayName || '未設定'}
-                                                    >
-                                                        {user.displayName || '未設定'}
-                                                    </p>
-                                                    {user.email && (
-                                                        <p className="max-w-full truncate text-xs text-gray-500" title={user.email}>
-                                                            {user.email}
-                                                        </p>
-                                                    )}
-                                                </div>
+                                            <div className="border-b border-border px-3 py-3">
+                                                <p className="text-xs text-muted">表示名</p>
+                                                <p className="truncate text-sm font-bold text-text-primary" title={user.displayName || '未設定'}>
+                                                    {user.displayName || '未設定'}
+                                                </p>
+                                                <p className="mt-1 break-all text-xs text-muted">{user.email}</p>
                                             </div>
-
                                             <button
                                                 type="button"
                                                 onClick={() => {
-                                                    closeMobileMenu();
+                                                    setShowDropdown(false);
                                                     setShowDisplayNameModal(true);
                                                 }}
-                                                className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
+                                                className={MENU_ITEM_CLASS}
                                             >
-                                                <Edit3 className="h-5 w-5 shrink-0 text-gray-600" aria-hidden="true" />
+                                                <Edit3 className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
                                                 表示名を編集
                                             </button>
                                             {isEmailProvider && (
                                                 <button
                                                     type="button"
                                                     onClick={handlePasswordChange}
-                                                    className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
+                                                    className={MENU_ITEM_CLASS}
                                                 >
-                                                    <Key className="h-5 w-5 shrink-0 text-blue-600" aria-hidden="true" />
+                                                    <Key className="h-4 w-4 shrink-0 text-action" aria-hidden="true" />
                                                     パスワードを変更
                                                 </button>
                                             )}
                                             <button
                                                 type="button"
                                                 onClick={handleLogout}
-                                                className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
+                                                className={MENU_ITEM_CLASS}
                                             >
-                                                <LogOut className="h-5 w-5 shrink-0 text-gray-600" aria-hidden="true" />
+                                                <LogOut className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
                                                 ログアウト
                                             </button>
+                                            <div className="my-1 border-t border-border"></div>
                                             <button
                                                 type="button"
                                                 onClick={handleDeleteAccount}
-                                                className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-1"
+                                                className={MENU_ITEM_DANGER_CLASS}
                                             >
-                                                <Trash2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+                                                <Trash2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                                                 アカウントを削除
                                             </button>
-                                        </>
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                closeMobileMenu();
-                                                setShowAuthModal(true);
-                                            }}
-                                            className="flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-                                        >
-                                            ログイン / アカウント作成
-                                        </button>
+                                        </div>
                                     )}
+                                </div>
+                            ) : (
+                                <Button onClick={() => setShowAuthModal(true)}>{SIGN_IN_LABEL}</Button>
+                            )}
+                        </div>
+
+                        {/* モバイル: ナビゲーションとアカウント操作を集約 */}
+                        <div className="shrink-0 lg:hidden" ref={mobileMenuRef}>
+                            <IconButton
+                                ref={mobileMenuButtonRef}
+                                variant="secondary"
+                                onClick={() => {
+                                    if (showMobileMenu) setShowMobileTeamMenu(false);
+                                    setShowMobileMenu(!showMobileMenu);
+                                    setShowDropdown(false);
+                                    setShowTeamMenu(false);
+                                }}
+                                aria-label={showMobileMenu ? 'メニューを閉じる' : 'メニューを開く'}
+                                aria-expanded={showMobileMenu}
+                                aria-controls="app-header-mobile-menu"
+                                selected={showMobileMenu}
+                            >
+                                {showMobileMenu ? (
+                                    <X className="h-5 w-5" aria-hidden="true" />
+                                ) : (
+                                    <Menu className="h-5 w-5" aria-hidden="true" />
+                                )}
+                            </IconButton>
+
+                            <div
+                                id="app-header-mobile-menu"
+                                aria-hidden={!showMobileMenu}
+                                inert={!showMobileMenu}
+                                className={`absolute inset-x-0 top-full z-50 max-h-[calc(100dvh-5rem)] overflow-y-auto overscroll-contain border-y border-border bg-surface shadow-elevation-overlay transition-all duration-150 ease-out motion-reduce:transition-none ${showMobileMenu
+                                    ? 'visible translate-y-0 opacity-100'
+                                    : 'invisible pointer-events-none -translate-y-1 opacity-0'
+                                    }`}
+                            >
+                                <div className="container mx-auto max-w-7xl px-4 py-2">
+                                    <nav aria-label="モバイルメインナビゲーション" className="space-y-1">
+                                        <NavItem
+                                            href="/home"
+                                            layout="block"
+                                            icon={Home}
+                                            active={activeTab === 'home'}
+                                            onClick={closeMobileMenu}
+                                        >
+                                            ホーム
+                                        </NavItem>
+
+                                        <NavItem
+                                            href="/documents"
+                                            layout="block"
+                                            icon={FileText}
+                                            active={activeTab === 'documents'}
+                                            onClick={closeMobileMenu}
+                                        >
+                                            文書
+                                        </NavItem>
+
+                                        <div>
+                                            <NavItemButton
+                                                layout="block"
+                                                icon={Users}
+                                                active={activeTab === 'team'}
+                                                badge={pendingInlineBadge}
+                                                trailing={
+                                                    <ChevronDown
+                                                        className={`h-4 w-4 shrink-0 transition-transform ${showMobileTeamMenu ? 'rotate-180' : ''}`}
+                                                        aria-hidden="true"
+                                                    />
+                                                }
+                                                onClick={() => setShowMobileTeamMenu((previous) => !previous)}
+                                                aria-expanded={showMobileTeamMenu}
+                                                aria-controls={showMobileTeamMenu ? 'app-header-mobile-team-menu' : undefined}
+                                            >
+                                                チーム
+                                            </NavItemButton>
+
+                                            {showMobileTeamMenu && (
+                                                <div id="app-header-mobile-team-menu" className="ml-5 mt-1 space-y-1 border-l-2 border-brand-border pl-3">
+                                                    <NavItem
+                                                        href={teamHref('subordinates')}
+                                                        layout="block"
+                                                        active={activeTab === 'team' && currentTeamView === 'subordinates'}
+                                                        badge={pendingInlineBadge}
+                                                        onClick={closeMobileMenu}
+                                                    >
+                                                        部下
+                                                    </NavItem>
+                                                    <NavItem
+                                                        href={teamHref('supervisors')}
+                                                        layout="block"
+                                                        active={activeTab === 'team' && currentTeamView === 'supervisors'}
+                                                        onClick={closeMobileMenu}
+                                                    >
+                                                        上司
+                                                    </NavItem>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <NavItem
+                                            href="/notifications"
+                                            layout="block"
+                                            icon={Bell}
+                                            active={activeTab === 'notifications'}
+                                            badge={notificationInlineBadge}
+                                            onClick={closeMobileMenu}
+                                        >
+                                            お知らせ
+                                        </NavItem>
+
+                                        {isAdmin && (
+                                            <NavItem
+                                                href="/admin"
+                                                layout="block"
+                                                icon={Shield}
+                                                active={activeTab === 'admin'}
+                                                onClick={closeMobileMenu}
+                                            >
+                                                管理者画面
+                                            </NavItem>
+                                        )}
+                                    </nav>
+
+                                    <div className="mt-2 border-t border-border pt-2">
+                                        {authLoading ? (
+                                            <div role="status" className="flex min-h-11 items-center px-3 text-sm text-muted">
+                                                読み込み中...
+                                            </div>
+                                        ) : user ? (
+                                            <>
+                                                <div className="mb-1 flex min-w-0 items-center gap-3 rounded-xl bg-surface-subtle px-3 py-3">
+                                                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface text-muted shadow-elevation-persistent ring-1 ring-border">
+                                                        <User className="h-4 w-4" aria-hidden="true" />
+                                                    </span>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p
+                                                            className="max-w-full truncate text-sm font-bold text-text-primary"
+                                                            title={user.displayName || '未設定'}
+                                                        >
+                                                            {user.displayName || '未設定'}
+                                                        </p>
+                                                        {user.email && (
+                                                            <p className="max-w-full truncate text-xs text-muted" title={user.email}>
+                                                                {user.email}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        closeMobileMenu();
+                                                        setShowDisplayNameModal(true);
+                                                    }}
+                                                    className={MENU_ITEM_CLASS}
+                                                >
+                                                    <Edit3 className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+                                                    表示名を編集
+                                                </button>
+                                                {isEmailProvider && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handlePasswordChange}
+                                                        className={MENU_ITEM_CLASS}
+                                                    >
+                                                        <Key className="h-5 w-5 shrink-0 text-action" aria-hidden="true" />
+                                                        パスワードを変更
+                                                    </button>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={handleLogout}
+                                                    className={MENU_ITEM_CLASS}
+                                                >
+                                                    <LogOut className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+                                                    ログアウト
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleDeleteAccount}
+                                                    className={MENU_ITEM_DANGER_CLASS}
+                                                >
+                                                    <Trash2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+                                                    アカウントを削除
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <Button
+                                                className="w-full"
+                                                onClick={() => {
+                                                    closeMobileMenu();
+                                                    setShowAuthModal(true);
+                                                }}
+                                            >
+                                                {SIGN_IN_LABEL}
+                                            </Button>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>

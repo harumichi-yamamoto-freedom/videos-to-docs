@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from './useAuth';
 import {
     SystemNotification,
@@ -17,6 +17,11 @@ export interface UseSystemNotificationsResult {
     loading: boolean;
     /** ホーム最上部バナーに出す通知（dismiss 済み除外）。未認証時は1ヶ月以内最新1件のみ */
     bannerNotifications: SystemNotification[];
+    /** 購読が失敗した状態。loading は解除されるので、消費者側で必ず出口を出すこと。 */
+    error: Error | null;
+    /** 購読は壊れているが、直前に取得済みの内容を表示している状態。 */
+    stale: boolean;
+    retry: () => void;
 }
 
 export function useSystemNotifications(): UseSystemNotificationsResult {
@@ -25,6 +30,9 @@ export function useSystemNotifications(): UseSystemNotificationsResult {
     const [dismissedIds, setDismissedIds] = useState<string[]>([]);
     const [notificationsLoaded, setNotificationsLoaded] = useState(false);
     const [dismissalsLoaded, setDismissalsLoaded] = useState(false);
+    const [notificationsError, setNotificationsError] = useState<Error | null>(null);
+    const [dismissalsError, setDismissalsError] = useState<Error | null>(null);
+    const [attempt, setAttempt] = useState(0);
     // 1ヶ月以内判定の基準時刻。マウント時に固定して useMemo 内で純粋に扱えるようにする。
     const [mountedAt] = useState(() => Date.now());
 
@@ -37,24 +45,42 @@ export function useSystemNotifications(): UseSystemNotificationsResult {
         setLastUid(currentUid);
         setDismissedIds([]);
         setDismissalsLoaded(false);
+        setDismissalsError(null);
     }
 
     useEffect(() => {
-        const unsubscribe = subscribeToPublishedNotifications(list => {
-            setNotifications(list);
-            setNotificationsLoaded(true);
-        });
+        const unsubscribe = subscribeToPublishedNotifications(
+            list => {
+                setNotifications(list);
+                setNotificationsError(null);
+                setNotificationsLoaded(true);
+            },
+            error => {
+                // loaded を立てないと loading が永久に true のままになり、
+                // 消費者は「読み込み中」と区別できないまま何も出せなくなる。
+                setNotificationsError(error);
+                setNotificationsLoaded(true);
+            },
+        );
         return () => unsubscribe();
-    }, []);
+    }, [attempt]);
 
     useEffect(() => {
         if (!user?.uid) return;
-        const unsubscribe = subscribeToDismissals(user.uid, ids => {
-            setDismissedIds(ids);
-            setDismissalsLoaded(true);
-        });
+        const unsubscribe = subscribeToDismissals(
+            user.uid,
+            ids => {
+                setDismissedIds(ids);
+                setDismissalsError(null);
+                setDismissalsLoaded(true);
+            },
+            error => {
+                setDismissalsError(error);
+                setDismissalsLoaded(true);
+            },
+        );
         return () => unsubscribe();
-    }, [user?.uid]);
+    }, [user?.uid, attempt]);
 
     const bannerNotifications = useMemo<SystemNotification[]>(() => {
         if (user?.uid) {
@@ -71,10 +97,23 @@ export function useSystemNotifications(): UseSystemNotificationsResult {
     // 未認証時は dismiss の概念がないのでロード待ちにしない。
     const effectiveDismissalsLoaded = user?.uid ? dismissalsLoaded : true;
 
+    const retry = useCallback(() => {
+        setNotificationsError(null);
+        setDismissalsError(null);
+        setNotificationsLoaded(false);
+        setDismissalsLoaded(false);
+        setAttempt(previous => previous + 1);
+    }, []);
+
+    const error = notificationsError ?? dismissalsError;
+
     return {
         notifications,
         dismissedIds,
         loading: authLoading || !notificationsLoaded || !effectiveDismissalsLoaded,
         bannerNotifications,
+        error,
+        stale: error !== null && notifications.length > 0,
+        retry,
     };
 }

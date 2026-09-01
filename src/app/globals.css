@@ -11,10 +11,54 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f1f5f9;
+  --color-text-primary: #111827;
+  --color-text-secondary: #1f2937;
+  /* #374151 on white is 10.31:1 (WCAG AAA for normal text). */
+  --color-muted: #374151;
+  --color-border: #d1d5db;
+
+  --color-brand: #1e3a8a;
+  --color-brand-subtle: #eff6ff;
+  --color-brand-border: #93c5fd;
+  --color-action: #1d4ed8;
+  --color-action-hover: #1e40af;
+  --color-action-foreground: #ffffff;
+  --color-selection: #eff6ff;
+  --color-selection-foreground: #1e3a8a;
+  --color-selection-boundary: #1d4ed8;
+
+  --color-status-warning: #713f12;
+  --color-status-warning-bg: #fefce8;
+  --color-status-warning-border: #fde047;
+  --color-status-danger: #7f1d1d;
+  --color-status-danger-bg: #fef2f2;
+  --color-status-danger-border: #fca5a5;
+  --color-status-info: #1e3a8a;
+  --color-status-info-bg: #eff6ff;
+  --color-status-info-border: #93c5fd;
+  /* 状態面をそのまま押せるとき（バナー等）の hover。地の bg と対で使う。 */
+  --color-status-info-bg-hover: #dbeafe;
+  --color-status-danger-bg-hover: #fee2e2;
+  /* 危険操作ボタンの hover。#7f1d1d より更に暗く、白文字で 13.2:1。 */
+  --color-status-danger-strong: #601414;
+  /* 件数バッジ。10px 太字を白で載せるため red-500(3.76:1) ではなく red-700(6.47:1)。 */
+  --color-badge: #b91c1c;
+  --color-badge-foreground: #ffffff;
+
+  /* elevation 3 段。常設=境界+弱い影 / 選択=境界色だけを差し替え（--color-selection-boundary
+     が選択段の境界色。ここに別名を置くと同じ役割が 2 名前になる） / オーバーレイ=強い影。 */
+  --color-elevation-persistent-boundary: #e5e7eb;
+  --shadow-elevation-persistent: 0 1px 3px 0 rgb(0 0 0 / 0.1),
+    0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-elevation-overlay: 0 20px 25px -5px rgb(0 0 0 / 0.1),
+    0 8px 10px -6px rgb(0 0 0 / 0.1);
+
   /* ライト設定の font-medium 日本語は可読性向上のため意図的に中太化する。 */
   /* このスタックは body の font-family と同一に保つこと（片側だけ編集すると html/body で書体が乖離する）。 */
-  --font-sans: Arial, Helvetica, "Hiragino Sans", "Yu Gothic Medium",
-    "Yu Gothic", Meiryo, sans-serif;
+  --font-sans: var(--font-ui), "Noto Sans JP", Arial, Helvetica,
+    "Hiragino Sans", "Yu Gothic Medium", "Yu Gothic", Meiryo, sans-serif;
   --font-mono: var(--font-geist-mono), "BIZ UDGothic",
     "Noto Sans Mono CJK JP", "MS Gothic", "Hiragino Sans", monospace;
 }
@@ -22,9 +66,10 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  /* @theme inline の変数を body から var() 参照してはならない。
+  /* --font-ui は next/font の body class が実CSS変数として注入するため参照できる。
+     @theme inline の変数自体を body から var() 参照してはならない。
      理由: @theme inline は実CSSカスタムプロパティを :root へ出力しないため、
      var() は guaranteed-invalid になり font-family が preflight 既定へ静かに落ちる。 */
-  font-family: Arial, Helvetica, "Hiragino Sans", "Yu Gothic Medium",
-    "Yu Gothic", Meiryo, sans-serif;
+  font-family: var(--font-ui), "Noto Sans JP", Arial, Helvetica,
+    "Hiragino Sans", "Yu Gothic Medium", "Yu Gothic", Meiryo, sans-serif;
 }

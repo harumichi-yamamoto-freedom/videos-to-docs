@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import {
   BIZ_UDPGothic,
   Geist_Mono,
+  Noto_Sans_JP,
   Noto_Serif_JP,
   Shippori_Mincho,
   Zen_Kaku_Gothic_New,
@@ -28,6 +29,14 @@ const notoSansJP = localFont({
   preload: false,
   fallback: ["Hiragino Sans", "Yu Gothic", "Meiryo", "sans-serif"],
   adjustFontFallback: false,
+});
+
+const uiFont = Noto_Sans_JP({
+  weight: ["400", "500", "700"],
+  subsets: ["latin"],
+  variable: "--font-ui",
+  display: "swap",
+  preload: false,
 });
 
 const geistMono = Geist_Mono({
@@ -92,7 +101,7 @@ export default function RootLayout({
         <meta name="color-scheme" content="light" />
       </head>
       <body
-        className={`${notoSansJP.variable} ${geistMono.variable} ${notoSerifJP.variable} ${zenKakuGothicNew.variable} ${shipporiMincho.variable} ${bizUDPGothic.variable} ${zenMaruGothic.variable} antialiased`}
+        className={`${uiFont.variable} ${notoSansJP.variable} ${geistMono.variable} ${notoSerifJP.variable} ${zenKakuGothicNew.variable} ${shipporiMincho.variable} ${bizUDPGothic.variable} ${zenMaruGothic.variable} antialiased`}
       >
         {children}
       </body>
