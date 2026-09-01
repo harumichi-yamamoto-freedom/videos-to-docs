@@ -61,6 +61,9 @@ export const PDF_THEME_RECOMMENDED_FONT: Record<PdfThemeId, ConcretePdfFontId> =
         sakura: 'gothic',
         consulting: 'gothic',
         architect: 'zen',
+        estate: 'gothic',
+        genba: 'gothic',
+        brand: 'gothic',
     };
 
 export function isPdfFontId(value: unknown): value is PdfFontId {

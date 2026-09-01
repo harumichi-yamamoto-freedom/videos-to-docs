@@ -49,6 +49,21 @@ export const PDF_THEMES = [
         label: '設計士',
         description: '図面のような精密な罫と墨の階調。製図ブルーの基準線',
     },
+    {
+        id: 'estate',
+        label: '邸宅',
+        description: '生成りと真鍮の上質な余白。施主への提案にふさわしい格',
+    },
+    {
+        id: 'genba',
+        label: '現場',
+        description: '決定・宿題・期限が最速で拾える定例議事録の実務仕様',
+    },
+    {
+        id: 'brand',
+        label: 'フリーダム',
+        description: '深青緑のコーポレート公式。どの文書にも合う信頼の既定',
+    },
 ] as const;
 
 export type PdfThemeId = (typeof PDF_THEMES)[number]['id'];

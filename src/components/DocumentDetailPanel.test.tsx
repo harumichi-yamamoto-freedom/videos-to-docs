@@ -66,6 +66,7 @@ type DocumentPrintPortalProps = {
     active: boolean;
     includeMetadata: boolean;
     theme: string;
+    font?: string;
 };
 
 type PdfPreviewProps = {

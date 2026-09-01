@@ -1,0 +1,674 @@
+/*
+ * Estate / 邸宅
+ * Warm paper, measured whitespace, and a restrained bronze inlay for a
+ * custom-residence meeting record with the bearing of a private brand book.
+ */
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document {
+  --estate-paper: #fffefa;
+  --estate-ivory: #faf7f0;
+  --estate-wash: #f1ece3;
+  --estate-ink: #2b2925;
+  --estate-ink-soft: #514c45;
+  --estate-bronze: #8c6f4a;
+  --estate-bronze-deep: #6f5436;
+  --estate-rule-strong: #958b7d;
+  --estate-rule: #c5bcaf;
+  --estate-rule-soft: #e1dad0;
+
+  color: var(--estate-ink);
+  background: var(--estate-paper);
+  font-family:
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 10.2pt;
+  font-weight: 400;
+  line-height: 1.82;
+  letter-spacing: 0;
+  word-spacing: 0;
+  font-kerning: normal;
+  text-autospace: ideograph-alpha ideograph-numeric;
+}
+
+/* Optional project cover: quiet rules and one short bronze inlay. */
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document__header {
+  position: relative;
+  margin: 0 0 11mm;
+  padding: 9mm 0 5.8mm;
+  border-top: 0.18mm solid var(--estate-rule-strong);
+  border-bottom: 0.3mm solid var(--estate-ink);
+  background: var(--estate-paper);
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document__header::before {
+  content: "";
+  position: absolute;
+  top: -0.18mm;
+  left: 0;
+  width: 32mm;
+  border-top: 0.68mm solid var(--estate-bronze);
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document__header::after {
+  content: "PRIVATE RESIDENCE / MEETING RECORD";
+  position: absolute;
+  top: 2.4mm;
+  right: 0;
+  color: var(--estate-bronze-deep);
+  font-size: 8pt;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.12em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document__title {
+  max-width: 154mm;
+  margin: 0 0 6.2mm;
+  color: var(--estate-ink);
+  font-size: 23pt;
+  font-weight: 700;
+  line-height: 1.34;
+  letter-spacing: 0.025em;
+  font-feature-settings: "palt" 1, "kern" 1;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document__meta {
+  grid-template-columns: 22mm minmax(0, 1fr);
+  gap: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 2.4mm 3.6mm;
+  border-top: 0.18mm solid var(--estate-rule);
+  border-bottom: 0.18mm solid var(--estate-rule);
+  background: var(--estate-ivory);
+  color: var(--estate-ink-soft);
+  font-size: 8.6pt;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document__meta
+  :is(dt, dd) {
+  min-width: 0;
+  padding: 1.15mm 0;
+  border-bottom: 0.14mm solid var(--estate-rule-soft);
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document__meta dt {
+  margin: 0;
+  padding-right: 3mm;
+  color: var(--estate-bronze-deep);
+  font-size: 8pt;
+  font-weight: 700;
+  line-height: 1.67;
+  letter-spacing: 0.045em;
+  white-space: nowrap;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document__meta dd {
+  margin: 0;
+  color: var(--estate-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document__meta
+  :is(dt, dd):last-of-type {
+  border-bottom: 0;
+}
+
+/* The content carries its own opening datum, so it remains composed without a cover. */
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown {
+  position: relative;
+  counter-reset: estate-section;
+  padding-top: 7.2mm;
+  border-top: 0.2mm solid var(--estate-ink-soft);
+  color: var(--estate-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown::before {
+  content: "";
+  position: absolute;
+  top: -0.2mm;
+  right: 0;
+  width: 30mm;
+  border-top: 0.68mm solid var(--estate-bronze);
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown::after {
+  content: "DESIGN MEETING / RECORD";
+  position: absolute;
+  top: 1.55mm;
+  right: 0;
+  color: var(--estate-bronze-deep);
+  font-size: 8pt;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.12em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--estate-ink);
+  font-weight: 700;
+  font-feature-settings: "palt" 1, "kern" 1;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown h1 {
+  position: relative;
+  margin: 11.5mm 0 5mm;
+  padding: 0 0 3.5mm;
+  border-bottom: 0.34mm solid var(--estate-ink-soft);
+  font-size: 19.5pt;
+  line-height: 1.42;
+  letter-spacing: 0.028em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown h1::before {
+  content: "PROJECT NOTE";
+  display: block;
+  margin-bottom: 2.4mm;
+  color: var(--estate-bronze-deep);
+  font-size: 8pt;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.13em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown h1::after {
+  content: "";
+  position: absolute;
+  bottom: -0.34mm;
+  left: 0;
+  width: 26mm;
+  border-bottom: 0.72mm solid var(--estate-bronze);
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown > h1:first-child {
+  margin-top: 1.6mm;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown h2 {
+  counter-increment: estate-section;
+  position: relative;
+  margin: 9.2mm 0 3.8mm;
+  padding: 0 0 2.2mm 15.5mm;
+  border-bottom: 0.18mm solid var(--estate-rule-strong);
+  font-size: 14.2pt;
+  line-height: 1.48;
+  letter-spacing: 0.022em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown h2::before {
+  content: counter(estate-section, decimal-leading-zero);
+  position: absolute;
+  top: 0.48em;
+  left: 0;
+  width: 12mm;
+  padding-right: 3mm;
+  border-right: 0.18mm solid var(--estate-rule);
+  color: var(--estate-bronze-deep);
+  font-size: 8.2pt;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown > h2:first-child {
+  margin-top: 1.8mm;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown h3 {
+  margin: 6.8mm 0 2.8mm;
+  padding: 0.45mm 0 0.5mm 3.4mm;
+  border-left: 0.48mm solid var(--estate-bronze);
+  font-size: 11.8pt;
+  line-height: 1.52;
+  letter-spacing: 0.025em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown h4 {
+  margin: 5.7mm 0 2.4mm;
+  padding-bottom: 1.15mm;
+  border-bottom: 0.16mm solid var(--estate-rule);
+  font-size: 10.7pt;
+  line-height: 1.58;
+  letter-spacing: 0.025em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown h5 {
+  margin: 4.9mm 0 2mm;
+  color: var(--estate-ink-soft);
+  font-size: 9.8pt;
+  line-height: 1.62;
+  letter-spacing: 0.04em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown h6 {
+  display: inline-block;
+  margin: 4.4mm 0 1.9mm;
+  padding: 0.55mm 1.7mm;
+  border: 0.18mm solid var(--estate-rule-strong);
+  background: var(--estate-ivory);
+  color: var(--estate-ink-soft);
+  font-size: 9.1pt;
+  line-height: 1.5;
+  letter-spacing: 0.055em;
+}
+
+/* Japanese copy stays compact; hierarchy comes from measure and spacing. */
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown p {
+  margin: 0 0 3.8mm;
+  color: var(--estate-ink);
+  line-height: 1.82;
+  letter-spacing: 0;
+  word-spacing: 0;
+  line-break: strict;
+  word-break: auto-phrase;
+  overflow-wrap: anywhere;
+  text-align: start;
+  text-justify: auto;
+  text-wrap: pretty;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown
+  :is(li, th, td, blockquote)
+  p {
+  text-align: left;
+  text-justify: auto;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown
+  :is(ul, ol) {
+  margin: 0 0 4mm;
+  padding-left: 1.85em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown
+  > ul:not(.contains-task-list) {
+  list-style: square outside;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown
+  > ol:not(.contains-task-list) {
+  list-style: decimal-leading-zero outside;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown li {
+  margin: 0;
+  padding-left: 0.12em;
+  color: var(--estate-ink);
+  line-height: 1.72;
+  letter-spacing: 0;
+  word-spacing: 0;
+  line-break: strict;
+  word-break: auto-phrase;
+  text-wrap: pretty;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown li + li {
+  margin-top: 1mm;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown
+  :is(ul ul, ul ol, ol ul, ol ol) {
+  margin-top: 1mm;
+  margin-bottom: 0.6mm;
+  padding-left: 1.65em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown ul ul {
+  list-style-type: circle;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown ul ul ul {
+  list-style-type: disc;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown ol ol {
+  list-style-type: lower-alpha;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown ul > li::marker {
+  color: var(--estate-bronze-deep);
+  font-size: 0.82em;
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown ol > li::marker {
+  color: var(--estate-bronze-deep);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown li > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown .contains-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown .task-list-item {
+  padding-left: 0;
+  list-style: none;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-document
+  .pdf-markdown
+  .task-list-item
+  input[type="checkbox"] {
+  width: 3.2mm;
+  height: 3.2mm;
+  margin: 0 1.7mm 0 0;
+  accent-color: var(--estate-bronze-deep);
+  vertical-align: -0.32mm;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown a {
+  color: var(--estate-bronze-deep);
+  font-weight: 600;
+  text-decoration-line: underline;
+  text-decoration-color: var(--estate-bronze);
+  text-decoration-style: solid;
+  text-decoration-thickness: 0.18mm;
+  text-underline-offset: 0.18em;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown strong {
+  color: var(--estate-ink);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown hr {
+  width: 30mm;
+  height: 0;
+  margin: 9.5mm auto;
+  border: 0;
+  border-top: 0.46mm solid var(--estate-bronze);
+}
+
+/* Specification table: pale material tones, dark type, and durable rules. */
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown table {
+  width: 100%;
+  max-width: 100%;
+  margin: 5.2mm 0 6mm;
+  border: 0.22mm solid var(--estate-rule-strong);
+  border-top: 0.62mm solid var(--estate-bronze-deep);
+  border-bottom: 0.34mm solid var(--estate-ink-soft);
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+  background: var(--estate-paper);
+  color: var(--estate-ink);
+  font-size: 9.1pt;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown thead {
+  background: var(--estate-wash);
+  color: var(--estate-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown tr {
+  background: var(--estate-paper);
+  color: var(--estate-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown
+  :is(th, td) {
+  padding: 2.35mm 2.5mm;
+  border: 0;
+  border-right: 0.16mm solid var(--estate-rule);
+  border-bottom: 0.16mm solid var(--estate-rule-soft);
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown th {
+  border-bottom: 0.34mm solid var(--estate-ink-soft);
+  background: var(--estate-wash);
+  color: var(--estate-ink);
+  font-size: 9pt;
+  font-weight: 700;
+  line-height: 1.48;
+  letter-spacing: 0.02em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown td {
+  background: var(--estate-paper);
+  color: var(--estate-ink);
+  font-size: 9.1pt;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown tbody tr:nth-child(even) td {
+  background: var(--estate-ivory);
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown tbody td:first-child {
+  color: var(--estate-ink-soft);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown :is(th, td):last-child {
+  border-right: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown
+  :is(th, td)
+  > :last-child {
+  margin-bottom: 0;
+}
+
+/* Architect's note: a warm field with a named, structural left rail. */
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown blockquote {
+  margin: 5.5mm 0 6mm;
+  padding: 3.5mm 4.6mm 3.8mm 6mm;
+  border-top: 0.18mm solid var(--estate-rule);
+  border-right: 0;
+  border-bottom: 0.18mm solid var(--estate-rule);
+  border-left: 0.68mm solid var(--estate-bronze);
+  border-radius: 0;
+  background: var(--estate-ivory);
+  color: var(--estate-ink-soft);
+  font-size: 9.9pt;
+  font-style: normal;
+  line-height: 1.78;
+  letter-spacing: 0;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown blockquote::before {
+  content: "ARCHITECT'S NOTE / 設計士より";
+  display: block;
+  margin-bottom: 2.2mm;
+  color: var(--estate-bronze-deep);
+  font-size: 8pt;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: 0.1em;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown blockquote p {
+  color: inherit;
+  line-height: inherit;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown blockquote strong {
+  color: var(--estate-ink);
+}
+
+/* Code uses a neutral specification-card treatment rather than a dark panel. */
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown code {
+  font-family:
+    var(--font-geist-mono, "Geist Mono"),
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    "Hiragino Sans",
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-variant-ligatures: none;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown pre {
+  margin: 5.2mm 0 5.8mm;
+  padding: 3.8mm 4.2mm;
+  border: 0.18mm solid var(--estate-rule);
+  border-top: 0.52mm solid var(--estate-bronze-deep);
+  border-radius: 0;
+  background: var(--estate-wash);
+  color: var(--estate-ink);
+  font-family:
+    var(--font-geist-mono, "Geist Mono"),
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    "Hiragino Sans",
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-size: 8.8pt;
+  line-height: 1.65;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown pre > code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: inherit;
+  overflow: visible;
+}
+
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown
+  :not(pre)
+  > code {
+  display: inline;
+  padding: 0.15mm 0.8mm;
+  border: 0.16mm solid var(--estate-rule);
+  border-bottom: 0.3mm solid var(--estate-bronze);
+  border-radius: 0;
+  background: var(--estate-ivory);
+  color: var(--estate-ink-soft);
+  font-size: 1em;
+  line-height: 1.25;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Images read as material plates: no shadow, only a fine frame and base rule. */
+:where(.pdf-print-root.pdf-theme-estate, .pdf-preview.pdf-theme-estate)
+  .pdf-markdown img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 5.8mm auto 6.4mm;
+  padding: 1mm;
+  border: 0.18mm solid var(--estate-rule);
+  border-bottom: 0.46mm solid var(--estate-bronze);
+  border-radius: 0;
+  background: var(--estate-paper);
+}

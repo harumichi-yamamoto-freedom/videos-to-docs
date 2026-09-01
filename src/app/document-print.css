@@ -8,6 +8,9 @@
 @import "./pdf-themes/sakura.css";
 @import "./pdf-themes/consulting.css";
 @import "./pdf-themes/architect.css";
+@import "./pdf-themes/estate.css";
+@import "./pdf-themes/genba.css";
+@import "./pdf-themes/brand.css";
 
 /* PDF は描画前に計測するため、印刷メディア外でも専用フォントを確定させる。 */
 :where(.pdf-print-root, .pdf-preview) .pdf-document {
