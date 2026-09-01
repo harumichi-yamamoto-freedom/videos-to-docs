@@ -25,9 +25,6 @@ export const BulkPromptSelector: React.FC<BulkPromptSelectorProps> = ({
             <h3 className="text-sm font-medium text-purple-900 mb-1">
                 📝 デフォルトプロンプト選択（ファイル追加時に適用）
             </h3>
-            <p className="text-xs text-amber-600 mb-3">
-                ※ Gemini 3.1 Pro は処理に時間がかかる場合があります。速度を重視する場合は Gemini 3 Pro もお試しください。
-            </p>
             <div className="space-y-2">
                 {availablePrompts.map(prompt => (
                     <div
