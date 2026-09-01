@@ -86,8 +86,8 @@ body.pdf-export-active > .pdf-print-root {
     --pdf-rule: #d8d2df;
     --pdf-rule-soft: #ebe7ee;
     --pdf-rule-strong: #bdb4c7;
-    --pdf-code: #292430;
-    --pdf-code-ink: #f5f2f7;
+    --pdf-code: #faf8fc;
+    --pdf-code-ink: #292430;
 
     color: var(--pdf-ink);
     background: #ffffff;
@@ -499,14 +499,14 @@ body.pdf-export-active > .pdf-print-root {
     overflow-wrap: anywhere;
   }
 
-  /* 長いコードはページを跨がせ、各 fragment でカードの装飾を再描画する。 */
+  /* 長いコードはページを跨がせ、各 fragment で明色のスパインを再描画する。 */
   .pdf-markdown pre {
     margin: 5.8mm 0;
     padding: 3.8mm 4mm;
     overflow: visible;
-    border: 0.25mm solid #18141d;
-    border-top: 0.95mm solid var(--pdf-violet);
-    border-radius: 1.7mm;
+    border: 0.2mm solid var(--pdf-rule);
+    border-left: 1.1mm solid var(--pdf-violet);
+    border-radius: 0 1.7mm 1.7mm 0;
     background: var(--pdf-code);
     color: var(--pdf-code-ink);
     font-family:
@@ -546,10 +546,11 @@ body.pdf-export-active > .pdf-print-root {
   .pdf-markdown :not(pre) > code {
     display: inline;
     padding: 0.25mm 1mm;
-    border: 0.2mm solid #cfc3dd;
-    border-radius: 0.8mm;
-    background: var(--pdf-violet-soft);
-    color: var(--pdf-violet-deep);
+    border: 0.2mm solid var(--pdf-rule);
+    border-left: 0.6mm solid var(--pdf-violet);
+    border-radius: 0 0.8mm 0.8mm 0;
+    background: var(--pdf-code);
+    color: var(--pdf-code-ink);
     font-size: 0.88em;
     line-height: 1;
     box-decoration-break: clone;
