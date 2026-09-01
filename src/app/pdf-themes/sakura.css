@@ -1,0 +1,525 @@
+/*
+ * Sakura theme
+ * Dusty rose and warm gray soften the page while dark ink, rules, and
+ * typographic scale preserve a formal proposal-document hierarchy.
+ */
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-document {
+  --pdf-sakura-ink: #302a2d;
+  --pdf-sakura-ink-soft: #51484c;
+  --pdf-sakura-muted: #6f6469;
+  --pdf-sakura-deep: #754454;
+  --pdf-sakura-accent: #aa6077;
+  --pdf-sakura-blush: #f7e9ed;
+  --pdf-sakura-whisper: #fcf7f8;
+  --pdf-sakura-gray: #f4f2f3;
+  --pdf-sakura-rule: #d8cbd0;
+  --pdf-sakura-rule-soft: #ece5e7;
+  --pdf-sakura-rule-strong: #ab989f;
+  --pdf-sakura-paper: #ffffff;
+
+  color: var(--pdf-sakura-ink);
+  background: var(--pdf-sakura-paper);
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 10.2pt;
+  font-weight: 400;
+  line-height: 1.8;
+  letter-spacing: 0.012em;
+  font-kerning: normal;
+}
+
+/* The optional document band echoes the content rail without dominating it. */
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-document__header {
+  position: relative;
+  margin: 0 0 9.5mm;
+  padding: 5mm 5.5mm 5.2mm;
+  border: 0.2mm solid var(--pdf-sakura-rule);
+  border-top: 0.55mm solid var(--pdf-sakura-ink-soft);
+  border-radius: 1.8mm;
+  background: linear-gradient(
+    108deg,
+    var(--pdf-sakura-whisper) 0%,
+    var(--pdf-sakura-paper) 64%,
+    var(--pdf-sakura-gray) 100%
+  );
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-document__header::before {
+  content: "";
+  position: absolute;
+  top: -0.82mm;
+  left: 5.5mm;
+  width: 30mm;
+  height: 1.05mm;
+  border: 0.16mm solid var(--pdf-sakura-deep);
+  border-radius: 1mm;
+  background: var(--pdf-sakura-accent);
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-document__title {
+  margin: 0 0 4.4mm;
+  color: var(--pdf-sakura-ink);
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 24.5pt;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.012em;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-document__title:last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-document__meta {
+  display: grid;
+  grid-template-columns: 18mm minmax(0, 1fr);
+  gap: 0.9mm 3.5mm;
+  margin: 0;
+  padding: 2.8mm 3.4mm;
+  border: 0.2mm solid var(--pdf-sakura-rule);
+  border-left: 0.8mm solid var(--pdf-sakura-accent);
+  border-radius: 0 1.2mm 1.2mm 0;
+  background: linear-gradient(
+    100deg,
+    var(--pdf-sakura-blush) 0%,
+    var(--pdf-sakura-gray) 100%
+  );
+  color: var(--pdf-sakura-ink-soft);
+  font-size: 8.2pt;
+  line-height: 1.55;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-document__meta dt {
+  color: var(--pdf-sakura-deep);
+  font-size: 7.7pt;
+  font-weight: 700;
+  letter-spacing: 0.075em;
+  white-space: nowrap;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-document__meta dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--pdf-sakura-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* This rail makes the article complete even when the document band is absent. */
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown {
+  position: relative;
+  padding-top: 4.4mm;
+  border-top: 0.38mm solid var(--pdf-sakura-ink-soft);
+  color: var(--pdf-sakura-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown::before {
+  content: "";
+  position: absolute;
+  top: -0.78mm;
+  left: 0;
+  width: 30mm;
+  height: 1.05mm;
+  border: 0.16mm solid var(--pdf-sakura-deep);
+  border-radius: 0 1mm 1mm 0;
+  background: var(--pdf-sakura-accent);
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--pdf-sakura-ink);
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-weight: 700;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown h1 {
+  margin: 10.5mm 0 4.8mm;
+  padding: 3.2mm 4.4mm 3.3mm 5.2mm;
+  border: 0.2mm solid var(--pdf-sakura-rule);
+  border-left: 1.05mm solid var(--pdf-sakura-accent);
+  border-bottom: 0.48mm solid var(--pdf-sakura-ink-soft);
+  border-radius: 0 1.5mm 1.5mm 0;
+  background: linear-gradient(
+    100deg,
+    var(--pdf-sakura-blush) 0%,
+    var(--pdf-sakura-whisper) 58%,
+    var(--pdf-sakura-gray) 100%
+  );
+  font-size: 21.5pt;
+  line-height: 1.34;
+  letter-spacing: 0.014em;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown h2 {
+  margin: 8.5mm 0 3.5mm;
+  padding: 1.7mm 2.8mm 1.8mm 4.5mm;
+  border-left: 0.82mm solid var(--pdf-sakura-accent);
+  border-bottom: 0.25mm solid var(--pdf-sakura-rule-strong);
+  background: linear-gradient(
+    90deg,
+    var(--pdf-sakura-whisper) 0%,
+    var(--pdf-sakura-paper) 78%
+  );
+  color: var(--pdf-sakura-deep);
+  font-size: 15.2pt;
+  line-height: 1.42;
+  letter-spacing: 0.022em;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown h3 {
+  position: relative;
+  margin: 6.8mm 0 2.9mm;
+  padding: 0 0 1.5mm;
+  border-bottom: 0.22mm solid var(--pdf-sakura-rule-strong);
+  color: var(--pdf-sakura-ink-soft);
+  font-size: 12.3pt;
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown h3::after {
+  content: "";
+  position: absolute;
+  bottom: -0.22mm;
+  left: 0;
+  width: 24mm;
+  border-bottom: 0.62mm solid var(--pdf-sakura-accent);
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown h4 {
+  margin: 5.5mm 0 2.3mm;
+  padding: 0.35mm 0 0.35mm 3mm;
+  border-left: 0.4mm solid var(--pdf-sakura-rule-strong);
+  font-size: 10.8pt;
+  line-height: 1.56;
+  letter-spacing: 0.038em;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown h5 {
+  margin: 4.8mm 0 2mm;
+  padding: 0 0 0.8mm;
+  border-bottom: 0.2mm dashed var(--pdf-sakura-rule-strong);
+  color: var(--pdf-sakura-deep);
+  font-size: 9.8pt;
+  line-height: 1.6;
+  letter-spacing: 0.065em;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown h6 {
+  margin: 4.3mm 0 1.8mm;
+  padding-left: 2.8mm;
+  border-left: 0.22mm solid var(--pdf-sakura-rule-strong);
+  color: var(--pdf-sakura-muted);
+  font-size: 9.2pt;
+  line-height: 1.62;
+  letter-spacing: 0.075em;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown p {
+  margin: 0 0 3.8mm;
+  color: var(--pdf-sakura-ink);
+  line-height: 1.8;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown > p:first-child {
+  color: var(--pdf-sakura-ink-soft);
+  font-size: 10.7pt;
+  line-height: 1.84;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown :is(ul, ol) {
+  margin: 0 0 4.5mm;
+  padding-left: 1.9em;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown ul {
+  list-style: disc outside;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown ol {
+  list-style: decimal outside;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown ul ul {
+  list-style-type: circle;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown ul ul ul {
+  list-style-type: square;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown li {
+  margin: 0;
+  color: var(--pdf-sakura-ink);
+  line-height: 1.76;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown li + li {
+  margin-top: 1.15mm;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown li > :is(ul, ol) {
+  margin: 1.3mm 0 0.8mm;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown ul > li::marker {
+  color: var(--pdf-sakura-accent);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown ol > li::marker {
+  color: var(--pdf-sakura-deep);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown a {
+  color: var(--pdf-sakura-deep);
+  font-weight: 600;
+  text-decoration-line: underline;
+  text-decoration-color: var(--pdf-sakura-accent);
+  text-decoration-thickness: 0.2mm;
+  text-underline-offset: 0.17em;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown strong {
+  color: var(--pdf-sakura-ink);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown hr {
+  width: 30mm;
+  height: 0.9mm;
+  margin: 9mm 0;
+  border: 0;
+  border-top: 0.62mm solid var(--pdf-sakura-accent);
+  border-bottom: 0.18mm solid var(--pdf-sakura-rule-strong);
+  background: transparent;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown table {
+  width: 100%;
+  max-width: 100%;
+  margin: 5.8mm 0 6mm;
+  border: 0.24mm solid var(--pdf-sakura-rule-strong);
+  border-top: 0.85mm solid var(--pdf-sakura-accent);
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 1.5mm;
+  background: var(--pdf-sakura-paper);
+  color: var(--pdf-sakura-ink);
+  font-size: 8.6pt;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown thead {
+  color: var(--pdf-sakura-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown tr {
+  background: var(--pdf-sakura-paper);
+  color: inherit;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown :is(th, td) {
+  padding: 2.1mm 2.4mm;
+  border: 0;
+  border-bottom: 0.2mm solid var(--pdf-sakura-rule);
+  color: var(--pdf-sakura-ink);
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown thead th {
+  border-bottom: 0.58mm solid var(--pdf-sakura-ink-soft);
+  background: linear-gradient(
+    105deg,
+    var(--pdf-sakura-blush) 0%,
+    var(--pdf-sakura-gray) 100%
+  );
+  color: var(--pdf-sakura-ink);
+  font-size: 8.15pt;
+  font-weight: 700;
+  line-height: 1.46;
+  letter-spacing: 0.035em;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown th + th {
+  border-left: 0.2mm solid var(--pdf-sakura-rule-strong);
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown td + td {
+  border-left: 0.2mm solid var(--pdf-sakura-rule-soft);
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown tr:nth-child(even) td {
+  background: var(--pdf-sakura-whisper);
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown :is(th, td) > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown code {
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-variant-ligatures: none;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown pre {
+  margin: 5.8mm 0;
+  padding: 3.7mm 4mm;
+  border: 0.2mm solid var(--pdf-sakura-rule);
+  border-top: 0.35mm solid var(--pdf-sakura-rule-strong);
+  border-left: 1mm solid var(--pdf-sakura-accent);
+  border-radius: 0 1.6mm 1.6mm 0;
+  background: linear-gradient(
+    105deg,
+    var(--pdf-sakura-gray) 0%,
+    var(--pdf-sakura-whisper) 100%
+  );
+  color: var(--pdf-sakura-ink);
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-size: 8.2pt;
+  line-height: 1.62;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown pre > code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: inherit;
+  overflow-wrap: inherit;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown :not(pre) > code {
+  padding: 0.25mm 0.95mm;
+  border: 0.2mm solid var(--pdf-sakura-rule);
+  border-left: 0.58mm solid var(--pdf-sakura-accent);
+  border-radius: 0 0.8mm 0.8mm 0;
+  background: var(--pdf-sakura-blush);
+  color: var(--pdf-sakura-deep);
+  font-size: 0.88em;
+  line-height: 1;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown blockquote {
+  margin: 5.8mm 0;
+  padding: 3.5mm 4.3mm 3.4mm 5.2mm;
+  border: 0.2mm solid var(--pdf-sakura-rule);
+  border-top: 0.35mm solid var(--pdf-sakura-rule-strong);
+  border-left: 1.05mm solid var(--pdf-sakura-deep);
+  border-radius: 0 1.6mm 1.6mm 0;
+  background: linear-gradient(
+    105deg,
+    var(--pdf-sakura-blush) 0%,
+    var(--pdf-sakura-whisper) 62%,
+    var(--pdf-sakura-gray) 100%
+  );
+  color: var(--pdf-sakura-ink-soft);
+  font-size: 10.35pt;
+  font-style: normal;
+  line-height: 1.76;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-sakura, .pdf-preview.pdf-theme-sakura)
+  .pdf-markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
