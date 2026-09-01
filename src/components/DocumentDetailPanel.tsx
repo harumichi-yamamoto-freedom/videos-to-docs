@@ -7,6 +7,7 @@ import { createLogger } from '@/lib/logger';
 import { MarkdownDocument } from '@/components/MarkdownDocument';
 import { DocumentPrintPortal } from '@/components/DocumentPrintPortal';
 import { useDocumentPrint } from '@/hooks/useDocumentPrint';
+import { getGeminiModelLabel } from '../constants/geminiModels';
 import {
     DEFAULT_PDF_THEME_ID,
     normalizePdfThemeId,
@@ -208,6 +209,12 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                             <p>ファイル: {document.fileName}</p>
                             <p>プロンプト: <span className="text-purple-700 font-semibold">{document.promptName}</span></p>
                             <p>生成日時: {formatDate(document.createdAt)}</p>
+                            {document.generatedByModel && (
+                                <p>
+                                    使用モデル: {getGeminiModelLabel(document.generatedByModel)}
+                                    {document.modelSelection === 'default' && '（デフォルト選択）'}
+                                </p>
+                            )}
                         </div>
                     </div>
                     <div className="flex flex-col items-end gap-1">

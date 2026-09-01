@@ -198,7 +198,7 @@ function mockPanelState({
         .mockImplementationOnce(() => [pdfTheme, setPdfTheme]);
 }
 
-describe('DocumentDetailPanel PDF 出力', () => {
+describe('DocumentDetailPanel', () => {
     const localStorageGetItem = vi.fn<(key: string) => string | null>(() => null);
     const localStorageSetItem = vi.fn();
 
@@ -221,6 +221,45 @@ describe('DocumentDetailPanel PDF 出力', () => {
 
     afterEach(() => {
         vi.unstubAllGlobals();
+    });
+
+    it('記録された解決済みモデル ID を表示名に変換して表示する', () => {
+        mockPanelState();
+
+        const tree = DocumentDetailPanel({
+            document: {
+                ...document,
+                generatedByModel: 'gemini-3.7-flash',
+                modelSelection: 'pinned',
+            },
+        }) as React.ReactNode;
+
+        expect(getText(tree)).toContain('使用モデル: Gemini 3.7 Flash');
+        expect(getText(tree)).not.toContain('デフォルト選択');
+    });
+
+    it('デフォルト選択で生成した文書には注記を添える', () => {
+        mockPanelState();
+
+        const tree = DocumentDetailPanel({
+            document: {
+                ...document,
+                generatedByModel: 'gemini-3.7-flash',
+                modelSelection: 'default',
+            },
+        }) as React.ReactNode;
+
+        expect(getText(tree)).toContain(
+            '使用モデル: Gemini 3.7 Flash（デフォルト選択）',
+        );
+    });
+
+    it('モデルの記録がない過去文書では使用モデル行を表示しない', () => {
+        mockPanelState();
+
+        const tree = DocumentDetailPanel({ document }) as React.ReactNode;
+
+        expect(getText(tree)).not.toContain('使用モデル:');
     });
 
     it('文書情報は既定 OFF で portal に渡す', () => {
@@ -386,5 +425,45 @@ describe('DocumentPrintPortal PDF テーマ', () => {
         }) as unknown as React.ReactElement<{ className: string }>;
 
         expect(portal.props.className).toBe('pdf-print-root pdf-theme-editorial');
+    });
+
+    it('文書情報に解決済みモデル名とデフォルト選択の注記を表示する', async () => {
+        const { DocumentPrintPortal: ActualDocumentPrintPortal } =
+            await vi.importActual<typeof import('./DocumentPrintPortal')>(
+                './DocumentPrintPortal',
+            );
+
+        const portal = ActualDocumentPrintPortal({
+            document: {
+                ...document,
+                generatedByModel: 'gemini-3.7-flash',
+                modelSelection: 'default',
+            },
+            active: true,
+            includeMetadata: true,
+        }) as unknown as React.ReactNode;
+
+        expect(getText(portal)).toContain(
+            '使用モデルGemini 3.7 Flash（デフォルト選択）',
+        );
+    });
+
+    it('文書情報を含めない場合は使用モデルを表示しない', async () => {
+        const { DocumentPrintPortal: ActualDocumentPrintPortal } =
+            await vi.importActual<typeof import('./DocumentPrintPortal')>(
+                './DocumentPrintPortal',
+            );
+
+        const portal = ActualDocumentPrintPortal({
+            document: {
+                ...document,
+                generatedByModel: 'gemini-3.7-flash',
+                modelSelection: 'pinned',
+            },
+            active: true,
+            includeMetadata: false,
+        }) as unknown as React.ReactNode;
+
+        expect(getText(portal)).not.toContain('使用モデル');
     });
 });

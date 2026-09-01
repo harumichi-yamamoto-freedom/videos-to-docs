@@ -8,6 +8,7 @@ export interface TranscriptionResult {
     success: boolean;
     text?: string;
     error?: string;
+    usedModel?: string;
 }
 
 export class GeminiClient {
@@ -112,6 +113,7 @@ export class GeminiClient {
             return {
                 success: true,
                 text,
+                usedModel: targetModel,
             };
         } catch (error) {
             geminiLogger.error('動画の直接送信でエラーが発生', error, {
@@ -235,6 +237,7 @@ export class GeminiClient {
             return {
                 success: true,
                 text,
+                usedModel: targetModel,
             };
         } catch (error) {
             geminiLogger.error('Gemini API呼び出しでエラーが発生', error, {
@@ -380,6 +383,7 @@ export class GeminiClient {
             return {
                 success: true,
                 text,
+                usedModel: targetModel,
             };
         } catch (error) {
             geminiLogger.error('Gemini API呼び出しでエラーが発生', error, {

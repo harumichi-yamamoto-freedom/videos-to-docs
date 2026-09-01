@@ -7,6 +7,10 @@ import { FileProcessingStatus, FileWithPrompts, DebugErrorMode } from '@/types/p
 import { Prompt } from '@/lib/prompts';
 import { validatePromptPermission } from '@/lib/promptPermissions';
 import { createLogger } from '@/lib/logger';
+import {
+    canonicalizeGeminiModel,
+    GEMINI_DEFAULT_MODEL_SENTINEL,
+} from '@/constants/geminiModels';
 
 const videoProcessingLogger = createLogger('useVideoProcessing');
 
@@ -137,7 +141,11 @@ export const useVideoProcessing = (
                                 bitrate,
                                 sampleRate,
                                 undefined,
-                                audioStoragePath ?? undefined
+                                audioStoragePath ?? undefined,
+                                transcriptionResult.usedModel,
+                                canonicalizeGeminiModel(prompt.model) === GEMINI_DEFAULT_MODEL_SENTINEL
+                                    ? 'default'
+                                    : 'pinned'
                             );
                             videoProcessingLogger.info('Firestoreへの保存が完了', {
                                 fileIndex,
@@ -326,7 +334,11 @@ export const useVideoProcessing = (
                                 bitrate,
                                 sampleRate,
                                 undefined,
-                                audioStoragePath ?? undefined
+                                audioStoragePath ?? undefined,
+                                transcriptionResult.usedModel,
+                                canonicalizeGeminiModel(prompt.model) === GEMINI_DEFAULT_MODEL_SENTINEL
+                                    ? 'default'
+                                    : 'pinned'
                             );
                             videoProcessingLogger.info('Firestoreへの保存が完了（再開）', {
                                 fileIndex,
@@ -415,4 +427,3 @@ export const useVideoProcessing = (
         processTranscriptionResume,
     };
 };
-

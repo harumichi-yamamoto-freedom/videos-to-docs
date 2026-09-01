@@ -29,6 +29,8 @@ export interface TranscriptionDocument {
     originalFileType: string; // 'video' or 'audio'
     transcription: string;
     promptName: string; // 使用したプロンプト名
+    generatedByModel?: string;
+    modelSelection?: 'default' | 'pinned';
     ownerType: 'guest' | 'user';
     ownerId: string; // "GUEST" または Auth uid
     createdBy: string; // "GUEST" または Auth uid
@@ -45,6 +47,8 @@ export interface Transcription {
     fileName: string;
     text: string; // transcription のエイリアス
     promptName: string;
+    generatedByModel?: string;
+    modelSelection?: 'default' | 'pinned';
     createdAt: Timestamp | Date;
 }
 
@@ -59,7 +63,9 @@ export async function saveTranscription(
     bitrate?: string,
     sampleRate?: number,
     title?: string,
-    audioStoragePath?: string
+    audioStoragePath?: string,
+    generatedByModel?: string,
+    modelSelection?: 'default' | 'pinned'
 ): Promise<string> {
     try {
         const userId = getCurrentUserId();
@@ -88,6 +94,8 @@ export async function saveTranscription(
             createdBy: userId,
             createdAt: serverTimestamp(),
             ...(audioStoragePath && { audioStoragePath }),
+            ...(generatedByModel !== undefined && { generatedByModel }),
+            ...(modelSelection !== undefined && { modelSelection }),
         });
 
         // 監査ログを記録
@@ -162,6 +170,8 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
                 originalFileType: data.originalFileType,
                 transcription: data.transcription ?? data.text ?? '',
                 promptName: data.promptName || '不明',
+                generatedByModel: data.generatedByModel,
+                modelSelection: data.modelSelection,
                 ownerType: ownerType as 'guest' | 'user',
                 ownerId: ownerId,
                 createdBy: createdBy,
@@ -230,6 +240,8 @@ export async function getTranscriptions(limitCount: number = 100): Promise<Trans
                 fileName: data.fileName,
                 text: data.transcription ?? data.text ?? '', // transcription を text にマッピング
                 promptName: data.promptName || '不明',
+                generatedByModel: data.generatedByModel,
+                modelSelection: data.modelSelection,
                 createdAt,
             });
         });
@@ -263,6 +275,8 @@ export async function getTranscriptionsByOwnerId(ownerId: string, limitCount: nu
                 fileName: data.fileName,
                 text: data.transcription ?? data.text ?? '',
                 promptName: data.promptName || '不明',
+                generatedByModel: data.generatedByModel,
+                modelSelection: data.modelSelection,
                 createdAt,
             });
         });

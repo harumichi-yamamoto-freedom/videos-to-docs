@@ -97,6 +97,8 @@ interface MockDocumentData {
     createdBy: string;
     transcription?: string | null;
     text?: string | null;
+    generatedByModel?: string;
+    modelSelection?: 'default' | 'pinned';
 }
 
 const mappingCases: Array<{ id: string; data: MockDocumentData; expected: string }> = [
@@ -112,6 +114,8 @@ const mappingCases: Array<{ id: string; data: MockDocumentData; expected: string
             createdBy: 'GUEST',
             transcription: 'transcription の本文',
             text: '古い text の本文',
+            generatedByModel: 'gemini-3.7-flash',
+            modelSelection: 'default',
         },
         expected: 'transcription の本文',
     },
@@ -126,6 +130,8 @@ const mappingCases: Array<{ id: string; data: MockDocumentData; expected: string
             ownerId: 'GUEST',
             createdBy: 'GUEST',
             text: 'text の本文',
+            generatedByModel: 'gemini-2.5-pro',
+            modelSelection: 'pinned',
         },
         expected: 'text の本文',
     },
@@ -229,6 +235,8 @@ describe('firestore', () => {
                 44100,
                 '新規文書',
                 'audio/recording.wav',
+                'gemini-3.7-flash',
+                'default',
             );
 
             expect(documentId).toBe(mocks.documentReference.id);
@@ -250,6 +258,8 @@ describe('firestore', () => {
                 createdBy: 'GUEST',
                 createdAt: mocks.timestamp,
                 audioStoragePath: 'audio/recording.wav',
+                generatedByModel: 'gemini-3.7-flash',
+                modelSelection: 'default',
             });
             expect(payload).not.toHaveProperty('text');
         });
@@ -286,6 +296,13 @@ describe('firestore', () => {
             expect(documents.map(document => document.transcription)).toEqual(
                 mappingCases.map(row => row.expected),
             );
+            expect(documents.map(document => ({
+                generatedByModel: document.generatedByModel,
+                modelSelection: document.modelSelection,
+            }))).toEqual(mappingCases.map(row => ({
+                generatedByModel: row.data.generatedByModel,
+                modelSelection: row.data.modelSelection,
+            })));
         });
 
         it('簡略形式で transcription を優先し、text と空文字へフォールバックする', async () => {
@@ -296,6 +313,13 @@ describe('firestore', () => {
             expect(documents.map(document => document.text)).toEqual(
                 mappingCases.map(row => row.expected),
             );
+            expect(documents.map(document => ({
+                generatedByModel: document.generatedByModel,
+                modelSelection: document.modelSelection,
+            }))).toEqual(mappingCases.map(row => ({
+                generatedByModel: row.data.generatedByModel,
+                modelSelection: row.data.modelSelection,
+            })));
         });
 
         it('所有者指定形式で transcription を優先し、text と空文字へフォールバックする', async () => {
@@ -306,6 +330,13 @@ describe('firestore', () => {
             expect(documents.map(document => document.text)).toEqual(
                 mappingCases.map(row => row.expected),
             );
+            expect(documents.map(document => ({
+                generatedByModel: document.generatedByModel,
+                modelSelection: document.modelSelection,
+            }))).toEqual(mappingCases.map(row => ({
+                generatedByModel: row.data.generatedByModel,
+                modelSelection: row.data.modelSelection,
+            })));
         });
     });
 });

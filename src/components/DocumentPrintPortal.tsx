@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import type { Transcription } from '@/lib/firestore';
 import { formatPdfDateTime } from '@/lib/pdfExport';
 import { MarkdownDocument } from '@/components/MarkdownDocument';
+import { getGeminiModelLabel } from '../constants/geminiModels';
 import {
     normalizePdfThemeId,
     type PdfThemeId,
@@ -42,6 +43,15 @@ export function DocumentPrintPortal({
                             <dd>{document.fileName}</dd>
                             <dt>プロンプト</dt>
                             <dd>{document.promptName}</dd>
+                            {document.generatedByModel && (
+                                <>
+                                    <dt>使用モデル</dt>
+                                    <dd>
+                                        {getGeminiModelLabel(document.generatedByModel)}
+                                        {document.modelSelection === 'default' && '（デフォルト選択）'}
+                                    </dd>
+                                </>
+                            )}
                         </dl>
                     </header>
                 )}

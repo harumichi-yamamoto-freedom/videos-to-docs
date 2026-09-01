@@ -95,7 +95,11 @@ describe('GeminiClient のモデル解決配線', () => {
         async ({ invoke, expectedModelInfoLogs }) => {
             const result = await invoke(createClient(), ' default ');
 
-            expect(result).toEqual({ success: true, text: 'ok' });
+            expect(result).toEqual({
+                success: true,
+                text: 'ok',
+                usedModel: DEFAULT_GEMINI_MODEL,
+            });
             expect(testDoubles.generateContent).toHaveBeenCalledTimes(1);
             expect(testDoubles.generateContent).toHaveBeenCalledWith(
                 expect.objectContaining({ model: DEFAULT_GEMINI_MODEL }),
@@ -135,11 +139,12 @@ describe('GeminiClient のモデル解決配線', () => {
         async ({ invoke, expectedModelInfoLogs }) => {
             const unknownModel = '  future-gemini-model  ';
 
-            await invoke(createClient(), unknownModel);
+            const result = await invoke(createClient(), unknownModel);
 
             expect(testDoubles.generateContent).toHaveBeenCalledWith(
                 expect.objectContaining({ model: unknownModel }),
             );
+            expect(result.usedModel).toBe(unknownModel);
 
             const loggedModelNames = testDoubles.logger.info.mock.calls
                 .map(call => call[1] as Record<string, unknown> | undefined)
