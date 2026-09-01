@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Transcription } from '@/lib/firestore';
 import { DocumentDetailPanel } from './DocumentDetailPanel';
+import { PdfDocumentHeader } from './PdfDocumentHeader';
 
 const { createPortal, documentPrintPortal, printPdf } = vi.hoisted(() => ({
     createPortal: vi.fn((children: React.ReactNode) => children),
@@ -65,6 +66,11 @@ type DocumentPrintPortalProps = {
     active: boolean;
     includeMetadata: boolean;
     theme: string;
+};
+
+type PdfPreviewProps = {
+    children?: React.ReactNode;
+    className: string;
 };
 
 const document: Transcription = {
@@ -170,6 +176,59 @@ function findPrintPortal(
 
         if (portal) {
             return portal;
+        }
+    }
+
+    return null;
+}
+
+function findPdfPreview(
+    node: React.ReactNode,
+): React.ReactElement<PdfPreviewProps> | null {
+    if (!React.isValidElement<{
+        children?: React.ReactNode;
+        className?: unknown;
+    }>(node)) {
+        return null;
+    }
+
+    if (
+        node.type === 'div' &&
+        typeof node.props.className === 'string' &&
+        node.props.className.split(/\s+/).includes('pdf-preview')
+    ) {
+        return node as React.ReactElement<PdfPreviewProps>;
+    }
+
+    for (const child of React.Children.toArray(node.props.children)) {
+        const preview = findPdfPreview(child);
+
+        if (preview) {
+            return preview;
+        }
+    }
+
+    return null;
+}
+
+function findPdfDocumentHeader(
+    node: React.ReactNode,
+): React.ReactElement<React.ComponentProps<typeof PdfDocumentHeader>> | null {
+    if (!React.isValidElement<{ children?: React.ReactNode }>(node)) {
+        return null;
+    }
+
+    if (node.type === PdfDocumentHeader) {
+        return node as React.ReactElement<
+            React.ComponentProps<typeof PdfDocumentHeader>
+        >;
+    }
+
+    for (const child of React.Children.toArray(node.props.children)) {
+        const header = findPdfDocumentHeader(child);
+
+        if (header) {
+            return header;
         }
     }
 
@@ -328,19 +387,22 @@ describe('DocumentDetailPanel', () => {
         expect(getText(tree)).not.toContain('使用モデル:');
     });
 
-    it('文書情報は既定 OFF で portal に渡す', () => {
+    it('文書情報は既定 OFF で画面プレビューから省略し portal に渡す', () => {
         mockPanelState();
 
         const tree = DocumentDetailPanel({ document }) as React.ReactNode;
         const checkbox = findMetadataCheckbox(tree);
+        const preview = findPdfPreview(tree);
         const portal = findPrintPortal(tree);
 
         expect(useState).toHaveBeenNthCalledWith(5, false);
         expect(checkbox?.props.checked).toBe(false);
+        expect(preview).not.toBeNull();
+        expect(findPdfDocumentHeader(preview)).toBeNull();
         expect(portal?.props.includeMetadata).toBe(false);
     });
 
-    it('文書情報を選択すると設定を保存し portal に true を渡す', () => {
+    it('文書情報を選択すると画面プレビューに表示し portal に true を渡す', () => {
         const setIncludeMetadata = vi.fn();
         mockPanelState({ setIncludeMetadata });
 
@@ -358,6 +420,10 @@ describe('DocumentDetailPanel', () => {
         mockPanelState({ includeMetadata: true });
 
         const selectedTree = DocumentDetailPanel({ document }) as React.ReactNode;
+        const previewHeader = findPdfDocumentHeader(findPdfPreview(selectedTree));
+
+        expect(previewHeader).not.toBeNull();
+        expect(previewHeader?.props.document).toBe(document);
         expect(findPrintPortal(selectedTree)?.props.includeMetadata).toBe(true);
     });
 
@@ -371,10 +437,13 @@ describe('DocumentDetailPanel', () => {
         expect(useState).toHaveBeenNthCalledWith(6, 'editorial');
         expect(select).not.toBeNull();
         expect(select?.props.value).toBe('editorial');
+        expect(findPdfPreview(tree)?.props.className).toBe(
+            'pdf-preview pdf-theme-editorial shadow',
+        );
         expect(portal?.props.theme).toBe('editorial');
     });
 
-    it('PDF デザインを選択すると pdfTheme に保存し portal に渡す', () => {
+    it('PDF デザインを選択すると画面プレビューと portal に即時反映する', () => {
         const setPdfTheme = vi.fn();
         mockPanelState({ setPdfTheme });
 
@@ -393,7 +462,18 @@ describe('DocumentDetailPanel', () => {
         mockPanelState({ pdfTheme: 'minimal' });
 
         const selectedTree = DocumentDetailPanel({ document }) as React.ReactNode;
+        expect(findPdfPreview(selectedTree)?.props.className).toBe(
+            'pdf-preview pdf-theme-minimal shadow',
+        );
         expect(findPrintPortal(selectedTree)?.props.theme).toBe('minimal');
+    });
+
+    it('画面プレビューの改ページ位置に関する注記を表示する', () => {
+        mockPanelState();
+
+        const tree = DocumentDetailPanel({ document }) as React.ReactNode;
+
+        expect(getText(tree)).toContain('※改ページ位置はPDF出力時のみ反映されます');
     });
 
     it('保存済みの有効な PDF デザインを読み戻す', () => {
@@ -509,8 +589,10 @@ describe('DocumentPrintPortal PDF テーマ', () => {
             active: true,
             includeMetadata: true,
         }) as unknown as React.ReactNode;
+        const header = findPdfDocumentHeader(portal);
 
-        expect(getText(portal)).toContain(
+        expect(header).not.toBeNull();
+        expect(getText(PdfDocumentHeader(header!.props))).toContain(
             '使用モデルGemini 3.7 Flash（デフォルト選択）・思考: 標準',
         );
     });
@@ -531,8 +613,10 @@ describe('DocumentPrintPortal PDF テーマ', () => {
             active: true,
             includeMetadata: true,
         }) as unknown as React.ReactNode;
+        const header = findPdfDocumentHeader(portal);
 
-        expect(getText(portal)).toContain(
+        expect(header).not.toBeNull();
+        expect(getText(PdfDocumentHeader(header!.props))).toContain(
             '使用モデルGemini 2.5 Pro・思考: 未指定',
         );
     });
@@ -552,8 +636,10 @@ describe('DocumentPrintPortal PDF テーマ', () => {
             active: true,
             includeMetadata: true,
         }) as unknown as React.ReactNode;
+        const header = findPdfDocumentHeader(portal);
 
-        expect(getText(portal)).not.toContain('思考:');
+        expect(header).not.toBeNull();
+        expect(getText(PdfDocumentHeader(header!.props))).not.toContain('思考:');
     });
 
     it('文書情報を含めない場合は使用モデルを表示しない', async () => {
@@ -572,6 +658,6 @@ describe('DocumentPrintPortal PDF テーマ', () => {
             includeMetadata: false,
         }) as unknown as React.ReactNode;
 
-        expect(getText(portal)).not.toContain('使用モデル');
+        expect(findPdfDocumentHeader(portal)).toBeNull();
     });
 });

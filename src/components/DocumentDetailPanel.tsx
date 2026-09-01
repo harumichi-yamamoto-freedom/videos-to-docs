@@ -6,6 +6,7 @@ import { Transcription } from '@/lib/firestore';
 import { createLogger } from '@/lib/logger';
 import { MarkdownDocument } from '@/components/MarkdownDocument';
 import { DocumentPrintPortal } from '@/components/DocumentPrintPortal';
+import { PdfDocumentHeader } from './PdfDocumentHeader';
 import { useDocumentPrint } from '@/hooks/useDocumentPrint';
 import { getGeminiModelLabel } from '../constants/geminiModels';
 import { THINKING_LEVELS } from '../constants/geminiThinking';
@@ -271,38 +272,43 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                             )}
                         </div>
                         {isViewMode && (
-                            <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-gray-500">
-                                <label className="flex items-center gap-1.5 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        checked={includeMetadata}
-                                        onChange={handleIncludeMetadataChange}
-                                        disabled={isPreparing}
-                                        className="h-3.5 w-3.5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
-                                    />
-                                    <span>文書情報を含める（元ファイル・プロンプト・生成日時）</span>
-                                </label>
-                                <label className="flex items-center gap-1.5">
-                                    <span>デザイン</span>
-                                    <select
-                                        aria-label="PDF デザイン"
-                                        value={pdfTheme}
-                                        onChange={handlePdfThemeChange}
-                                        disabled={isPreparing}
-                                        className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 shadow-sm focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-400 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {PDF_THEMES.map(theme => (
-                                            <option
-                                                key={theme.id}
-                                                value={theme.id}
-                                                title={theme.description}
-                                            >
-                                                {theme.label}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
-                            </div>
+                            <>
+                                <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-gray-500">
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={includeMetadata}
+                                            onChange={handleIncludeMetadataChange}
+                                            disabled={isPreparing}
+                                            className="h-3.5 w-3.5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                        />
+                                        <span>文書情報を含める（元ファイル・プロンプト・生成日時）</span>
+                                    </label>
+                                    <label className="flex items-center gap-1.5">
+                                        <span>デザイン</span>
+                                        <select
+                                            aria-label="PDF デザイン"
+                                            value={pdfTheme}
+                                            onChange={handlePdfThemeChange}
+                                            disabled={isPreparing}
+                                            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 shadow-sm focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-400 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {PDF_THEMES.map(theme => (
+                                                <option
+                                                    key={theme.id}
+                                                    value={theme.id}
+                                                    title={theme.description}
+                                                >
+                                                    {theme.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                </div>
+                                <p className="text-xs text-gray-400 text-right">
+                                    ※改ページ位置はPDF出力時のみ反映されます
+                                </p>
+                            </>
                         )}
                         <p className="text-xs text-gray-500 text-right">
                             印刷設定は A4・倍率100%を推奨。「ヘッダーとフッター」はオフにしてください
@@ -313,10 +319,17 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
 
             <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
                 {isViewMode ? (
-                    <MarkdownDocument
-                        className="prose prose-sm max-w-none text-gray-800"
-                        markdown={document.text}
-                    />
+                    <div className={`pdf-preview pdf-theme-${pdfTheme} shadow`}>
+                        <article className="pdf-document">
+                            {includeMetadata && (
+                                <PdfDocumentHeader document={document} />
+                            )}
+                            <MarkdownDocument
+                                className="pdf-markdown"
+                                markdown={document.text}
+                            />
+                        </article>
+                    </div>
                 ) : (
                     <div className="h-full">
                         <textarea
