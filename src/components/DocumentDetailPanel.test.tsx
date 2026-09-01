@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Transcription } from '@/lib/firestore';
 import { DocumentDetailPanel } from './DocumentDetailPanel';
 
-const { documentPrintPortal, printPdf } = vi.hoisted(() => ({
+const { createPortal, documentPrintPortal, printPdf } = vi.hoisted(() => ({
+    createPortal: vi.fn((children: React.ReactNode) => children),
     documentPrintPortal: vi.fn(() => null),
     printPdf: vi.fn(async (): Promise<void> => undefined),
 }));
@@ -26,12 +27,20 @@ vi.mock('@/lib/logger', () => ({
     createLogger: () => ({ error: vi.fn() }),
 }));
 
+vi.mock('@/lib/pdfExport', () => ({
+    formatPdfDateTime: vi.fn(() => ''),
+}));
+
 vi.mock('@/components/MarkdownDocument', () => ({
     MarkdownDocument: () => null,
 }));
 
 vi.mock('@/components/DocumentPrintPortal', () => ({
     DocumentPrintPortal: documentPrintPortal,
+}));
+
+vi.mock('react-dom', () => ({
+    createPortal,
 }));
 
 type ButtonProps = {
@@ -46,9 +55,16 @@ type CheckboxProps = {
     onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
 };
 
+type SelectProps = {
+    'aria-label'?: string;
+    onChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+    value: string;
+};
+
 type DocumentPrintPortalProps = {
     active: boolean;
     includeMetadata: boolean;
+    theme: string;
 };
 
 const document: Transcription = {
@@ -116,6 +132,28 @@ function findMetadataCheckbox(
     return null;
 }
 
+function findPdfThemeSelect(
+    node: React.ReactNode,
+): React.ReactElement<SelectProps> | null {
+    if (!React.isValidElement<SelectProps & { children?: React.ReactNode }>(node)) {
+        return null;
+    }
+
+    if (node.type === 'select' && node.props['aria-label'] === 'PDF デザイン') {
+        return node as React.ReactElement<SelectProps>;
+    }
+
+    for (const child of React.Children.toArray(node.props.children)) {
+        const select = findPdfThemeSelect(child);
+
+        if (select) {
+            return select;
+        }
+    }
+
+    return null;
+}
+
 function findPrintPortal(
     node: React.ReactNode,
 ): React.ReactElement<DocumentPrintPortalProps> | null {
@@ -140,26 +178,32 @@ function findPrintPortal(
 
 function mockPanelState({
     includeMetadata = false,
+    pdfTheme = 'editorial',
     saving = false,
     setIncludeMetadata = vi.fn(),
+    setPdfTheme = vi.fn(),
 }: {
     includeMetadata?: boolean;
+    pdfTheme?: string;
     saving?: boolean;
     setIncludeMetadata?: ReturnType<typeof vi.fn>;
+    setPdfTheme?: ReturnType<typeof vi.fn>;
 } = {}): void {
     vi.mocked(useState)
         .mockImplementationOnce(() => [true, vi.fn()])
         .mockImplementationOnce(() => [document.title, vi.fn()])
         .mockImplementationOnce(() => [document.text, vi.fn()])
         .mockImplementationOnce(() => [saving, vi.fn()])
-        .mockImplementationOnce(() => [includeMetadata, setIncludeMetadata]);
+        .mockImplementationOnce(() => [includeMetadata, setIncludeMetadata])
+        .mockImplementationOnce(() => [pdfTheme, setPdfTheme]);
 }
 
 describe('DocumentDetailPanel PDF 出力', () => {
-    const localStorageGetItem = vi.fn<() => string | null>(() => null);
+    const localStorageGetItem = vi.fn<(key: string) => string | null>(() => null);
     const localStorageSetItem = vi.fn();
 
     beforeEach(() => {
+        createPortal.mockClear();
         printPdf.mockClear();
         vi.mocked(useState).mockReset();
         vi.mocked(useEffect).mockReset();
@@ -212,6 +256,79 @@ describe('DocumentDetailPanel PDF 出力', () => {
         expect(findPrintPortal(selectedTree)?.props.includeMetadata).toBe(true);
     });
 
+    it('PDF デザインは editorial を既定値として select と portal に渡す', () => {
+        mockPanelState();
+
+        const tree = DocumentDetailPanel({ document }) as React.ReactNode;
+        const select = findPdfThemeSelect(tree);
+        const portal = findPrintPortal(tree);
+
+        expect(useState).toHaveBeenNthCalledWith(6, 'editorial');
+        expect(select).not.toBeNull();
+        expect(select?.props.value).toBe('editorial');
+        expect(portal?.props.theme).toBe('editorial');
+    });
+
+    it('PDF デザインを選択すると pdfTheme に保存し portal に渡す', () => {
+        const setPdfTheme = vi.fn();
+        mockPanelState({ setPdfTheme });
+
+        const initialTree = DocumentDetailPanel({ document }) as React.ReactNode;
+        const select = findPdfThemeSelect(initialTree);
+
+        expect(select).not.toBeNull();
+        select?.props.onChange({
+            target: { value: 'minimal' },
+        } as React.ChangeEvent<HTMLSelectElement>);
+
+        expect(setPdfTheme).toHaveBeenCalledWith('minimal');
+        expect(localStorageSetItem).toHaveBeenCalledWith('pdfTheme', 'minimal');
+
+        vi.mocked(useState).mockReset();
+        mockPanelState({ pdfTheme: 'minimal' });
+
+        const selectedTree = DocumentDetailPanel({ document }) as React.ReactNode;
+        expect(findPrintPortal(selectedTree)?.props.theme).toBe('minimal');
+    });
+
+    it('保存済みの有効な PDF デザインを読み戻す', () => {
+        const setPdfTheme = vi.fn();
+        localStorageGetItem.mockImplementation(key => (
+            key === 'pdfTheme' ? 'minimal' : null
+        ));
+        mockPanelState({ setPdfTheme });
+
+        DocumentDetailPanel({ document });
+
+        for (const [effect, dependencies] of vi.mocked(useEffect).mock.calls) {
+            if (Array.isArray(dependencies) && dependencies.length === 0) {
+                effect();
+            }
+        }
+
+        expect(localStorageGetItem).toHaveBeenCalledWith('pdfTheme');
+        expect(setPdfTheme).toHaveBeenCalledWith('minimal');
+    });
+
+    it('不正な保存済み PDF デザインは editorial にフォールバックする', () => {
+        const setPdfTheme = vi.fn();
+        localStorageGetItem.mockImplementation(key => (
+            key === 'pdfTheme' ? 'unknown-theme' : null
+        ));
+        mockPanelState({ setPdfTheme });
+
+        DocumentDetailPanel({ document });
+
+        for (const [effect, dependencies] of vi.mocked(useEffect).mock.calls) {
+            if (Array.isArray(dependencies) && dependencies.length === 0) {
+                effect();
+            }
+        }
+
+        expect(localStorageGetItem).toHaveBeenCalledWith('pdfTheme');
+        expect(setPdfTheme).toHaveBeenCalledWith('editorial');
+    });
+
     it('保存中は表示モードへ戻ってもクリックを拒否する', () => {
         mockPanelState({ saving: true });
 
@@ -228,5 +345,46 @@ describe('DocumentDetailPanel PDF 出力', () => {
         pdfButton?.props.onClick();
 
         expect(printPdf).not.toHaveBeenCalled();
+    });
+});
+
+describe('DocumentPrintPortal PDF テーマ', () => {
+    beforeEach(() => {
+        vi.stubGlobal('window', { document: { body: {} } });
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('選択テーマをルート class に反映する', async () => {
+        const { DocumentPrintPortal: ActualDocumentPrintPortal } =
+            await vi.importActual<typeof import('./DocumentPrintPortal')>(
+                './DocumentPrintPortal',
+            );
+
+        const portal = ActualDocumentPrintPortal({
+            document,
+            active: true,
+            includeMetadata: false,
+            theme: 'minimal',
+        }) as unknown as React.ReactElement<{ className: string }>;
+
+        expect(portal.props.className).toBe('pdf-print-root pdf-theme-minimal');
+    });
+
+    it('テーマ未指定時は editorial のルート class にフォールバックする', async () => {
+        const { DocumentPrintPortal: ActualDocumentPrintPortal } =
+            await vi.importActual<typeof import('./DocumentPrintPortal')>(
+                './DocumentPrintPortal',
+            );
+
+        const portal = ActualDocumentPrintPortal({
+            document,
+            active: true,
+            includeMetadata: false,
+        }) as unknown as React.ReactElement<{ className: string }>;
+
+        expect(portal.props.className).toBe('pdf-print-root pdf-theme-editorial');
     });
 });
