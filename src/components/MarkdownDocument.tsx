@@ -68,7 +68,7 @@ export type MarkdownDocumentProps = {
     className?: string;
 };
 
-export function MarkdownDocument({
+export const MarkdownDocument = React.memo(function MarkdownDocument({
     markdown,
     className,
 }: MarkdownDocumentProps): React.ReactElement {
@@ -82,4 +82,4 @@ export function MarkdownDocument({
             </ReactMarkdown>
         </div>
     );
-}
+});

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { createPortal } from 'react-dom';
 import type { Transcription } from '@/lib/firestore';
 import { formatPdfDateTime } from '@/lib/pdfExport';
@@ -8,20 +8,14 @@ import { MarkdownDocument } from '@/components/MarkdownDocument';
 
 export type DocumentPrintPortalProps = {
     document: Transcription;
+    active: boolean;
 };
 
 export function DocumentPrintPortal({
     document,
+    active,
 }: DocumentPrintPortalProps): React.ReactPortal | null {
-    const [mounted, setMounted] = useState(false);
-
-    useEffect(() => {
-        const frameId = window.requestAnimationFrame(() => setMounted(true));
-
-        return () => window.cancelAnimationFrame(frameId);
-    }, []);
-
-    if (!mounted) {
+    if (!active) {
         return null;
     }
 

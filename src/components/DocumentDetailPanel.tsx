@@ -52,6 +52,20 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
     }
 
     const hasChanges = editedTitle !== document.title || editedContent !== document.text;
+    const canPrintPdf = isViewMode && !saving && !isPreparing;
+    const pdfButtonTitle = saving
+        ? '保存完了後に PDF 出力できます'
+        : !isViewMode
+            ? '保存後に PDF 出力できます'
+            : undefined;
+
+    const handlePrintPdf = (): void => {
+        if (!canPrintPdf) {
+            return;
+        }
+
+        void printPdf();
+    };
 
     const handleCancelEdit = () => {
         if (hasChanges && !confirm('保存されていない変更があります。変更を破棄しますか？')) {
@@ -135,13 +149,13 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                             <p>生成日時: {formatDate(document.createdAt)}</p>
                         </div>
                     </div>
-                    <div className="flex items-center justify-end">
+                    <div className="flex flex-col items-end gap-1">
                         <div className="flex items-center space-x-2 bg-white/80 rounded-lg p-1 shadow-sm">
                             <button
                                 type="button"
-                                onClick={() => void printPdf()}
-                                disabled={!isViewMode || isPreparing}
-                                title={!isViewMode ? '保存後に PDF 出力できます' : undefined}
+                                onClick={handlePrintPdf}
+                                disabled={!canPrintPdf}
+                                title={pdfButtonTitle}
                                 className="px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 <Download className="w-4 h-4" />
@@ -174,6 +188,9 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                                 </>
                             )}
                         </div>
+                        <p className="text-xs text-gray-500 text-right">
+                            印刷設定は A4・倍率100%を推奨。「ヘッダーとフッター」はオフにしてください
+                        </p>
                     </div>
                 </div>
             </div>
@@ -225,7 +242,7 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                     </button>
                 </div>
             )}
-            <DocumentPrintPortal document={document} />
+            <DocumentPrintPortal document={document} active={isPreparing} />
         </div>
     );
 };

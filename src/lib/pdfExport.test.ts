@@ -58,8 +58,25 @@ describe('sanitizeFileStem', () => {
         );
     });
 
-    it('絵文字を保持する', () => {
-        expect(sanitizeFileStem('発表🚀まとめ')).toBe('発表🚀まとめ');
+    it('絵文字と絵文字内の ZWJ を保持する', () => {
+        expect(sanitizeFileStem('発表🚀👨‍👩‍👧‍👦まとめ')).toBe(
+            '発表🚀👨‍👩‍👧‍👦まとめ',
+        );
+    });
+
+    it('U+200B 単独タイトルを可視文字へ置換する', () => {
+        expect(sanitizeFileStem('\u200B')).toBe('_');
+    });
+
+    it('RLO を含むタイトルから表示順制御を除去する', () => {
+        expect(sanitizeFileStem('議事録\u202Efdp')).toBe('議事録_fdp');
+    });
+
+    it('孤立サロゲートを置換する', () => {
+        expect(sanitizeFileStem('議事録\uD800\uDC00末尾')).toBe(
+            '議事録𐀀末尾',
+        );
+        expect(sanitizeFileStem('high\uD800-low\uDC00')).toBe('high_-low_');
     });
 
     it('結合文字を NFC に正規化する', () => {
@@ -99,6 +116,12 @@ describe('sanitizeFileStem', () => {
         const longTitle = `${'あ'.repeat(99)}.${'い'.repeat(10)}`;
 
         expect(sanitizeFileStem(longTitle)).toBe('あ'.repeat(99));
+    });
+
+    it('切り詰めと末尾除去で再生成された Windows 予約名を回避する', () => {
+        const regeneratedReservedName = `CON ${'.'.repeat(96)}x`;
+
+        expect(sanitizeFileStem(regeneratedReservedName)).toBe('_CON');
     });
 
     it('長い Windows 予約名を回避しても100 code pointを超えない', () => {

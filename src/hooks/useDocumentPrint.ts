@@ -2,7 +2,6 @@
 
 import {
     useCallback,
-    useEffect,
     useLayoutEffect,
     useRef,
     useState,
@@ -15,7 +14,9 @@ const PDF_EXPORT_ACTIVE_CLASS = 'pdf-export-active';
 type PrintOperation = {
     isCancelled: boolean;
     cancelled: Promise<void>;
+    portalActivated: Promise<void>;
     cancel: () => void;
+    markPortalActivated: () => void;
 };
 
 function waitForPrintLayout(): Promise<void> {
@@ -34,7 +35,7 @@ export function useDocumentPrint(document: Transcription | null): {
     const isMountedRef = useRef(false);
     const activeOperationRef = useRef<PrintOperation | null>(null);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         isMountedRef.current = true;
 
         return () => {
@@ -46,6 +47,12 @@ export function useDocumentPrint(document: Transcription | null): {
     useLayoutEffect(() => {
         activeOperationRef.current?.cancel();
     }, [document]);
+
+    useLayoutEffect(() => {
+        if (isPreparing) {
+            activeOperationRef.current?.markPortalActivated();
+        }
+    }, [isPreparing]);
 
     const printPdf = useCallback(async (): Promise<void> => {
         if (!document || activeOperationRef.current) {
@@ -59,13 +66,19 @@ export function useDocumentPrint(document: Transcription | null): {
         const originalTitle = domDocument.title;
         let isRestored = false;
         let resolveCancellation = (): void => undefined;
+        let resolvePortalActivation = (): void => undefined;
         const cancellation = new Promise<void>(resolve => {
             resolveCancellation = resolve;
+        });
+        const portalActivation = new Promise<void>(resolve => {
+            resolvePortalActivation = resolve;
         });
         const operation: PrintOperation = {
             isCancelled: false,
             cancelled: cancellation,
+            portalActivated: portalActivation,
             cancel: () => undefined,
+            markPortalActivated: resolvePortalActivation,
         };
 
         const restore = (): void => {
@@ -100,15 +113,29 @@ export function useDocumentPrint(document: Transcription | null): {
         };
 
         activeOperationRef.current = operation;
-        setIsPreparing(true);
 
         try {
             domDocument.body.classList.add(PDF_EXPORT_ACTIVE_CLASS);
-            await Promise.race([waitForPrintLayout(), operation.cancelled]);
+            setIsPreparing(true);
+
+            await Promise.race([
+                operation.portalActivated,
+                operation.cancelled,
+            ]);
 
             if (
                 operation.isCancelled ||
                 activeOperationRef.current !== operation
+            ) {
+                return;
+            }
+
+            await Promise.race([waitForPrintLayout(), operation.cancelled]);
+
+            if (
+                operation.isCancelled ||
+                activeOperationRef.current !== operation ||
+                !isMountedRef.current
             ) {
                 return;
             }
@@ -120,13 +147,23 @@ export function useDocumentPrint(document: Transcription | null): {
 
             if (
                 operation.isCancelled ||
-                activeOperationRef.current !== operation
+                activeOperationRef.current !== operation ||
+                !isMountedRef.current
             ) {
                 return;
             }
 
             domDocument.title = buildPdfFileStem(document);
             window.addEventListener('afterprint', restore);
+
+            if (
+                operation.isCancelled ||
+                activeOperationRef.current !== operation ||
+                !isMountedRef.current
+            ) {
+                return;
+            }
+
             window.print();
         } finally {
             restore();

@@ -25,6 +25,8 @@ const fileDateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
 
 const WINDOWS_RESERVED_NAME =
     /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu;
+const UNSAFE_FORMAT_CONTROLS =
+    /[\u00ad\u061c\u180e\u200b\u200c\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb]/gu;
 
 export function dateLikeToDate(value: DateLike): Date {
     return value instanceof Date ? value : value.toDate();
@@ -62,6 +64,8 @@ export function sanitizeFileStem(value: string): string {
     let sanitized = value
         .normalize('NFC')
         .replace(/[\u0000-\u001f\u007f-\u009f<>:"/\\|?*]/gu, '_')
+        .replace(UNSAFE_FORMAT_CONTROLS, '_')
+        .replace(/\p{Cs}/gu, '_')
         .replace(/\s+/gu, ' ')
         .trim()
         .replace(/[ .]+$/u, '');
@@ -79,7 +83,15 @@ export function sanitizeFileStem(value: string): string {
         .join('')
         .replace(/[ .]+$/u, '');
 
-    return sanitized || 'document';
+    if (!sanitized) {
+        return 'document';
+    }
+
+    if (WINDOWS_RESERVED_NAME.test(sanitized)) {
+        sanitized = `_${sanitized}`;
+    }
+
+    return sanitized;
 }
 
 export function buildPdfFileStem(document: {

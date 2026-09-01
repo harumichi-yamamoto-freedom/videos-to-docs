@@ -1,5 +1,4 @@
-/* Web 表示と印刷で同じ日本語 font stack を使う。 */
-.markdown-document,
+/* 画面フォントはW6確定スタックを維持。NotoはPDF専用（設計§2からの意図的逸脱・lead承認）。 */
 .pdf-document {
   font-family:
     var(--font-noto-sans-jp, "Noto Sans JP"),
