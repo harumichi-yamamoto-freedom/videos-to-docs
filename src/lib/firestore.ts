@@ -94,10 +94,27 @@ export async function saveTranscription(
     modelSelection?: 'default' | 'pinned',
     // 既存の positional 呼び出しを維持するため、新規引数は末尾に追加する。
     generatedByThinkingLevel?: string,
+    /** 呼び出し側がジョブ開始時に固定した所有者UID。実際に書き込む userId と一致しなければ保存しない */
+    expectedOwnerUid?: string,
 ): Promise<string> {
     try {
         const userId = getCurrentUserId();
         const ownerType = getOwnerType();
+
+        // 書き込む userId そのものを照合する。呼び出し側で確認してから
+        // ここへ到達するまでの間に認証が変わっても取り違えない
+        if (expectedOwnerUid !== undefined && expectedOwnerUid !== userId) {
+            // UID は利用者に見せず、突き合わせに必要な値はログにだけ残す
+            firestoreLogger.error('保存先の所有者が処理開始時から変わったため保存を中止', undefined, {
+                fileName,
+                promptName,
+                expectedOwnerUid,
+                currentUserId: userId,
+            });
+            throw new Error(
+                'ログイン状態が処理の開始時から変わったため、保存を中止しました。ログインし直してから、もう一度お試しください。'
+            );
+        }
 
         // サイズチェック
         const sizeValidation = await validateDocumentSize(transcription);

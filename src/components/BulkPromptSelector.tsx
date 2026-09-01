@@ -1,7 +1,6 @@
 'use client';
 
-import React from 'react';
-import { CheckSquare, Square } from 'lucide-react';
+import React, { useId } from 'react';
 import { Prompt } from '@/lib/prompts';
 import { getGeminiModelLabel } from '@/constants/geminiModels';
 
@@ -16,38 +15,44 @@ export const BulkPromptSelector: React.FC<BulkPromptSelectorProps> = ({
     bulkSelectedPromptIds,
     onToggleBulkPrompt,
 }) => {
+    const groupId = useId();
+
     if (availablePrompts.length === 0) {
         return null;
     }
 
     return (
-        <div className="mt-6 bg-purple-50 border border-purple-200 rounded-lg p-4">
-            <h3 className="text-sm font-medium text-purple-900 mb-1">
-                📝 デフォルトプロンプト選択（ファイル追加時に適用）
-            </h3>
-            <div className="space-y-2">
-                {availablePrompts.map(prompt => (
-                    <div
-                        key={prompt.id}
-                        className="flex items-center space-x-2 cursor-pointer hover:bg-purple-100 p-2 rounded"
-                        onClick={() => onToggleBulkPrompt(prompt.id!)}
-                    >
-                        {bulkSelectedPromptIds.includes(prompt.id!) ? (
-                            <CheckSquare className="w-4 h-4 text-purple-600" />
-                        ) : (
-                            <Square className="w-4 h-4 text-gray-400" />
-                        )}
-                        <div className="flex flex-col">
-                            <span className="text-sm text-gray-700">{prompt.name}</span>
-                            <span className="text-[11px] text-gray-500">
-                                {getGeminiModelLabel(prompt.model)}
+        <fieldset className="rounded-lg border border-purple-200 bg-purple-50 p-4">
+            <legend className="px-1 text-sm font-medium text-purple-900">
+                デフォルトプロンプト（ファイル追加時に適用します）
+            </legend>
+            <div className="space-y-1">
+                {availablePrompts.map(prompt => {
+                    const checkboxId = `${groupId}-${prompt.id}`;
+
+                    return (
+                        <label
+                            key={prompt.id}
+                            htmlFor={checkboxId}
+                            className="flex min-h-11 cursor-pointer items-center gap-3 rounded px-2 py-1 hover:bg-purple-100 focus-within:ring-2 focus-within:ring-purple-500"
+                        >
+                            <input
+                                id={checkboxId}
+                                type="checkbox"
+                                checked={bulkSelectedPromptIds.includes(prompt.id!)}
+                                onChange={() => onToggleBulkPrompt(prompt.id!)}
+                                className="h-4 w-4 shrink-0 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                            />
+                            <span className="flex min-w-0 flex-col">
+                                <span className="truncate text-sm text-gray-800">{prompt.name}</span>
+                                <span className="text-xs text-gray-600">
+                                    {getGeminiModelLabel(prompt.model)}
+                                </span>
                             </span>
-                        </div>
-                    </div>
-                ))}
+                        </label>
+                    );
+                })}
             </div>
-        </div>
+        </fieldset>
     );
 };
-
-
