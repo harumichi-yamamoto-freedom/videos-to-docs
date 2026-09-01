@@ -86,7 +86,7 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
         benchmark: {
             recognitionQuality: 5,
             analysisQuality: 5,
-            // 出力 ≈315-340 tok/s（Artificial Analysis実測）・思考は既定OFFのため 3.5 Flash より短い見積もり
+            // 出力 ≈287-308 tok/s（Artificial Analysis実測）。⚠️思考は既定ON・レベルmedium（OFF不可・公式docs確認済2026-09-01）のため実測待ち時間には思考分が含まれる
             estimatedSeconds: 40,
             recommendedFor: '動画・音声→文書の総合おすすめ。現行の既定モデル',
         },
