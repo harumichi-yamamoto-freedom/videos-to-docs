@@ -4,7 +4,12 @@
  * making color the only carrier of hierarchy.
  */
 
-.pdf-print-root.pdf-theme-rich .pdf-document {
+/*
+ * :is() retains the former two-class root specificity while :where() shares
+ * every visual rule with the screen preview.
+ */
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document {
   --pdf-rich-ink: #202331;
   --pdf-rich-ink-soft: #454d5e;
   --pdf-rich-navy: #263b63;
@@ -54,14 +59,14 @@
 }
 
 /* Document title: a dark typographic anchor with a restrained spectrum rail. */
-.pdf-print-root.pdf-theme-rich .pdf-document__header {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__header {
   position: relative;
   margin: 0 0 10mm;
   padding: 5mm 0 0;
   border-top: 0.35mm solid var(--pdf-rich-ink);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__header::before {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__header::before {
   content: "";
   position: absolute;
   top: -0.8mm;
@@ -73,7 +78,7 @@
   background: var(--pdf-rich-spectrum);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__title {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__title {
   position: relative;
   margin: 0 0 4.8mm;
   padding: 0 0 3.2mm;
@@ -94,7 +99,7 @@
   text-wrap: balance;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__title::after {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__title::after {
   content: "";
   display: block;
   width: 34mm;
@@ -104,7 +109,7 @@
   background: var(--pdf-rich-spectrum);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__meta {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__meta {
   margin: 0;
   padding: 3.4mm 4.2mm;
   border: 0.22mm solid var(--pdf-rich-rule);
@@ -121,14 +126,14 @@
   line-height: 1.55;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__meta dt {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__meta dt {
   color: var(--pdf-rich-plum);
   font-size: 7.7pt;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__meta dt::before {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__meta dt::before {
   content: "";
   display: inline-block;
   width: 1.35mm;
@@ -140,20 +145,20 @@
   vertical-align: 0.02em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__meta dd {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__meta dd {
   margin: 0;
   color: var(--pdf-rich-ink-soft);
 }
 
 /* The content spine repeats the title palette without relying on color alone. */
-.pdf-print-root.pdf-theme-rich .pdf-markdown {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown {
   position: relative;
   padding-top: 4.2mm;
   border-top: 0.45mm solid var(--pdf-rich-ink);
   color: var(--pdf-rich-ink);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown::before {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown::before {
   content: "";
   position: absolute;
   top: -0.78mm;
@@ -165,12 +170,12 @@
   background: var(--pdf-rich-spectrum);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h1,
-.pdf-print-root.pdf-theme-rich .pdf-markdown h2,
-.pdf-print-root.pdf-theme-rich .pdf-markdown h3,
-.pdf-print-root.pdf-theme-rich .pdf-markdown h4,
-.pdf-print-root.pdf-theme-rich .pdf-markdown h5,
-.pdf-print-root.pdf-theme-rich .pdf-markdown h6 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h1,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h2,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h3,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h4,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h5,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h6 {
   font-family:
     var(--font-noto-sans-jp, "Noto Sans JP"),
     "Hiragino Sans",
@@ -183,7 +188,7 @@
   text-wrap: balance;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h1 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h1 {
   position: relative;
   margin: 10.5mm 0 4.8mm;
   padding: 3.2mm 4.3mm 3mm 5.2mm;
@@ -203,7 +208,7 @@
   letter-spacing: 0.012em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h1::after {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h1::after {
   content: "";
   display: block;
   width: 31mm;
@@ -213,7 +218,7 @@
   background: var(--pdf-rich-spectrum);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h2 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h2 {
   position: relative;
   margin: 8.5mm 0 3.5mm;
   padding: 1.5mm 2.5mm 1.6mm 4.7mm;
@@ -230,7 +235,7 @@
   letter-spacing: 0.02em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h2::before {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h2::before {
   content: "";
   position: absolute;
   top: -0.15mm;
@@ -240,7 +245,7 @@
   background: var(--pdf-rich-spectrum-vertical);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h3 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h3 {
   position: relative;
   margin: 6.8mm 0 2.9mm;
   padding: 0 0 1.4mm;
@@ -251,7 +256,7 @@
   letter-spacing: 0.03em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h3::after {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h3::after {
   content: "";
   position: absolute;
   bottom: -0.28mm;
@@ -262,7 +267,7 @@
   background: var(--pdf-rich-spectrum);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h4 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h4 {
   margin: 5.5mm 0 2.3mm;
   padding: 0.5mm 0 0.5mm 3mm;
   border-left: 0.6mm solid var(--pdf-rich-gold);
@@ -272,7 +277,7 @@
   letter-spacing: 0.035em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h5 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h5 {
   margin: 4.7mm 0 2mm;
   padding: 0 0 0.8mm;
   border-bottom: 0.2mm dashed var(--pdf-rich-rule-strong);
@@ -282,7 +287,7 @@
   letter-spacing: 0.065em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h6 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h6 {
   position: relative;
   margin: 4.3mm 0 1.8mm;
   padding-left: 3.2mm;
@@ -292,7 +297,7 @@
   letter-spacing: 0.075em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h6::before {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h6::before {
   content: "";
   position: absolute;
   top: 0.52em;
@@ -304,72 +309,72 @@
   transform: rotate(45deg);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown p {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown p {
   margin: 0 0 3.8mm;
   color: var(--pdf-rich-ink);
   font-size: 10.2pt;
   line-height: 1.8;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown > p:first-child {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > p:first-child {
   color: var(--pdf-rich-ink-soft);
   font-size: 10.8pt;
   line-height: 1.84;
 }
 
 /* Marker shape remains meaningful when the palette is rendered in grayscale. */
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul,
-.pdf-print-root.pdf-theme-rich .pdf-markdown ol {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ol {
   margin: 0 0 4.5mm;
   padding-left: 1.95em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul {
   list-style: disc outside;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ol {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ol {
   list-style: decimal outside;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul ul {
   list-style-type: circle;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul ul {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul ul ul {
   list-style-type: square;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown li {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown li {
   margin: 0;
   color: var(--pdf-rich-ink);
   line-height: 1.76;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown li + li {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown li + li {
   margin-top: 1.25mm;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul > li::marker {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul > li::marker {
   color: var(--pdf-rich-teal);
   font-weight: 700;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ol > li::marker {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ol > li::marker {
   color: var(--pdf-rich-plum);
   font-weight: 700;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul > li::marker,
-.pdf-print-root.pdf-theme-rich .pdf-markdown ol ol > li::marker {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul ul > li::marker,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ol ol > li::marker {
   color: var(--pdf-rich-gold);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul ul > li::marker {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul ul ul > li::marker {
   color: var(--pdf-rich-berry);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown a {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown a {
   color: var(--pdf-rich-navy);
   font-weight: 700;
   text-decoration-line: underline;
@@ -378,7 +383,7 @@
   text-underline-offset: 0.16em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown strong {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown strong {
   color: var(--pdf-rich-plum);
   background: linear-gradient(
     transparent 72%,
@@ -387,7 +392,7 @@
   font-weight: 700;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown hr {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown hr {
   width: 42mm;
   height: 0.9mm;
   margin: 9mm 0;
@@ -397,7 +402,7 @@
 }
 
 /* A pale header keeps table labels legible even when backgrounds are omitted. */
-.pdf-print-root.pdf-theme-rich .pdf-markdown table {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown table {
   margin: 5.8mm 0;
   border: 0.25mm solid var(--pdf-rich-rule-strong);
   border-top: 0.9mm solid var(--pdf-rich-navy);
@@ -408,8 +413,8 @@
   line-height: 1.54;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown th,
-.pdf-print-root.pdf-theme-rich .pdf-markdown td {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown th,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown td {
   padding: 2.15mm 2.45mm;
   border: 0;
   border-bottom: 0.2mm solid var(--pdf-rich-rule);
@@ -418,7 +423,7 @@
   text-align: left;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown thead th {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown thead th {
   border-bottom: 0.65mm solid var(--pdf-rich-navy);
   background: linear-gradient(
     105deg,
@@ -433,23 +438,23 @@
   letter-spacing: 0.035em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown th + th {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown th + th {
   border-left: 0.2mm solid var(--pdf-rich-rule-strong);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown td + td {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown td + td {
   border-left: 0.2mm solid var(--pdf-rich-rule-soft);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown tr:nth-child(even) td {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown tr:nth-child(even) td {
   background: var(--pdf-rich-navy-tint);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown tr:last-child td {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown tr:last-child td {
   border-bottom-color: transparent;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown code {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown code {
   color: var(--pdf-rich-plum);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
@@ -460,7 +465,7 @@
   font-variant-ligatures: none;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown pre {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown pre {
   margin: 5.8mm 0;
   padding: 3.8mm 4.1mm;
   border: 0.22mm solid var(--pdf-rich-rule);
@@ -484,7 +489,7 @@
   letter-spacing: 0;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown pre > code {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown pre > code {
   margin: 0;
   padding: 0;
   border: 0;
@@ -493,7 +498,7 @@
   font: inherit;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown :not(pre) > code {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown :not(pre) > code {
   padding: 0.28mm 1mm;
   border: 0.2mm solid var(--pdf-rich-rule);
   border-left: 0.6mm solid var(--pdf-rich-gold);
@@ -504,7 +509,7 @@
   line-height: 1;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown blockquote {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown blockquote {
   position: relative;
   margin: 5.8mm 0;
   padding: 3.7mm 4.3mm 3.5mm 10.5mm;
@@ -524,7 +529,7 @@
   line-height: 1.76;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown blockquote::before {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown blockquote::before {
   content: "“";
   position: absolute;
   top: 1.6mm;
@@ -542,6 +547,6 @@
   line-height: 1;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown blockquote strong {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown blockquote strong {
   color: var(--pdf-rich-plum);
 }

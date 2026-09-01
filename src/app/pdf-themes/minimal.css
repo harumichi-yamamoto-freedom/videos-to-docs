@@ -1,5 +1,5 @@
 /* aaa/d2a-css-minimal のモノクロ組版をテーマとして移植する。 */
-:where(.pdf-print-root.pdf-theme-minimal) .pdf-document {
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-document {
   --pdf-ink: #1c1c1b;
   --pdf-muted: #64645f;
   --pdf-rule: #bdbdb8;
@@ -7,276 +7,275 @@
   --pdf-wash: #f5f5f2;
 }
 
-@media print {
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-document {
-    color: var(--pdf-ink);
-    background: #ffffff;
-    font-size: 10pt;
-    font-weight: 400;
-    line-height: 1.78;
-    letter-spacing: 0.018em;
-  }
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-document__header {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 52mm;
-    column-gap: 10mm;
-    align-items: end;
-    margin: 0 0 10mm;
-    padding: 3.8mm 0 4.5mm;
-    border-top: 0.65mm solid var(--pdf-ink);
-    border-bottom: 0.2mm solid var(--pdf-rule);
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-document {
+  color: var(--pdf-ink);
+  background: #ffffff;
+  font-size: 10pt;
+  font-weight: 400;
+  line-height: 1.78;
+  letter-spacing: 0.018em;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-document__title {
-    margin: 0;
-    color: var(--pdf-ink);
-    font-size: 16.5pt;
-    font-weight: 700;
-    line-height: 1.38;
-    letter-spacing: 0.04em;
-    font-feature-settings: "palt" 1;
-    font-kerning: normal;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-document__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52mm;
+  column-gap: 10mm;
+  align-items: end;
+  margin: 0 0 10mm;
+  padding: 3.8mm 0 4.5mm;
+  border-top: 0.65mm solid var(--pdf-ink);
+  border-bottom: 0.2mm solid var(--pdf-rule);
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-document__meta {
-    grid-template-columns: 14mm minmax(0, 1fr);
-    gap: 0.65mm 2.5mm;
-    margin: 0;
-    color: var(--pdf-muted);
-    font-size: 7.6pt;
-    line-height: 1.52;
-    letter-spacing: 0.035em;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-document__title {
+  margin: 0;
+  color: var(--pdf-ink);
+  font-size: 16.5pt;
+  font-weight: 700;
+  line-height: 1.38;
+  letter-spacing: 0.04em;
+  font-feature-settings: "palt" 1;
+  font-kerning: normal;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-document__meta dt {
-    color: var(--pdf-ink);
-    font-weight: 700;
-    white-space: nowrap;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-document__meta {
+  grid-template-columns: 14mm minmax(0, 1fr);
+  gap: 0.65mm 2.5mm;
+  margin: 0;
+  color: var(--pdf-muted);
+  font-size: 7.6pt;
+  line-height: 1.52;
+  letter-spacing: 0.035em;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal)
-    .pdf-markdown
-    :is(h1, h2, h3, h4, h5, h6) {
-    color: var(--pdf-ink);
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-document__meta dt {
+  color: var(--pdf-ink);
+  font-weight: 700;
+  white-space: nowrap;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown h1 {
-    margin: 10.5mm 0 4.5mm;
-    padding-bottom: 2.7mm;
-    border-bottom: 0.35mm solid var(--pdf-ink);
-    font-size: 17.5pt;
-    line-height: 1.42;
-    letter-spacing: 0.04em;
-    font-feature-settings: "palt" 1;
-    font-kerning: normal;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--pdf-ink);
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown h2 {
-    margin: 8.5mm 0 3.2mm;
-    padding-top: 2.2mm;
-    border-top: 0.2mm solid var(--pdf-rule);
-    font-size: 12.5pt;
-    line-height: 1.5;
-    letter-spacing: 0.038em;
-    font-feature-settings: "palt" 1;
-    font-kerning: normal;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown h1 {
+  margin: 10.5mm 0 4.5mm;
+  padding-bottom: 2.7mm;
+  border-bottom: 0.35mm solid var(--pdf-ink);
+  font-size: 17.5pt;
+  line-height: 1.42;
+  letter-spacing: 0.04em;
+  font-feature-settings: "palt" 1;
+  font-kerning: normal;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown h3 {
-    margin: 6.3mm 0 2.4mm;
-    font-size: 10.8pt;
-    line-height: 1.58;
-    letter-spacing: 0.034em;
-    font-feature-settings: "palt" 1;
-    font-kerning: normal;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown h2 {
+  margin: 8.5mm 0 3.2mm;
+  padding-top: 2.2mm;
+  border-top: 0.2mm solid var(--pdf-rule);
+  font-size: 12.5pt;
+  line-height: 1.5;
+  letter-spacing: 0.038em;
+  font-feature-settings: "palt" 1;
+  font-kerning: normal;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown h4 {
-    margin: 5.2mm 0 2mm;
-    font-size: 10pt;
-    line-height: 1.62;
-    letter-spacing: 0.04em;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown h3 {
+  margin: 6.3mm 0 2.4mm;
+  font-size: 10.8pt;
+  line-height: 1.58;
+  letter-spacing: 0.034em;
+  font-feature-settings: "palt" 1;
+  font-kerning: normal;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal)
-    .pdf-markdown
-    :is(h5, h6) {
-    margin: 4.5mm 0 1.7mm;
-    font-size: 9.2pt;
-    line-height: 1.65;
-    letter-spacing: 0.055em;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown h4 {
+  margin: 5.2mm 0 2mm;
+  font-size: 10pt;
+  line-height: 1.62;
+  letter-spacing: 0.04em;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown h6 {
-    color: var(--pdf-muted);
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  :is(h5, h6) {
+  margin: 4.5mm 0 1.7mm;
+  font-size: 9.2pt;
+  line-height: 1.65;
+  letter-spacing: 0.055em;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown p {
-    margin: 0 0 3.4mm;
-    text-align: justify;
-    text-justify: inter-character;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown h6 {
+  color: var(--pdf-muted);
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal)
-    .pdf-markdown
-    :is(li, th, td)
-    p {
-    text-align: left;
-    text-justify: auto;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown p {
+  margin: 0 0 3.4mm;
+  text-align: justify;
+  text-justify: inter-character;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown :is(ul, ol) {
-    margin: 0 0 4.2mm;
-    padding-left: 1.55em;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  :is(li, th, td)
+  p {
+  text-align: left;
+  text-justify: auto;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal)
-    .pdf-markdown
-    :is(ul ul, ul ol, ol ul, ol ol) {
-    margin-top: 0.8mm;
-    margin-bottom: 0;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown :is(ul, ol) {
+  margin: 0 0 4.2mm;
+  padding-left: 1.55em;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown li {
-    margin: 0;
-    padding-left: 0.12em;
-    line-height: 1.75;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  :is(ul ul, ul ol, ol ul, ol ol) {
+  margin-top: 0.8mm;
+  margin-bottom: 0;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown li + li {
-    margin-top: 0.8mm;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown li {
+  margin: 0;
+  padding-left: 0.12em;
+  line-height: 1.75;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown li::marker {
-    color: var(--pdf-muted);
-    font-size: 0.86em;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown li + li {
+  margin-top: 0.8mm;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown ol > li::marker {
-    color: var(--pdf-ink);
-    font-weight: 700;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown li::marker {
+  color: var(--pdf-muted);
+  font-size: 0.86em;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal)
-    .pdf-markdown
-    .task-list-item
-    input[type="checkbox"] {
-    accent-color: var(--pdf-ink);
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown ol > li::marker {
+  color: var(--pdf-ink);
+  font-weight: 700;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown a {
-    color: inherit;
-    text-decoration: underline;
-    text-decoration-color: var(--pdf-muted);
-    text-decoration-thickness: 0.16mm;
-    text-underline-offset: 0.17em;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  .task-list-item
+  input[type="checkbox"] {
+  accent-color: var(--pdf-ink);
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown strong {
-    color: var(--pdf-ink);
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--pdf-muted);
+  text-decoration-thickness: 0.16mm;
+  text-underline-offset: 0.17em;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown hr {
-    width: 16mm;
-    height: 0;
-    margin: 9mm auto;
-    border: 0;
-    border-top: 0.35mm solid var(--pdf-ink);
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown strong {
+  color: var(--pdf-ink);
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown table {
-    margin: 5.5mm 0 6mm;
-    border-collapse: collapse;
-    border-top: 0.32mm solid var(--pdf-ink);
-    border-bottom: 0.32mm solid var(--pdf-ink);
-    color: var(--pdf-ink);
-    font-size: 8.5pt;
-    line-height: 1.58;
-    font-variant-numeric: tabular-nums;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown hr {
+  width: 16mm;
+  height: 0;
+  margin: 9mm auto;
+  border: 0;
+  border-top: 0.35mm solid var(--pdf-ink);
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown :is(th, td) {
-    padding: 2mm 2.2mm;
-    border: 0;
-    border-bottom: 0.2mm solid var(--pdf-hairline);
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown table {
+  margin: 5.5mm 0 6mm;
+  border-collapse: collapse;
+  border-top: 0.32mm solid var(--pdf-ink);
+  border-bottom: 0.32mm solid var(--pdf-ink);
+  color: var(--pdf-ink);
+  font-size: 8.5pt;
+  line-height: 1.58;
+  font-variant-numeric: tabular-nums;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown th {
-    border-bottom-width: 0.28mm;
-    border-bottom-color: var(--pdf-ink);
-    background: transparent;
-    font-weight: 700;
-    letter-spacing: 0.035em;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown :is(th, td) {
+  padding: 2mm 2.2mm;
+  border: 0;
+  border-bottom: 0.2mm solid var(--pdf-hairline);
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal)
-    .pdf-markdown
-    :is(th, td):first-child {
-    padding-left: 0.4mm;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown th {
+  border-bottom-width: 0.28mm;
+  border-bottom-color: var(--pdf-ink);
+  background: transparent;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal)
-    .pdf-markdown
-    :is(th, td):last-child {
-    padding-right: 0.4mm;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  :is(th, td):first-child {
+  padding-left: 0.4mm;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal)
-    .pdf-markdown
-    :is(tbody, tfoot)
-    tr:last-child
-    td {
-    border-bottom: 0;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  :is(th, td):last-child {
+  padding-right: 0.4mm;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown pre {
-    margin: 5mm 0 5.5mm;
-    padding: 3.2mm 3.5mm;
-    border: 0.2mm solid var(--pdf-hairline);
-    border-left: 0.55mm solid var(--pdf-muted);
-    border-radius: 0;
-    background: var(--pdf-wash);
-    color: var(--pdf-ink);
-    font-family:
-      var(--font-geist-mono, "SFMono-Regular"),
-      var(--font-noto-sans-jp, "Noto Sans JP"),
-      "Yu Gothic",
-      Meiryo,
-      monospace;
-    font-size: 8.15pt;
-    line-height: 1.62;
-    letter-spacing: 0;
-    word-break: break-word;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  :is(tbody, tfoot)
+  tr:last-child
+  td {
+  border-bottom: 0;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown :not(pre) > code {
-    padding: 0.15mm 0.75mm;
-    border: 0;
-    border-bottom: 0.2mm solid var(--pdf-rule);
-    border-radius: 0;
-    background: var(--pdf-wash);
-    color: var(--pdf-ink);
-    font-family:
-      var(--font-geist-mono, "SFMono-Regular"),
-      var(--font-noto-sans-jp, "Noto Sans JP"),
-      monospace;
-    font-size: 0.86em;
-    letter-spacing: 0;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown pre {
+  margin: 5mm 0 5.5mm;
+  padding: 3.2mm 3.5mm;
+  border: 0.2mm solid var(--pdf-hairline);
+  border-left: 0.55mm solid var(--pdf-muted);
+  border-radius: 0;
+  background: var(--pdf-wash);
+  color: var(--pdf-ink);
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-size: 8.15pt;
+  line-height: 1.62;
+  letter-spacing: 0;
+  word-break: break-word;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal) .pdf-markdown blockquote {
-    margin: 5.5mm 0;
-    padding: 1.2mm 0 1.2mm 4.5mm;
-    border-left: 0.45mm solid var(--pdf-muted);
-    background: transparent;
-    color: #4d4d49;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown :not(pre) > code {
+  padding: 0.15mm 0.75mm;
+  border: 0;
+  border-bottom: 0.2mm solid var(--pdf-rule);
+  border-radius: 0;
+  background: var(--pdf-wash);
+  color: var(--pdf-ink);
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    monospace;
+  font-size: 0.86em;
+  letter-spacing: 0;
+}
 
-  :where(.pdf-print-root.pdf-theme-minimal)
-    .pdf-markdown
-    :is(img, svg, figure) {
-    display: block;
-    margin: 5.5mm auto;
-  }
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal) .pdf-markdown blockquote {
+  margin: 5.5mm 0;
+  padding: 1.2mm 0 1.2mm 4.5mm;
+  border-left: 0.45mm solid var(--pdf-muted);
+  background: transparent;
+  color: #4d4d49;
+}
+
+:where(.pdf-print-root.pdf-theme-minimal, .pdf-preview.pdf-theme-minimal)
+  .pdf-markdown
+  :is(img, svg, figure) {
+  display: block;
+  margin: 5.5mm auto;
 }

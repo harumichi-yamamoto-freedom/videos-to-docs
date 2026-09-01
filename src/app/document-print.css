@@ -4,7 +4,7 @@
 @import "./pdf-themes/rich.css";
 
 /* PDF は描画前に計測するため、印刷メディア外でも専用フォントを確定させる。 */
-.pdf-document {
+:where(.pdf-print-root, .pdf-preview) .pdf-document {
   font-family:
     var(--font-noto-sans-jp, "Noto Sans JP"),
     "Hiragino Sans",
@@ -17,6 +17,15 @@
 /* hidden 属性は Tailwind Preflight と競合し得るため使用しない。 */
 .pdf-print-root {
   display: none;
+}
+
+/* 画面プレビューは印刷可能領域と同等の本文幅と余白を持つ。 */
+.pdf-preview {
+  box-sizing: content-box;
+  max-width: 176mm;
+  margin-inline: auto;
+  padding: 17mm 18mm 22mm;
+  background: #ffffff;
 }
 
 /* window.print() 前に付与し、off-screen で font/layout を確定する。 */
@@ -55,6 +64,151 @@ body.pdf-export-active > .pdf-print-root {
   }
 }
 
+/* 画面プレビューと PDF で共有する日本語組版の基礎。 */
+:where(.pdf-print-root, .pdf-preview) .pdf-document {
+  line-break: strict;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-document *,
+:where(.pdf-print-root, .pdf-preview) .pdf-document *::before,
+:where(.pdf-print-root, .pdf-preview) .pdf-document *::after {
+  box-sizing: border-box;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-document__title {
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-document__meta {
+  display: grid;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-document__meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown > :first-child {
+  margin-top: 0;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown h1,
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown h2,
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown h3,
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown h4,
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown h5,
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown h6 {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown ul {
+  list-style: disc outside;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown ol {
+  list-style: decimal outside;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown ul ul {
+  list-style: circle outside;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown li > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown .contains-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+:where(.pdf-print-root, .pdf-preview)
+  .pdf-markdown
+  .task-list-item
+  input[type="checkbox"] {
+  margin-right: 1.5mm;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown a {
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown strong {
+  font-weight: 700;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown table {
+  width: 100%;
+  max-width: 100%;
+  border-spacing: 0;
+  table-layout: auto;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown th,
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown td {
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown code {
+  overflow-wrap: anywhere;
+}
+
+/* 長いコードは画面でも折り返し、装飾を fragment ごとに再描画できるようにする。 */
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown pre {
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* ReactMarkdown が pre/code の双方へ付ける背景と余白を一度だけ描画する。 */
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown pre > code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: inherit;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown :not(pre) > code {
+  display: inline;
+}
+
+/* 長い引用は fragment ごとに外観を維持する。 */
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown blockquote {
+  font-style: normal;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown img,
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown svg,
+:where(.pdf-print-root, .pdf-preview) .pdf-markdown figure {
+  max-width: 100%;
+  height: auto;
+}
+
 @media print {
   body.pdf-export-active {
     width: auto !important;
@@ -80,19 +234,10 @@ body.pdf-export-active > .pdf-print-root {
     page: pdf-document;
   }
 
-  /* テーマに依存しない日本語組版と色再現の基礎。 */
+  /* テーマに依存しない印刷時の色再現。 */
   .pdf-document {
-    line-break: strict;
-    word-break: normal;
-    overflow-wrap: break-word;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
-  }
-
-  .pdf-document *,
-  .pdf-document *::before,
-  .pdf-document *::after {
-    box-sizing: border-box;
   }
 
   /* 文書ヘッダーと直後の本文を別ページへ孤立させない。 */
@@ -105,36 +250,12 @@ body.pdf-export-active > .pdf-print-root {
     page-break-after: avoid;
   }
 
-  .pdf-document__title {
-    overflow-wrap: anywhere;
-  }
-
-  .pdf-document__meta {
-    display: grid;
-  }
-
-  .pdf-document__meta dd {
-    min-width: 0;
-    margin: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .pdf-markdown > :first-child {
-    margin-top: 0;
-  }
-
-  .pdf-markdown > :last-child {
-    margin-bottom: 0;
-  }
-
   .pdf-markdown h1,
   .pdf-markdown h2,
   .pdf-markdown h3,
   .pdf-markdown h4,
   .pdf-markdown h5,
   .pdf-markdown h6 {
-    font-weight: 700;
-    overflow-wrap: anywhere;
     break-inside: avoid;
     break-inside: avoid-page;
     break-after: avoid;
@@ -155,52 +276,18 @@ body.pdf-export-active > .pdf-print-root {
     widows: 3;
   }
 
-  .pdf-markdown ul {
-    list-style: disc outside;
-  }
-
-  .pdf-markdown ol {
-    list-style: decimal outside;
-  }
-
-  .pdf-markdown ul ul {
-    list-style: circle outside;
-  }
-
   .pdf-markdown li {
     orphans: 2;
     widows: 2;
   }
 
-  .pdf-markdown li > :last-child {
-    margin-bottom: 0;
-  }
-
-  .pdf-markdown .contains-task-list {
-    padding-left: 0;
-    list-style: none;
-  }
-
   .pdf-markdown .task-list-item input[type="checkbox"] {
-    margin-right: 1.5mm;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
 
-  .pdf-markdown a {
-    overflow-wrap: anywhere;
-  }
-
-  .pdf-markdown strong {
-    font-weight: 700;
-  }
-
   /* 表はページを跨げる一方、見出し行を反復し、各行の分断を避ける。 */
   .pdf-markdown table {
-    width: 100%;
-    max-width: 100%;
-    border-spacing: 0;
-    table-layout: auto;
     break-inside: auto;
     page-break-inside: auto;
   }
@@ -219,69 +306,25 @@ body.pdf-export-active > .pdf-print-root {
     page-break-inside: avoid;
   }
 
-  .pdf-markdown th,
-  .pdf-markdown td {
-    vertical-align: top;
-    text-align: left;
-    overflow-wrap: anywhere;
-  }
-
-  .pdf-markdown code {
-    overflow-wrap: anywhere;
-  }
-
   /* 長いコードはページを跨ぎ、各 fragment で装飾を再描画する。 */
   .pdf-markdown pre {
-    overflow: visible;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    tab-size: 4;
     orphans: 3;
     widows: 3;
     break-inside: auto;
     page-break-inside: auto;
-    box-decoration-break: clone;
-    -webkit-box-decoration-break: clone;
-  }
-
-  /* ReactMarkdown が pre/code の双方へ付ける背景と余白を一度だけ描画する。 */
-  .pdf-markdown pre > code {
-    display: block;
-    margin: 0;
-    padding: 0;
-    overflow: visible;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    white-space: inherit;
-  }
-
-  .pdf-markdown :not(pre) > code {
-    display: inline;
   }
 
   /* 長い引用も分割し、各 fragment で外観を維持する。 */
   .pdf-markdown blockquote {
-    font-style: normal;
     orphans: 3;
     widows: 3;
     break-inside: auto;
     page-break-inside: auto;
-    box-decoration-break: clone;
-    -webkit-box-decoration-break: clone;
-  }
-
-  .pdf-markdown blockquote > :last-child {
-    margin-bottom: 0;
   }
 
   .pdf-markdown img,
   .pdf-markdown svg,
   .pdf-markdown figure {
-    max-width: 100%;
-    height: auto;
     break-inside: avoid;
     break-inside: avoid-page;
     page-break-inside: avoid;

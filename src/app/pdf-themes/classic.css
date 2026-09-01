@@ -1,182 +1,179 @@
 /* 8c171ca の従来デザインを、現行の共通印刷骨格へ移植する。 */
-@media print {
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-document {
-    color: #111827;
-    background: #ffffff;
-    font-size: 10.5pt;
-    font-weight: 400;
-    line-height: 1.75;
-    letter-spacing: 0.01em;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document {
+  color: #111827;
+  background: #ffffff;
+  font-size: 10.5pt;
+  font-weight: 400;
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-document__header {
-    margin: 0 0 9mm;
-    padding: 0 0 5mm;
-    border-bottom: 0.4mm solid #7c3aed;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document__header {
+  margin: 0 0 9mm;
+  padding: 0 0 5mm;
+  border-bottom: 0.4mm solid #7c3aed;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-document__title {
-    margin: 0 0 3mm;
-    color: #111827;
-    font-size: 22pt;
-    font-weight: 700;
-    line-height: 1.35;
-    letter-spacing: 0.025em;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document__title {
+  margin: 0 0 3mm;
+  color: #111827;
+  font-size: 22pt;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.025em;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-document__meta {
-    grid-template-columns: max-content 1fr;
-    gap: 0.8mm 3mm;
-    margin: 0;
-    color: #6b7280;
-    font-size: 8.5pt;
-    line-height: 1.55;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document__meta {
+  grid-template-columns: max-content 1fr;
+  gap: 0.8mm 3mm;
+  margin: 0;
+  color: #6b7280;
+  font-size: 8.5pt;
+  line-height: 1.55;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-document__meta dt {
-    font-weight: 700;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document__meta dt {
+  font-weight: 700;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic)
-    .pdf-markdown
-    :is(h1, h2, h3, h4, h5, h6) {
-    color: #111827;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: #111827;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown h1 {
-    margin: 10mm 0 4mm;
-    padding-bottom: 2mm;
-    border-bottom: 0.25mm solid #d1d5db;
-    font-size: 18pt;
-    line-height: 1.45;
-    letter-spacing: 0.035em;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h1 {
+  margin: 10mm 0 4mm;
+  padding-bottom: 2mm;
+  border-bottom: 0.25mm solid #d1d5db;
+  font-size: 18pt;
+  line-height: 1.45;
+  letter-spacing: 0.035em;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown h2 {
-    margin: 8mm 0 3mm;
-    padding-left: 3mm;
-    border-left: 1mm solid #8b5cf6;
-    font-size: 14.5pt;
-    line-height: 1.5;
-    letter-spacing: 0.025em;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h2 {
+  margin: 8mm 0 3mm;
+  padding-left: 3mm;
+  border-left: 1mm solid #8b5cf6;
+  font-size: 14.5pt;
+  line-height: 1.5;
+  letter-spacing: 0.025em;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown h3 {
-    margin: 6mm 0 2.5mm;
-    font-size: 12pt;
-    line-height: 1.55;
-    letter-spacing: 0.02em;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h3 {
+  margin: 6mm 0 2.5mm;
+  font-size: 12pt;
+  line-height: 1.55;
+  letter-spacing: 0.02em;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown h4 {
-    margin: 5mm 0 2mm;
-    font-size: 10.5pt;
-    line-height: 1.6;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h4 {
+  margin: 5mm 0 2mm;
+  font-size: 10.5pt;
+  line-height: 1.6;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown :is(h5, h6) {
-    margin: 4mm 0 1.5mm;
-    font-size: 9.5pt;
-    line-height: 1.6;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :is(h5, h6) {
+  margin: 4mm 0 1.5mm;
+  font-size: 9.5pt;
+  line-height: 1.6;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown p {
-    margin: 0 0 3.5mm;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown p {
+  margin: 0 0 3.5mm;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown :is(ul, ol) {
-    margin: 0 0 4mm;
-    padding-left: 1.8em;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :is(ul, ol) {
+  margin: 0 0 4mm;
+  padding-left: 1.8em;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown li {
-    margin: 0;
-    line-height: 1.72;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown li {
+  margin: 0;
+  line-height: 1.72;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown li + li {
-    margin-top: 1.2mm;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown li + li {
+  margin-top: 1.2mm;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown a {
-    color: #1d4ed8;
-    text-decoration: underline;
-    text-underline-offset: 0.12em;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown a {
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown strong {
-    color: #111827;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown strong {
+  color: #111827;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown hr {
-    height: 0;
-    margin: 7mm 0;
-    border: 0;
-    border-top: 0.25mm solid #d1d5db;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown hr {
+  height: 0;
+  margin: 7mm 0;
+  border: 0;
+  border-top: 0.25mm solid #d1d5db;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown table {
-    margin: 5mm 0;
-    border-collapse: collapse;
-    color: #111827;
-    font-size: 8.7pt;
-    line-height: 1.55;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown table {
+  margin: 5mm 0;
+  border-collapse: collapse;
+  color: #111827;
+  font-size: 8.7pt;
+  line-height: 1.55;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown :is(th, td) {
-    padding: 1.8mm 2mm;
-    border: 0.25mm solid #d1d5db;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :is(th, td) {
+  padding: 1.8mm 2mm;
+  border: 0.25mm solid #d1d5db;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown th {
-    background: #f3f4f6;
-    font-weight: 700;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown th {
+  background: #f3f4f6;
+  font-weight: 700;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic)
-    .pdf-markdown
-    tbody
-    tr:nth-child(even)
-    td {
-    background: #fafafa;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  tbody
+  tr:nth-child(even)
+  td {
+  background: #fafafa;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown pre {
-    margin: 4mm 0;
-    padding: 3mm;
-    border: 0.25mm solid #d1d5db;
-    border-radius: 1.5mm;
-    background: #f6f8fa;
-    color: #1f2937;
-    font-family:
-      var(--font-geist-mono, "SFMono-Regular"),
-      var(--font-noto-sans-jp, "Noto Sans JP"),
-      "Yu Gothic",
-      Meiryo,
-      monospace;
-    font-size: 8.3pt;
-    line-height: 1.55;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown pre {
+  margin: 4mm 0;
+  padding: 3mm;
+  border: 0.25mm solid #d1d5db;
+  border-radius: 1.5mm;
+  background: #f6f8fa;
+  color: #1f2937;
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-size: 8.3pt;
+  line-height: 1.55;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown :not(pre) > code {
-    padding: 0.2mm 1mm;
-    border: 0.2mm solid #e5e7eb;
-    border-radius: 0.8mm;
-    background: #f3f4f6;
-    color: #6d28d9;
-    font-family:
-      var(--font-geist-mono, "SFMono-Regular"),
-      var(--font-noto-sans-jp, "Noto Sans JP"),
-      monospace;
-    font-size: 0.88em;
-  }
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :not(pre) > code {
+  padding: 0.2mm 1mm;
+  border: 0.2mm solid #e5e7eb;
+  border-radius: 0.8mm;
+  background: #f3f4f6;
+  color: #6d28d9;
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    monospace;
+  font-size: 0.88em;
+}
 
-  :where(.pdf-print-root.pdf-theme-classic) .pdf-markdown blockquote {
-    margin: 5mm 0;
-    padding: 2.5mm 3mm 2.5mm 4mm;
-    border-left: 1mm solid #a78bfa;
-    background: #faf7ff;
-    color: #374151;
-  }
-
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown blockquote {
+  margin: 5mm 0;
+  padding: 2.5mm 3mm 2.5mm 4mm;
+  border-left: 1mm solid #a78bfa;
+  background: #faf7ff;
+  color: #374151;
 }
