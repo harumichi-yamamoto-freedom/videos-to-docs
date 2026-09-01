@@ -9,6 +9,7 @@ import { DocumentPrintPortal } from '@/components/DocumentPrintPortal';
 import { useDocumentPrint } from '@/hooks/useDocumentPrint';
 
 const documentDetailLogger = createLogger('DocumentDetailPanel');
+const PDF_INCLUDE_METADATA_STORAGE_KEY = 'pdfIncludeMetadata';
 
 interface DocumentDetailPanelProps {
     document: Transcription | null;
@@ -25,6 +26,7 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
     const [editedTitle, setEditedTitle] = useState('');
     const [editedContent, setEditedContent] = useState('');
     const [saving, setSaving] = useState(false);
+    const [includeMetadata, setIncludeMetadata] = useState(false);
     const { printPdf, isPreparing } = useDocumentPrint(document);
 
     const isEditable = !!onContentUpdate;
@@ -40,6 +42,16 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
             setIsViewMode(true);
         }
     }, [document]);
+
+    useEffect(() => {
+        try {
+            setIncludeMetadata(
+                window.localStorage.getItem(PDF_INCLUDE_METADATA_STORAGE_KEY) === 'true',
+            );
+        } catch {
+            setIncludeMetadata(false);
+        }
+    }, []);
 
     if (!document) {
         return (
@@ -65,6 +77,22 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
         }
 
         void printPdf();
+    };
+
+    const handleIncludeMetadataChange = (
+        event: React.ChangeEvent<HTMLInputElement>,
+    ): void => {
+        const checked = event.target.checked;
+        setIncludeMetadata(checked);
+
+        try {
+            window.localStorage.setItem(
+                PDF_INCLUDE_METADATA_STORAGE_KEY,
+                String(checked),
+            );
+        } catch {
+            // localStorage が利用できない環境でも、現在の選択はそのまま反映する。
+        }
     };
 
     const handleCancelEdit = () => {
@@ -188,6 +216,18 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                                 </>
                             )}
                         </div>
+                        {isViewMode && (
+                            <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={includeMetadata}
+                                    onChange={handleIncludeMetadataChange}
+                                    disabled={isPreparing}
+                                    className="h-3.5 w-3.5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                />
+                                <span>文書情報を含める（元ファイル・プロンプト・生成日時）</span>
+                            </label>
+                        )}
                         <p className="text-xs text-gray-500 text-right">
                             印刷設定は A4・倍率100%を推奨。「ヘッダーとフッター」はオフにしてください
                         </p>
@@ -242,7 +282,11 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                     </button>
                 </div>
             )}
-            <DocumentPrintPortal document={document} active={isPreparing} />
+            <DocumentPrintPortal
+                document={document}
+                active={isPreparing}
+                includeMetadata={includeMetadata}
+            />
         </div>
     );
 };

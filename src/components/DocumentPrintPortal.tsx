@@ -9,11 +9,13 @@ import { MarkdownDocument } from '@/components/MarkdownDocument';
 export type DocumentPrintPortalProps = {
     document: Transcription;
     active: boolean;
+    includeMetadata: boolean;
 };
 
 export function DocumentPrintPortal({
     document,
     active,
+    includeMetadata,
 }: DocumentPrintPortalProps): React.ReactPortal | null {
     if (!active) {
         return null;
@@ -22,17 +24,19 @@ export function DocumentPrintPortal({
     return createPortal(
         <div className="pdf-print-root">
             <article className="pdf-document">
-                <header className="pdf-document__header">
-                    <h1 className="pdf-document__title">{document.title}</h1>
-                    <dl className="pdf-document__meta">
-                        <dt>生成日時</dt>
-                        <dd>{formatPdfDateTime(document.createdAt)}</dd>
-                        <dt>元ファイル</dt>
-                        <dd>{document.fileName}</dd>
-                        <dt>プロンプト</dt>
-                        <dd>{document.promptName}</dd>
-                    </dl>
-                </header>
+                {includeMetadata && (
+                    <header className="pdf-document__header">
+                        <h1 className="pdf-document__title">{document.title}</h1>
+                        <dl className="pdf-document__meta">
+                            <dt>生成日時</dt>
+                            <dd>{formatPdfDateTime(document.createdAt)}</dd>
+                            <dt>元ファイル</dt>
+                            <dd>{document.fileName}</dd>
+                            <dt>プロンプト</dt>
+                            <dd>{document.promptName}</dd>
+                        </dl>
+                    </header>
+                )}
                 <MarkdownDocument
                     className="pdf-markdown"
                     markdown={document.text}
