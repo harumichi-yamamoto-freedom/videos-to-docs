@@ -1,0 +1,471 @@
+/* 墨の階調と細い和罫に、朱の小さな印を添えた端正な商談文書。 */
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-document {
+  --sumi-ink: #202224;
+  --sumi-ink-soft: #383b3d;
+  --sumi-muted: #626669;
+  --sumi-rule-strong: #8b8e8e;
+  --sumi-rule: #c4c5c2;
+  --sumi-rule-soft: #dedfdb;
+  --sumi-wash: #f4f3ef;
+  --sumi-wash-soft: #faf9f6;
+  --sumi-shu: #c55445;
+  --sumi-shu-deep: #8e3d33;
+
+  color: var(--sumi-ink);
+  background: #ffffff;
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 10.1pt;
+  font-weight: 400;
+  line-height: 1.8;
+  letter-spacing: 0.018em;
+  font-kerning: normal;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-document__header {
+  position: relative;
+  margin: 0 0 9.5mm;
+  padding: 4.8mm 0 4.4mm;
+  border-top: 0.6mm solid var(--sumi-ink);
+  border-bottom: 0.18mm solid var(--sumi-rule);
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-document__header::before {
+  content: "";
+  position: absolute;
+  top: -0.6mm;
+  left: 0;
+  width: 18mm;
+  border-top: 1mm solid var(--sumi-shu);
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-document__title {
+  margin: 0 0 4.2mm;
+  color: var(--sumi-ink);
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 23pt;
+  font-weight: 700;
+  line-height: 1.34;
+  letter-spacing: 0.045em;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-document__meta {
+  display: grid;
+  grid-template-columns: 17mm minmax(0, 1fr);
+  gap: 0.8mm 3.5mm;
+  margin: 0;
+  padding: 2.8mm 3.4mm;
+  border-top: 0.18mm solid var(--sumi-rule);
+  border-bottom: 0.18mm solid var(--sumi-rule);
+  border-left: 0.65mm solid var(--sumi-ink-soft);
+  background: var(--sumi-wash-soft);
+  color: var(--sumi-ink-soft);
+  font-size: 8.2pt;
+  line-height: 1.55;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-document__meta dt {
+  margin: 0;
+  color: var(--sumi-shu-deep);
+  font-size: 7.7pt;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-document__meta dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--sumi-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown {
+  position: relative;
+  padding-top: 4.2mm;
+  border-top: 0.6mm solid var(--sumi-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown::before {
+  content: "";
+  position: absolute;
+  top: -0.6mm;
+  left: 0;
+  width: 18mm;
+  border-top: 1mm solid var(--sumi-shu);
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--sumi-ink);
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-weight: 700;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown h1 {
+  position: relative;
+  margin: 10.5mm 0 4.6mm;
+  padding: 0 0 2.8mm 5mm;
+  border-bottom: 0.38mm solid var(--sumi-ink);
+  font-size: 20.5pt;
+  line-height: 1.38;
+  letter-spacing: 0.035em;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown h1::before {
+  content: "";
+  position: absolute;
+  top: 0.18em;
+  bottom: calc(0.18em + 2.8mm);
+  left: 0;
+  width: 0.85mm;
+  background: var(--sumi-shu);
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown > h1:first-child {
+  margin-top: 2.5mm;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown h2 {
+  margin: 8.5mm 0 3.5mm;
+  padding: 0 0 1.8mm 3.6mm;
+  border-left: 0.45mm solid var(--sumi-ink-soft);
+  border-bottom: 0.18mm solid var(--sumi-rule);
+  font-size: 14.5pt;
+  line-height: 1.45;
+  letter-spacing: 0.045em;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown h3 {
+  margin: 6.8mm 0 2.8mm;
+  padding-top: 1.4mm;
+  border-top: 0.3mm solid var(--sumi-ink-soft);
+  font-size: 11.8pt;
+  line-height: 1.52;
+  letter-spacing: 0.045em;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown h4 {
+  margin: 5.6mm 0 2.3mm;
+  font-size: 10.5pt;
+  line-height: 1.58;
+  letter-spacing: 0.055em;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown h5 {
+  margin: 4.8mm 0 2mm;
+  padding-left: 2.6mm;
+  border-left: 0.25mm solid var(--sumi-rule-strong);
+  color: var(--sumi-ink-soft);
+  font-size: 9.5pt;
+  line-height: 1.62;
+  letter-spacing: 0.08em;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown h6 {
+  margin: 4.4mm 0 1.8mm;
+  color: var(--sumi-muted);
+  font-size: 8.9pt;
+  line-height: 1.65;
+  letter-spacing: 0.1em;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown p {
+  margin: 0 0 3.8mm;
+  text-align: justify;
+  text-justify: inter-character;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown
+  :is(li, th, td)
+  p {
+  text-align: left;
+  text-justify: auto;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown
+  :is(ul, ol) {
+  margin: 0 0 4.2mm;
+  padding-left: 1.7em;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown ul {
+  list-style: disc outside;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown ol {
+  list-style: decimal outside;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown
+  :is(ul ul, ul ol, ol ul, ol ol) {
+  margin-top: 1mm;
+  margin-bottom: 0.5mm;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown ul ul {
+  list-style-type: circle;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown ul ul ul {
+  list-style-type: square;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown li {
+  margin: 0;
+  padding-left: 0.12em;
+  line-height: 1.74;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown li + li {
+  margin-top: 0.9mm;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown ul > li::marker {
+  color: var(--sumi-muted);
+  font-size: 0.82em;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown ol > li::marker {
+  color: var(--sumi-ink-soft);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown a {
+  color: var(--sumi-shu-deep);
+  font-weight: 500;
+  text-decoration-line: underline;
+  text-decoration-color: var(--sumi-shu);
+  text-decoration-thickness: 0.18mm;
+  text-underline-offset: 0.18em;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown strong {
+  color: var(--sumi-ink);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown hr {
+  width: 20mm;
+  height: 0;
+  margin: 9mm 0;
+  border: 0;
+  border-top: 0.75mm solid var(--sumi-shu);
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown table {
+  width: 100%;
+  max-width: 100%;
+  margin: 5.8mm 0 6.2mm;
+  border-top: 0.55mm solid var(--sumi-ink);
+  border-bottom: 0.32mm solid var(--sumi-ink);
+  border-collapse: collapse;
+  background: #ffffff;
+  color: var(--sumi-ink);
+  font-size: 8.55pt;
+  line-height: 1.58;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown thead {
+  color: var(--sumi-ink);
+  font-size: 8.15pt;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown tr {
+  border-bottom: 0.18mm solid var(--sumi-rule);
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown thead tr {
+  border-bottom: 0.38mm solid var(--sumi-ink-soft);
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown
+  :is(th, td) {
+  padding: 2mm 2.4mm;
+  border: 0;
+  vertical-align: top;
+  text-align: left;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown th {
+  background: var(--sumi-wash);
+  color: var(--sumi-ink);
+  font-weight: 700;
+  letter-spacing: 0.045em;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown td {
+  color: var(--sumi-ink-soft);
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown
+  :is(th, td):first-child {
+  padding-left: 0.6mm;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown
+  :is(th, td):last-child {
+  padding-right: 0.6mm;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown code {
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-variant-ligatures: none;
+  letter-spacing: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown pre {
+  margin: 5.5mm 0 6mm;
+  padding: 3.4mm 3.8mm;
+  border: 0.18mm solid var(--sumi-rule);
+  border-top: 0.55mm solid var(--sumi-ink-soft);
+  border-left: 0.7mm solid var(--sumi-rule-strong);
+  border-radius: 0;
+  background: var(--sumi-wash);
+  color: var(--sumi-ink);
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-size: 8.15pt;
+  line-height: 1.64;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown pre > code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: inherit;
+  overflow-wrap: inherit;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown
+  :not(pre)
+  > code {
+  padding: 0.18mm 0.8mm;
+  border: 0.16mm solid var(--sumi-rule);
+  border-bottom-color: var(--sumi-rule-strong);
+  border-radius: 0.4mm;
+  background: var(--sumi-wash);
+  color: var(--sumi-ink);
+  font-size: 0.87em;
+  line-height: 1;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown blockquote {
+  position: relative;
+  margin: 5.8mm 0;
+  padding: 3.1mm 4.5mm 3.1mm 7mm;
+  border-top: 0.15mm solid var(--sumi-rule-soft);
+  border-bottom: 0.15mm solid var(--sumi-rule-soft);
+  border-left: 1.1mm double var(--sumi-ink-soft);
+  background: var(--sumi-wash-soft);
+  color: var(--sumi-ink-soft);
+  line-height: 1.76;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown blockquote::before {
+  content: "";
+  position: absolute;
+  top: 3.7mm;
+  left: 2mm;
+  width: 1.8mm;
+  border-top: 0.7mm solid var(--sumi-shu);
+}
+
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
