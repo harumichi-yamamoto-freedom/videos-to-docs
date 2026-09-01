@@ -1,4 +1,4 @@
-/* 画面フォントはW6確定スタックを維持。NotoはPDF専用（設計§2からの意図的逸脱・lead承認）。 */
+/* PDF は描画前に計測するため、印刷メディア外でも専用フォントを確定させる。 */
 .pdf-document {
   font-family:
     var(--font-noto-sans-jp, "Noto Sans JP"),
@@ -20,7 +20,7 @@ body.pdf-export-active > .pdf-print-root {
   position: fixed;
   top: 0;
   left: -200vw;
-  width: 176mm; /* A4 210mm - 左右余白 17mm × 2 */
+  width: 174mm; /* A4 210mm - 左右余白 18mm × 2 */
   visibility: hidden;
   pointer-events: none;
 }
@@ -28,15 +28,25 @@ body.pdf-export-active > .pdf-print-root {
 /* 名前付き page にして、通常の画面印刷へ A4 設定を波及させない。 */
 @page pdf-document {
   size: A4 portrait;
-  margin: 18mm 17mm 20mm;
+  margin: 17mm 18mm 22mm;
 
   /* Chromium 131+。未対応ブラウザは margin box のみ無視する。 */
   @bottom-center {
-    content: counter(page) " / " counter(pages);
-    font-family: Arial, sans-serif;
-    font-size: 8pt;
+    content: counter(page) "  /  " counter(pages);
+    padding-top: 2.8mm;
+    border-top: 0.2mm solid #d8d2df;
+    color: #686170;
+    font-family:
+      var(--font-noto-sans-jp, "Noto Sans JP"),
+      "Hiragino Sans",
+      "Yu Gothic",
+      Meiryo,
+      sans-serif;
+    font-size: 7.5pt;
+    font-weight: 700;
     line-height: 1;
-    color: #6b7280;
+    letter-spacing: 0.16em;
+    vertical-align: top;
   }
 }
 
@@ -66,12 +76,26 @@ body.pdf-export-active > .pdf-print-root {
   }
 
   .pdf-document {
-    color: #111827;
+    --pdf-ink: #231f29;
+    --pdf-ink-soft: #49434f;
+    --pdf-muted: #706977;
+    --pdf-violet: #6e4bb4;
+    --pdf-violet-deep: #4b3477;
+    --pdf-violet-soft: #f2eef7;
+    --pdf-violet-whisper: #faf8fc;
+    --pdf-rule: #d8d2df;
+    --pdf-rule-soft: #ebe7ee;
+    --pdf-rule-strong: #bdb4c7;
+    --pdf-code: #f2eef7;
+    --pdf-code-ink: #292430;
+
+    color: var(--pdf-ink);
     background: #ffffff;
-    font-size: 10.5pt;
+    font-size: 10.2pt;
     font-weight: 400;
-    line-height: 1.75;
-    letter-spacing: 0.01em;
+    line-height: 1.78;
+    letter-spacing: 0.012em;
+    font-kerning: normal;
     line-break: strict;
     word-break: normal;
     overflow-wrap: break-word;
@@ -85,10 +109,15 @@ body.pdf-export-active > .pdf-print-root {
     box-sizing: border-box;
   }
 
+  /*
+   * オプションのメタ帯。本文側と同じ「濃墨の罫線 + 短い紫」の編集記号で、
+   * 帯がなくても本文の起点が独立して成立する。
+   */
   .pdf-document__header {
-    margin: 0 0 9mm;
-    padding: 0 0 5mm;
-    border-bottom: 0.4mm solid #7c3aed;
+    position: relative;
+    margin: 0 0 10mm;
+    padding: 4.5mm 0 0;
+    border-top: 0.65mm solid var(--pdf-ink);
     break-inside: avoid;
     break-inside: avoid-page;
     break-after: avoid;
@@ -97,34 +126,72 @@ body.pdf-export-active > .pdf-print-root {
     page-break-after: avoid;
   }
 
+  .pdf-document__header::before {
+    content: "";
+    position: absolute;
+    top: -0.65mm;
+    left: 0;
+    width: 22mm;
+    border-top: 1.15mm solid var(--pdf-violet);
+  }
+
   .pdf-document__title {
-    margin: 0 0 3mm;
-    color: #111827;
-    font-size: 22pt;
+    margin: 0 0 4.5mm;
+    color: var(--pdf-ink);
+    font-size: 25.5pt;
     font-weight: 700;
-    line-height: 1.35;
-    letter-spacing: 0.025em;
+    line-height: 1.28;
+    letter-spacing: 0.008em;
+    font-feature-settings: "palt" 1;
+    text-wrap: balance;
     overflow-wrap: anywhere;
   }
 
   .pdf-document__meta {
     display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 0.8mm 3mm;
+    grid-template-columns: 18mm minmax(0, 1fr);
+    gap: 1mm 4mm;
     margin: 0;
-    color: #6b7280;
-    font-size: 8.5pt;
+    padding: 3.2mm 4mm;
+    border: 0.2mm solid var(--pdf-rule);
+    border-left: 0.85mm solid var(--pdf-violet);
+    border-radius: 1.3mm;
+    background: var(--pdf-violet-whisper);
+    color: var(--pdf-ink-soft);
+    font-size: 8.2pt;
     line-height: 1.55;
   }
 
   .pdf-document__meta dt {
+    color: var(--pdf-violet-deep);
+    font-size: 7.7pt;
     font-weight: 700;
+    letter-spacing: 0.08em;
   }
 
   .pdf-document__meta dd {
     min-width: 0;
     margin: 0;
     overflow-wrap: anywhere;
+  }
+
+  /*
+   * ヘッダーなしの本文を主役にするエディトリアル・スパイン。
+   * 文書が見出し以外から始まっても、紙面上端に明確な起点を作る。
+   */
+  .pdf-markdown {
+    position: relative;
+    padding-top: 4mm;
+    border-top: 0.65mm solid var(--pdf-ink);
+  }
+
+  .pdf-markdown::before {
+    content: "";
+    position: absolute;
+    top: -0.65mm;
+    left: 0;
+    width: 22mm;
+    border-top: 1.15mm solid var(--pdf-violet);
   }
 
   .pdf-markdown > :first-child {
@@ -141,8 +208,11 @@ body.pdf-export-active > .pdf-print-root {
   .pdf-markdown h4,
   .pdf-markdown h5,
   .pdf-markdown h6 {
-    color: #111827;
+    color: var(--pdf-ink);
     font-weight: 700;
+    font-feature-settings: "palt" 1;
+    text-wrap: balance;
+    overflow-wrap: anywhere;
     break-inside: avoid;
     break-inside: avoid-page;
     break-after: avoid;
@@ -159,53 +229,102 @@ body.pdf-export-active > .pdf-print-root {
   }
 
   .pdf-markdown h1 {
-    margin: 10mm 0 4mm;
-    padding-bottom: 2mm;
-    border-bottom: 0.25mm solid #d1d5db;
-    font-size: 18pt;
-    line-height: 1.45;
-    letter-spacing: 0.035em;
+    position: relative;
+    margin: 11mm 0 4.8mm;
+    padding: 3.2mm 0 2.8mm;
+    border-top: 0.65mm solid var(--pdf-ink);
+    border-bottom: 0.2mm solid var(--pdf-rule);
+    font-size: 22pt;
+    line-height: 1.32;
+    letter-spacing: 0.012em;
+  }
+
+  .pdf-markdown h1::before {
+    content: "";
+    position: absolute;
+    top: -0.65mm;
+    left: 0;
+    width: 22mm;
+    border-top: 1.15mm solid var(--pdf-violet);
+  }
+
+  /* 先頭 h1 の上罫は本文コンテナのスパインと共有して二重線を避ける。 */
+  .pdf-markdown > h1:first-child {
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .pdf-markdown > h1:first-child::before {
+    content: none;
   }
 
   .pdf-markdown h2 {
-    margin: 8mm 0 3mm;
-    padding-left: 3mm;
-    border-left: 1mm solid #8b5cf6;
-    font-size: 14.5pt;
-    line-height: 1.5;
-    letter-spacing: 0.025em;
-  }
-
-  .pdf-markdown h3 {
-    margin: 6mm 0 2.5mm;
-    font-size: 12pt;
-    line-height: 1.55;
+    position: relative;
+    margin: 8.8mm 0 3.4mm;
+    padding-left: 4mm;
+    font-size: 15.5pt;
+    line-height: 1.4;
     letter-spacing: 0.02em;
   }
 
-  .pdf-markdown h4 {
-    margin: 5mm 0 2mm;
-    font-size: 10.5pt;
-    line-height: 1.6;
+  .pdf-markdown h2::before {
+    content: "";
+    position: absolute;
+    top: 0.2em;
+    bottom: 0.2em;
+    left: 0;
+    width: 0.8mm;
+    border-radius: 1mm;
+    background: var(--pdf-violet);
   }
 
-  .pdf-markdown h5,
+  .pdf-markdown h3 {
+    margin: 6.8mm 0 2.8mm;
+    color: #352c3d;
+    font-size: 12.3pt;
+    line-height: 1.48;
+    letter-spacing: 0.03em;
+  }
+
+  .pdf-markdown h4 {
+    margin: 5.4mm 0 2.3mm;
+    font-size: 10.7pt;
+    line-height: 1.55;
+    letter-spacing: 0.035em;
+  }
+
+  .pdf-markdown h5 {
+    margin: 4.6mm 0 2mm;
+    color: var(--pdf-violet-deep);
+    font-size: 9.7pt;
+    line-height: 1.58;
+    letter-spacing: 0.07em;
+  }
+
   .pdf-markdown h6 {
-    margin: 4mm 0 1.5mm;
-    font-size: 9.5pt;
-    line-height: 1.6;
+    margin: 4.2mm 0 1.8mm;
+    color: var(--pdf-muted);
+    font-size: 9.1pt;
+    line-height: 1.58;
+    letter-spacing: 0.08em;
   }
 
   .pdf-markdown p {
-    margin: 0 0 3.5mm;
+    margin: 0 0 3.8mm;
     orphans: 3;
     widows: 3;
   }
 
+  .pdf-markdown > p:first-child {
+    color: var(--pdf-ink-soft);
+    font-size: 10.9pt;
+    line-height: 1.82;
+  }
+
   .pdf-markdown ul,
   .pdf-markdown ol {
-    margin: 0 0 4mm;
-    padding-left: 1.8em;
+    margin: 0 0 4.4mm;
+    padding-left: 1.9em;
   }
 
   .pdf-markdown ul {
@@ -220,15 +339,29 @@ body.pdf-export-active > .pdf-print-root {
     list-style: circle outside;
   }
 
+  .pdf-markdown ul ul ul {
+    list-style: square outside;
+  }
+
   .pdf-markdown li {
     margin: 0;
-    line-height: 1.72;
+    line-height: 1.74;
     orphans: 2;
     widows: 2;
   }
 
+  .pdf-markdown li::marker {
+    color: var(--pdf-violet-deep);
+    font-weight: 700;
+  }
+
   .pdf-markdown li + li {
     margin-top: 1.2mm;
+  }
+
+  .pdf-markdown li > ul,
+  .pdf-markdown li > ol {
+    margin: 1.4mm 0 0.8mm;
   }
 
   .pdf-markdown li > :last-child {
@@ -242,40 +375,52 @@ body.pdf-export-active > .pdf-print-root {
 
   .pdf-markdown .task-list-item input[type="checkbox"] {
     margin-right: 1.5mm;
+    accent-color: var(--pdf-violet);
+    vertical-align: -0.1em;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
 
   .pdf-markdown a {
-    color: #1d4ed8;
-    text-decoration: underline;
-    text-underline-offset: 0.12em;
+    color: var(--pdf-violet-deep);
+    text-decoration-line: underline;
+    text-decoration-color: var(--pdf-violet);
+    text-decoration-thickness: 0.18mm;
+    text-underline-offset: 0.16em;
     overflow-wrap: anywhere;
   }
 
   .pdf-markdown strong {
-    color: #111827;
+    color: #30283a;
     font-weight: 700;
   }
 
   .pdf-markdown hr {
+    width: 24mm;
     height: 0;
-    margin: 7mm 0;
+    margin: 9mm 0;
     border: 0;
-    border-top: 0.25mm solid #d1d5db;
+    border-top: 0.8mm solid var(--pdf-violet);
   }
 
-  /* 表全体はページを跨げる。行は可能な限り分断しない。 */
+  /*
+   * 外周・太い上辺・反復ヘッダーでカード感を作る。
+   * 表全体はページを跨げる一方、各行は可能な限り分断しない。
+   */
   .pdf-markdown table {
     width: 100%;
     max-width: 100%;
-    margin: 5mm 0;
-    border-collapse: collapse;
+    margin: 5.8mm 0;
+    border: 0.25mm solid var(--pdf-rule-strong);
+    border-top: 0.9mm solid var(--pdf-violet);
+    border-collapse: separate;
     border-spacing: 0;
+    border-radius: 1.6mm;
+    background: #ffffff;
+    color: var(--pdf-ink);
+    font-size: 8.6pt;
+    line-height: 1.52;
     table-layout: auto;
-    color: #111827;
-    font-size: 8.7pt;
-    line-height: 1.55;
     break-inside: auto;
     page-break-inside: auto;
   }
@@ -296,39 +441,83 @@ body.pdf-export-active > .pdf-print-root {
 
   .pdf-markdown th,
   .pdf-markdown td {
-    padding: 1.8mm 2mm;
-    border: 0.25mm solid #d1d5db;
+    padding: 2.1mm 2.4mm;
+    border: 0;
+    border-bottom: 0.2mm solid var(--pdf-rule);
     vertical-align: top;
     text-align: left;
     overflow-wrap: anywhere;
   }
 
   .pdf-markdown th {
-    background: #f3f4f6;
+    border-bottom-color: #5d5266;
+    background: #382f41;
+    color: #ffffff;
+    font-size: 8.1pt;
     font-weight: 700;
+    line-height: 1.45;
+    letter-spacing: 0.035em;
+  }
+
+  .pdf-markdown th + th {
+    border-left: 0.2mm solid #5d5266;
+  }
+
+  .pdf-markdown td + td {
+    border-left: 0.2mm solid var(--pdf-rule-soft);
+  }
+
+  .pdf-markdown thead tr:first-child th:first-child {
+    border-top-left-radius: 0.8mm;
+  }
+
+  .pdf-markdown thead tr:first-child th:last-child {
+    border-top-right-radius: 0.8mm;
   }
 
   .pdf-markdown tbody tr:nth-child(even) td {
-    background: #fafafa;
+    background: var(--pdf-violet-whisper);
   }
 
-  /* 長いコードはページを跨がせる。 */
-  .pdf-markdown pre {
-    margin: 4mm 0;
-    padding: 3mm;
-    overflow: visible;
-    border: 0.25mm solid #d1d5db;
-    border-radius: 1.5mm;
-    background: #f6f8fa;
-    color: #1f2937;
+  .pdf-markdown tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .pdf-markdown th > :last-child,
+  .pdf-markdown td > :last-child {
+    margin-bottom: 0;
+  }
+
+  .pdf-markdown code {
     font-family:
       var(--font-geist-mono, "SFMono-Regular"),
       var(--font-noto-sans-jp, "Noto Sans JP"),
       "Yu Gothic",
       Meiryo,
       monospace;
-    font-size: 8.3pt;
-    line-height: 1.55;
+    font-variant-ligatures: none;
+    overflow-wrap: anywhere;
+  }
+
+  /* 長いコードはページを跨がせ、各 fragment で明色のスパインを再描画する。 */
+  .pdf-markdown pre {
+    margin: 5.8mm 0;
+    padding: 3.8mm 4mm;
+    overflow: visible;
+    border: 0.2mm solid var(--pdf-rule);
+    border-left: 1.1mm solid var(--pdf-violet);
+    border-radius: 0 1.7mm 1.7mm 0;
+    background: var(--pdf-code);
+    color: var(--pdf-code-ink);
+    font-family:
+      var(--font-geist-mono, "SFMono-Regular"),
+      var(--font-noto-sans-jp, "Noto Sans JP"),
+      "Yu Gothic",
+      Meiryo,
+      monospace;
+    font-size: 8.2pt;
+    line-height: 1.62;
+    letter-spacing: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     tab-size: 4;
@@ -340,7 +529,7 @@ body.pdf-export-active > .pdf-print-root {
     -webkit-box-decoration-break: clone;
   }
 
-  /* 現行 pre/code の二重 padding と背景を除去する。 */
+  /* ReactMarkdown が pre/code の双方へ付ける背景と余白を一度だけ描画する。 */
   .pdf-markdown pre > code {
     display: block;
     margin: 0;
@@ -356,27 +545,31 @@ body.pdf-export-active > .pdf-print-root {
 
   .pdf-markdown :not(pre) > code {
     display: inline;
-    padding: 0.2mm 1mm;
-    border: 0.2mm solid #e5e7eb;
-    border-radius: 0.8mm;
-    background: #f3f4f6;
-    color: #6d28d9;
-    font-family:
-      var(--font-geist-mono, "SFMono-Regular"),
-      var(--font-noto-sans-jp, "Noto Sans JP"),
-      monospace;
+    padding: 0.25mm 1mm;
+    border: 0.2mm solid var(--pdf-rule);
+    border-left: 0.6mm solid var(--pdf-violet);
+    border-radius: 0 0.8mm 0.8mm 0;
+    background: var(--pdf-code);
+    color: var(--pdf-code-ink);
     font-size: 0.88em;
-    overflow-wrap: anywhere;
+    line-height: 1;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
   }
 
-  /* 長い引用は分割し、各 fragment の装飾を再描画する。 */
+  /* 長い引用は分割し、各 fragment でも外枠・左レール・背景を維持する。 */
   .pdf-markdown blockquote {
-    margin: 5mm 0;
-    padding: 2.5mm 3mm 2.5mm 4mm;
-    border-left: 1mm solid #a78bfa;
-    background: #faf7ff;
-    color: #374151;
+    position: relative;
+    margin: 5.8mm 0;
+    padding: 3.6mm 4.2mm 3.4mm 10.5mm;
+    border: 0.2mm solid var(--pdf-rule);
+    border-left: 1.1mm solid var(--pdf-violet);
+    border-radius: 0 1.6mm 1.6mm 0;
+    background: var(--pdf-violet-soft);
+    color: var(--pdf-ink-soft);
+    font-size: 10.4pt;
     font-style: normal;
+    line-height: 1.74;
     orphans: 3;
     widows: 3;
     break-inside: auto;
@@ -385,11 +578,41 @@ body.pdf-export-active > .pdf-print-root {
     -webkit-box-decoration-break: clone;
   }
 
+  .pdf-markdown blockquote::before {
+    content: "“";
+    position: absolute;
+    top: 1.7mm;
+    left: 3.1mm;
+    color: var(--pdf-violet-deep);
+    font-family:
+      var(--font-noto-sans-jp, "Noto Sans JP"),
+      "Hiragino Sans",
+      "Yu Gothic",
+      Meiryo,
+      sans-serif;
+    font-size: 24pt;
+    font-weight: 700;
+    line-height: 1;
+  }
+
   .pdf-markdown blockquote > :last-child {
     margin-bottom: 0;
   }
 
-  .pdf-markdown img,
+  .pdf-markdown img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 5.8mm auto;
+    padding: 1mm;
+    border: 0.2mm solid var(--pdf-rule);
+    border-radius: 1.5mm;
+    background: #ffffff;
+    break-inside: avoid;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
   .pdf-markdown svg,
   .pdf-markdown figure {
     max-width: 100%;
@@ -397,5 +620,13 @@ body.pdf-export-active > .pdf-print-root {
     break-inside: avoid;
     break-inside: avoid-page;
     page-break-inside: avoid;
+  }
+
+  .pdf-markdown figure {
+    margin: 5.8mm 0;
+  }
+
+  .pdf-markdown figure > img {
+    margin: 0 auto;
   }
 }
