@@ -1,0 +1,1 @@
+- `src/lib/adminAudioFiles.ts:56` の本文マッピングにも `data.transcription ?? data.text ?? ''` の移行互換を追加する。

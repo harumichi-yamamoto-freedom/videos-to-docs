@@ -8,6 +8,7 @@ import {
     limit,
     Timestamp,
     deleteDoc,
+    deleteField,
     doc,
     updateDoc,
     where,
@@ -159,7 +160,7 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
                 title: data.title || data.fileName, // 既存データの後方互換性
                 fileName: data.fileName,
                 originalFileType: data.originalFileType,
-                transcription: data.transcription,
+                transcription: data.transcription ?? data.text ?? '',
                 promptName: data.promptName || '不明',
                 ownerType: ownerType as 'guest' | 'user',
                 ownerId: ownerId,
@@ -227,7 +228,7 @@ export async function getTranscriptions(limitCount: number = 100): Promise<Trans
                 id: docSnapshot.id,
                 title: data.title || data.fileName, // 既存データの後方互換性
                 fileName: data.fileName,
-                text: data.transcription, // transcription を text にマッピング
+                text: data.transcription ?? data.text ?? '', // transcription を text にマッピング
                 promptName: data.promptName || '不明',
                 createdAt,
             });
@@ -260,7 +261,7 @@ export async function getTranscriptionsByOwnerId(ownerId: string, limitCount: nu
                 id: docSnapshot.id,
                 title: data.title || data.fileName,
                 fileName: data.fileName,
-                text: data.transcription,
+                text: data.transcription ?? data.text ?? '',
                 promptName: data.promptName || '不明',
                 createdAt,
             });
@@ -298,7 +299,8 @@ export async function updateTranscriptionContent(documentId: string, newContent:
     try {
         const docRef = doc(db, 'transcriptions', documentId);
         await updateDoc(docRef, {
-            text: newContent,
+            transcription: newContent,
+            text: deleteField(),
             updatedAt: serverTimestamp(),
         });
 
@@ -332,4 +334,3 @@ export async function deleteTranscription(documentId: string): Promise<void> {
         throw new Error('文書の削除に失敗しました');
     }
 }
-
