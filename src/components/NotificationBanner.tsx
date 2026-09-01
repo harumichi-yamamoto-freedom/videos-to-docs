@@ -1,12 +1,14 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { X, Info, AlertTriangle } from 'lucide-react';
 import { useSystemNotifications } from '@/hooks/useSystemNotifications';
 import { useAuth } from '@/hooks/useAuth';
 import { dismissNotification, SystemNotification } from '@/lib/systemNotifications';
 import { createLogger } from '@/lib/logger';
+import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
 
 const bannerLogger = createLogger('NotificationBanner');
 
@@ -18,82 +20,95 @@ const PUBLISHED_DATE_FORMATTER = new Intl.DateTimeFormat('ja-JP', {
 
 const SEVERITY_STYLE: Record<SystemNotification['severity'], {
     container: string;
+    hover: string;
     iconColor: string;
     Icon: React.ComponentType<{ className?: string }>;
 }> = {
     info: {
-        container: 'bg-blue-50 border-blue-200 hover:bg-blue-100',
-        iconColor: 'text-blue-600',
+        container: 'border-status-info-border bg-status-info-bg',
+        hover: 'hover:bg-status-info-bg-hover',
+        iconColor: 'text-status-info',
         Icon: Info,
     },
     critical: {
-        container: 'bg-red-50 border-red-300 hover:bg-red-100',
-        iconColor: 'text-red-600',
+        container: 'border-status-danger-border bg-status-danger-bg',
+        hover: 'hover:bg-status-danger-bg-hover',
+        iconColor: 'text-status-danger',
         Icon: AlertTriangle,
     },
 };
 
 export const NotificationBanner: React.FC = () => {
-    const router = useRouter();
     const { user } = useAuth();
-    const { bannerNotifications, loading } = useSystemNotifications();
+    const { bannerNotifications, loading, error, stale, retry } = useSystemNotifications();
 
-    if (loading || bannerNotifications.length === 0) return null;
+    if (loading) return null;
+    if (!error && bannerNotifications.length === 0) return null;
 
-    const handleOpen = (id: string) => {
-        router.push(`/notifications?open=${id}`);
-    };
-
-    const handleDismiss = async (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
+    const handleDismiss = async (id: string) => {
         if (!user?.uid) return;
         try {
             await dismissNotification(user.uid, id);
-        } catch (error) {
-            bannerLogger.error('通知の dismiss に失敗', error, { id, userId: user.uid });
+        } catch (caught) {
+            bannerLogger.error('通知の dismiss に失敗', caught, { id, userId: user.uid });
         }
     };
 
     return (
-        <div className="space-y-2 mb-4">
-            {bannerNotifications.map(notification => {
-                const style = SEVERITY_STYLE[notification.severity];
-                const Icon = style.Icon;
-                return (
-                    <div
-                        key={notification.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => handleOpen(notification.id)}
-                        onKeyDown={e => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                handleOpen(notification.id);
-                            }
-                        }}
-                        className={`flex items-center gap-3 px-4 py-2 rounded-lg border cursor-pointer transition-colors ${style.container}`}
-                    >
-                        <Icon className={`w-4 h-4 flex-shrink-0 ${style.iconColor}`} />
-                        <span className="text-sm font-medium text-gray-900 truncate flex-1">
-                            {notification.title}
-                        </span>
-                        <span className="text-xs text-gray-500 flex-shrink-0">
-                            {PUBLISHED_DATE_FORMATTER.format(notification.publishedAt)}
-                        </span>
-                        {user?.uid && (
-                            <button
-                                type="button"
-                                onClick={e => handleDismiss(e, notification.id)}
-                                className="p-1 text-gray-500 hover:text-gray-800 hover:bg-white rounded transition-colors flex-shrink-0"
-                                title="閉じる（次回以降表示しません）"
-                                aria-label="閉じる"
+        <div className="mb-4 space-y-2">
+            {error && (
+                <div
+                    role="alert"
+                    className="flex flex-wrap items-center gap-3 rounded-lg border border-status-warning-border bg-status-warning-bg px-4 py-2"
+                >
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
+                    <p className="min-w-0 flex-1 text-sm text-status-warning">
+                        {stale
+                            ? 'お知らせを更新できませんでした。表示中の内容は最新ではない可能性があります。'
+                            : 'お知らせを取得できませんでした。'}
+                    </p>
+                    <Button variant="secondary" onClick={retry} className="shrink-0">
+                        再試行
+                    </Button>
+                </div>
+            )}
+
+            {bannerNotifications.length > 0 && (
+                <ul className="space-y-2">
+                    {bannerNotifications.map(notification => {
+                        const style = SEVERITY_STYLE[notification.severity];
+                        const Icon = style.Icon;
+                        return (
+                            <li
+                                key={notification.id}
+                                className={`flex items-stretch rounded-lg border ${style.container}`}
                             >
-                                <X className="w-3.5 h-3.5" />
-                            </button>
-                        )}
-                    </div>
-                );
-            })}
+                                <Link
+                                    href={`/notifications?open=${notification.id}`}
+                                    className={`flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-l-lg px-4 py-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action focus-visible:ring-offset-1 ${style.hover}`}
+                                >
+                                    <Icon className={`h-4 w-4 shrink-0 ${style.iconColor}`} />
+                                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">
+                                        {notification.title}
+                                    </span>
+                                    <span className="shrink-0 text-xs text-muted">
+                                        {PUBLISHED_DATE_FORMATTER.format(notification.publishedAt)}
+                                    </span>
+                                </Link>
+                                {user?.uid && (
+                                    <IconButton
+                                        aria-label={`「${notification.title}」を閉じる（今後このお知らせを表示しません）`}
+                                        onClick={() => handleDismiss(notification.id)}
+                                        className="shrink-0 rounded-l-none"
+                                    >
+                                        <X className="h-4 w-4" aria-hidden="true" />
+                                    </IconButton>
+                                )}
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
         </div>
     );
 };
