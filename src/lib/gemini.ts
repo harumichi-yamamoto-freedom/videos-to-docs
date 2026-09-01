@@ -1,5 +1,9 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { DEFAULT_GEMINI_MODEL, resolveGeminiModel } from '../constants/geminiModels';
+import {
+    resolveThinkingLevelForModel,
+    type GeminiThinkingLevel,
+} from '../constants/geminiThinking';
 import { createLogger } from './logger';
 
 const geminiLogger = createLogger('gemini');
@@ -9,6 +13,35 @@ export interface TranscriptionResult {
     text?: string;
     error?: string;
     usedModel?: string;
+    usedThinkingLevel?: string;
+}
+
+interface GeminiUsageMetadata {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    thoughtsTokenCount?: number;
+    totalTokenCount?: number;
+}
+
+const THINKING_LEVEL_ENUMS = {
+    LOW: ThinkingLevel.LOW,
+    MEDIUM: ThinkingLevel.MEDIUM,
+    HIGH: ThinkingLevel.HIGH,
+} as const;
+
+function logGeminiUsage(
+    model: string,
+    thinkingLevel: string,
+    usageMetadata?: GeminiUsageMetadata,
+): void {
+    geminiLogger.info('Gemini API usage', {
+        model,
+        thinkingLevel,
+        promptTokenCount: usageMetadata?.promptTokenCount,
+        candidatesTokenCount: usageMetadata?.candidatesTokenCount,
+        thoughtsTokenCount: usageMetadata?.thoughtsTokenCount,
+        totalTokenCount: usageMetadata?.totalTokenCount,
+    });
 }
 
 export class GeminiClient {
@@ -32,14 +65,18 @@ export class GeminiClient {
      * @param fileName ファイル名
      * @param customPrompt カスタムプロンプト（オプション）
      * @param modelName 使用するGeminiモデル。未指定の場合は既定モデル。
+     * @param thinkingLevel 思考レベル。未指定の場合は default。
      */
     async transcribeVideo(
         videoBlob: Blob,
         fileName: string,
         customPrompt?: string,
-        modelName?: string
+        modelName?: string,
+        thinkingLevel: GeminiThinkingLevel = 'default',
     ): Promise<TranscriptionResult> {
         const targetModel = resolveGeminiModel(modelName ?? this.defaultModel);
+        const resolvedThinkingLevel = resolveThinkingLevelForModel(thinkingLevel, targetModel);
+        const usedThinkingLevel = resolvedThinkingLevel ?? 'unspecified';
 
         try {
             geminiLogger.info('transcribeVideo 開始', {
@@ -89,6 +126,13 @@ export class GeminiClient {
             // Gemini APIにリクエスト
             const result = await this.genAI.models.generateContent({
                 model: targetModel,
+                ...(resolvedThinkingLevel && {
+                    config: {
+                        thinkingConfig: {
+                            thinkingLevel: THINKING_LEVEL_ENUMS[resolvedThinkingLevel],
+                        },
+                    },
+                }),
                 contents: [
                     {
                         role: 'user',
@@ -104,6 +148,8 @@ export class GeminiClient {
 
             const text = result.text ?? '';
 
+            logGeminiUsage(targetModel, usedThinkingLevel, result.usageMetadata);
+
             geminiLogger.info('動画の直接送信による文書生成が成功', {
                 fileName,
                 modelName: targetModel,
@@ -114,6 +160,7 @@ export class GeminiClient {
                 success: true,
                 text,
                 usedModel: targetModel,
+                usedThinkingLevel,
             };
         } catch (error) {
             geminiLogger.error('動画の直接送信でエラーが発生', error, {
@@ -156,14 +203,18 @@ export class GeminiClient {
     /**
      * 音声ファイルから文字起こしと文書生成を行う
      * @param modelName 使用するGeminiモデル。未指定の場合は既定モデル。
+     * @param thinkingLevel 思考レベル。未指定の場合は default。
      */
     async transcribeAudio(
         audioBlob: Blob,
         fileName: string,
         customPrompt?: string,
-        modelName?: string
+        modelName?: string,
+        thinkingLevel: GeminiThinkingLevel = 'default',
     ): Promise<TranscriptionResult> {
         const targetModel = resolveGeminiModel(modelName ?? this.defaultModel);
+        const resolvedThinkingLevel = resolveThinkingLevelForModel(thinkingLevel, targetModel);
+        const usedThinkingLevel = resolvedThinkingLevel ?? 'unspecified';
 
         try {
             geminiLogger.info('transcribeAudio 開始', {
@@ -213,6 +264,13 @@ export class GeminiClient {
             // Gemini APIにリクエスト
             const result = await this.genAI.models.generateContent({
                 model: targetModel,
+                ...(resolvedThinkingLevel && {
+                    config: {
+                        thinkingConfig: {
+                            thinkingLevel: THINKING_LEVEL_ENUMS[resolvedThinkingLevel],
+                        },
+                    },
+                }),
                 contents: [
                     {
                         role: 'user',
@@ -228,6 +286,8 @@ export class GeminiClient {
 
             const text = result.text ?? '';
 
+            logGeminiUsage(targetModel, usedThinkingLevel, result.usageMetadata);
+
             geminiLogger.info('音声の文書生成が成功', {
                 fileName,
                 modelName: targetModel,
@@ -238,6 +298,7 @@ export class GeminiClient {
                 success: true,
                 text,
                 usedModel: targetModel,
+                usedThinkingLevel,
             };
         } catch (error) {
             geminiLogger.error('Gemini API呼び出しでエラーが発生', error, {
@@ -288,15 +349,19 @@ export class GeminiClient {
      * 既にBase64化したメディアで文書生成を行う（getBase64 を1回だけ行い、複数プロンプトで共有する用途）
      * @param base64Data Base64文字列（data URLのプレフィックスなし）
      * @param mimeType 'video/mp4' または 'audio/mpeg' など
+     * @param thinkingLevel 思考レベル。未指定の場合は default。
      */
     async transcribeWithBase64(
         base64Data: string,
         mimeType: string,
         fileName: string,
         customPrompt?: string,
-        modelName?: string
+        modelName?: string,
+        thinkingLevel: GeminiThinkingLevel = 'default',
     ): Promise<TranscriptionResult> {
         const targetModel = resolveGeminiModel(modelName ?? this.defaultModel);
+        const resolvedThinkingLevel = resolveThinkingLevelForModel(thinkingLevel, targetModel);
+        const usedThinkingLevel = resolvedThinkingLevel ?? 'unspecified';
 
         try {
             if (!base64Data || base64Data.length === 0) {
@@ -359,6 +424,13 @@ export class GeminiClient {
 
             const result = await this.genAI.models.generateContent({
                 model: targetModel,
+                ...(resolvedThinkingLevel && {
+                    config: {
+                        thinkingConfig: {
+                            thinkingLevel: THINKING_LEVEL_ENUMS[resolvedThinkingLevel],
+                        },
+                    },
+                }),
                 contents: [
                     {
                         role: 'user',
@@ -374,6 +446,8 @@ export class GeminiClient {
 
             const text = result.text ?? '';
 
+            logGeminiUsage(targetModel, usedThinkingLevel, result.usageMetadata);
+
             geminiLogger.info('文書生成が成功', {
                 fileName,
                 modelName: targetModel,
@@ -384,6 +458,7 @@ export class GeminiClient {
                 success: true,
                 text,
                 usedModel: targetModel,
+                usedThinkingLevel,
             };
         } catch (error) {
             geminiLogger.error('Gemini API呼び出しでエラーが発生', error, {

@@ -3,6 +3,7 @@ import {
     DEFAULT_GEMINI_MODEL,
     GEMINI_DEFAULT_MODEL_SENTINEL,
 } from '../constants/geminiModels';
+import type { GeminiThinkingLevel } from '../constants/geminiThinking';
 
 const testDoubles = vi.hoisted(() => ({
     generateContent: vi.fn(),
@@ -14,6 +15,11 @@ const testDoubles = vi.hoisted(() => ({
 }));
 
 vi.mock('@google/genai', () => ({
+    ThinkingLevel: {
+        LOW: 'SDK_LOW',
+        MEDIUM: 'SDK_MEDIUM',
+        HIGH: 'SDK_HIGH',
+    },
     GoogleGenAI: class {
         models = { generateContent: testDoubles.generateContent };
     },
@@ -28,6 +34,7 @@ import { GeminiClient, TranscriptionResult } from './gemini';
 type InvokeGeminiMethod = (
     client: GeminiClient,
     model: string,
+    thinkingLevel?: GeminiThinkingLevel,
 ) => Promise<TranscriptionResult>;
 
 const METHOD_CASES: Array<{
@@ -38,32 +45,35 @@ const METHOD_CASES: Array<{
     {
         name: 'transcribeVideo',
         expectedModelInfoLogs: 3,
-        invoke: (client, model) => client.transcribeVideo(
+        invoke: (client, model, thinkingLevel) => client.transcribeVideo(
             new Blob(['video'], { type: 'video/mp4' }),
             'video.mp4',
             'テスト用プロンプト',
             model,
+            thinkingLevel,
         ),
     },
     {
         name: 'transcribeAudio',
         expectedModelInfoLogs: 3,
-        invoke: (client, model) => client.transcribeAudio(
+        invoke: (client, model, thinkingLevel) => client.transcribeAudio(
             new Blob(['audio'], { type: 'audio/mpeg' }),
             'audio.mp3',
             'テスト用プロンプト',
             model,
+            thinkingLevel,
         ),
     },
     {
         name: 'transcribeWithBase64',
         expectedModelInfoLogs: 2,
-        invoke: (client, model) => client.transcribeWithBase64(
+        invoke: (client, model, thinkingLevel) => client.transcribeWithBase64(
             'ZmFrZQ==',
             'audio/mpeg',
             'audio.mp3',
             'テスト用プロンプト',
             model,
+            thinkingLevel,
         ),
     },
 ];
@@ -99,10 +109,18 @@ describe('GeminiClient のモデル解決配線', () => {
                 success: true,
                 text: 'ok',
                 usedModel: DEFAULT_GEMINI_MODEL,
+                usedThinkingLevel: 'MEDIUM',
             });
             expect(testDoubles.generateContent).toHaveBeenCalledTimes(1);
             expect(testDoubles.generateContent).toHaveBeenCalledWith(
-                expect.objectContaining({ model: DEFAULT_GEMINI_MODEL }),
+                expect.objectContaining({
+                    model: DEFAULT_GEMINI_MODEL,
+                    config: {
+                        thinkingConfig: {
+                            thinkingLevel: 'SDK_MEDIUM',
+                        },
+                    },
+                }),
             );
 
             const loggedModelNames = testDoubles.logger.info.mock.calls
@@ -144,7 +162,9 @@ describe('GeminiClient のモデル解決配線', () => {
             expect(testDoubles.generateContent).toHaveBeenCalledWith(
                 expect.objectContaining({ model: unknownModel }),
             );
+            expect(testDoubles.generateContent.mock.calls[0][0]).not.toHaveProperty('config');
             expect(result.usedModel).toBe(unknownModel);
+            expect(result.usedThinkingLevel).toBe('unspecified');
 
             const loggedModelNames = testDoubles.logger.info.mock.calls
                 .map(call => call[1] as Record<string, unknown> | undefined)
@@ -171,6 +191,85 @@ describe('GeminiClient のモデル解決配線', () => {
                 expect.any(Error),
                 expect.objectContaining({ modelName: unknownModel }),
             );
+        },
+    );
+
+    it.each(METHOD_CASES)(
+        '$name は Gemini 3.7 系へ指定した thinkingLevel を付与し、実送信値を返す',
+        async ({ invoke }) => {
+            const result = await invoke(createClient(), 'gemini-3.7-future-preview', 'high');
+
+            expect(testDoubles.generateContent).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    model: 'gemini-3.7-future-preview',
+                    config: {
+                        thinkingConfig: {
+                            thinkingLevel: 'SDK_HIGH',
+                        },
+                    },
+                }),
+            );
+            expect(result.usedThinkingLevel).toBe('HIGH');
+        },
+    );
+
+    it.each(METHOD_CASES)(
+        '$name は非対象の Gemini 2.5 系へ thinkingConfig を付けず unspecified を返す',
+        async ({ invoke }) => {
+            const result = await invoke(createClient(), 'gemini-2.5-flash', 'high');
+
+            expect(testDoubles.generateContent).toHaveBeenCalledTimes(1);
+            expect(testDoubles.generateContent.mock.calls[0][0]).toEqual(
+                expect.objectContaining({ model: 'gemini-2.5-flash' }),
+            );
+            expect(testDoubles.generateContent.mock.calls[0][0]).not.toHaveProperty('config');
+            expect(result.usedThinkingLevel).toBe('unspecified');
+        },
+    );
+
+    it.each(METHOD_CASES)(
+        '$name は成功時に thinking token を含む usageMetadata を記録する',
+        async ({ invoke }) => {
+            testDoubles.generateContent.mockResolvedValueOnce({
+                text: 'ok',
+                usageMetadata: {
+                    promptTokenCount: 101,
+                    candidatesTokenCount: 202,
+                    thoughtsTokenCount: 303,
+                    totalTokenCount: 606,
+                },
+            });
+
+            await invoke(createClient(), DEFAULT_GEMINI_MODEL, 'low');
+
+            expect(testDoubles.generateContent.mock.calls[0][0]).toHaveProperty(
+                'config.thinkingConfig.thinkingLevel',
+                'SDK_LOW',
+            );
+            expect(testDoubles.logger.info).toHaveBeenCalledWith('Gemini API usage', {
+                model: DEFAULT_GEMINI_MODEL,
+                thinkingLevel: 'LOW',
+                promptTokenCount: 101,
+                candidatesTokenCount: 202,
+                thoughtsTokenCount: 303,
+                totalTokenCount: 606,
+            });
+        },
+    );
+
+    it.each(METHOD_CASES)(
+        '$name は usageMetadata がなくても undefined 安全にログを記録する',
+        async ({ invoke }) => {
+            await invoke(createClient(), 'gemini-2.5-flash', 'medium');
+
+            expect(testDoubles.logger.info).toHaveBeenCalledWith('Gemini API usage', {
+                model: 'gemini-2.5-flash',
+                thinkingLevel: 'unspecified',
+                promptTokenCount: undefined,
+                candidatesTokenCount: undefined,
+                thoughtsTokenCount: undefined,
+                totalTokenCount: undefined,
+            });
         },
     );
 });

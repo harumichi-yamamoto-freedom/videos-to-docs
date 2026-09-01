@@ -108,6 +108,7 @@ export const useVideoProcessing = (
                             fileIndex,
                             promptId: prompt.id,
                             promptModel: prompt.model,
+                            promptThinkingLevel: prompt.thinkingLevel,
                             isVideoBlob,
                         });
 
@@ -116,7 +117,8 @@ export const useVideoProcessing = (
                             mimeType,
                             file.file.name,
                             prompt.content,
-                            prompt.model
+                            prompt.model,
+                            prompt.thinkingLevel,
                         );
 
                         videoProcessingLogger.info(`プロンプト「${prompt.name}」の Gemini API 呼び出し完了`, {
@@ -145,7 +147,8 @@ export const useVideoProcessing = (
                                 transcriptionResult.usedModel,
                                 canonicalizeGeminiModel(prompt.model) === GEMINI_DEFAULT_MODEL_SENTINEL
                                     ? 'default'
-                                    : 'pinned'
+                                    : 'pinned',
+                                transcriptionResult.usedThinkingLevel,
                             );
                             videoProcessingLogger.info('Firestoreへの保存が完了', {
                                 fileIndex,
@@ -301,6 +304,7 @@ export const useVideoProcessing = (
                             fileIndex,
                             promptId: prompt.id,
                             promptModel: prompt.model,
+                            promptThinkingLevel: prompt.thinkingLevel,
                             isVideoBlob,
                         });
 
@@ -309,7 +313,8 @@ export const useVideoProcessing = (
                             mimeType,
                             file.file.name,
                             prompt.content,
-                            prompt.model
+                            prompt.model,
+                            prompt.thinkingLevel,
                         );
 
                         videoProcessingLogger.info(`プロンプト「${prompt.name}」の Gemini API 呼び出し完了（再開）`, {
@@ -338,7 +343,8 @@ export const useVideoProcessing = (
                                 transcriptionResult.usedModel,
                                 canonicalizeGeminiModel(prompt.model) === GEMINI_DEFAULT_MODEL_SENTINEL
                                     ? 'default'
-                                    : 'pinned'
+                                    : 'pinned',
+                                transcriptionResult.usedThinkingLevel,
                             );
                             videoProcessingLogger.info('Firestoreへの保存が完了（再開）', {
                                 fileIndex,

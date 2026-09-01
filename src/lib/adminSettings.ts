@@ -8,6 +8,10 @@ import {
     canonicalizeGeminiModel,
     GEMINI_DEFAULT_MODEL_SENTINEL,
 } from '../constants/geminiModels';
+import {
+    canonicalizeThinkingLevel,
+    type GeminiThinkingLevel,
+} from '../constants/geminiThinking';
 import { createLogger } from './logger';
 
 const adminSettingsLogger = createLogger('adminSettings');
@@ -16,6 +20,7 @@ export interface DefaultPromptTemplate {
     name: string;
     content: string;
     model?: string;
+    thinkingLevel?: GeminiThinkingLevel;
 }
 
 export interface AdminSettings {
@@ -66,6 +71,7 @@ export const INITIAL_DEFAULT_PROMPTS: DefaultPromptTemplate[] = [
 
 出力は正しく作成された資料のみを表示し、その他の説明や追加情報は不要です`,
         model: GEMINI_DEFAULT_MODEL_SENTINEL,
+        thinkingLevel: 'default',
     },
     {
         name: '希望条件',
@@ -73,11 +79,13 @@ export const INITIAL_DEFAULT_PROMPTS: DefaultPromptTemplate[] = [
 利用者は住宅・不動産業界のプロフェッショナルです。その為ディティールにこだわって最高のアウトプットを作成する必要があります。
 書式はマークダウン形式で出力してください。`,
         model: GEMINI_DEFAULT_MODEL_SENTINEL,
+        thinkingLevel: 'default',
     },
     {
         name: 'お客様情報',
         content: `お客様情報を一覧で出力して`,
         model: GEMINI_DEFAULT_MODEL_SENTINEL,
+        thinkingLevel: 'low',
     },
     {
         name: 'ヒヤッとアラートサンプル',
@@ -162,6 +170,7 @@ export const INITIAL_DEFAULT_PROMPTS: DefaultPromptTemplate[] = [
 - 守秘に配慮し、個人を特定できる情報や不要な評価語は書かない。
 `,
         model: GEMINI_DEFAULT_MODEL_SENTINEL,
+        thinkingLevel: 'default',
     },
 ];
 
@@ -175,22 +184,23 @@ const DEFAULT_SETTINGS: AdminSettings = {
     defaultPrompts: INITIAL_DEFAULT_PROMPTS,
 };
 
-function canonicalizeDefaultPromptModels(
+function canonicalizeDefaultPrompts(
     prompts: DefaultPromptTemplate[],
 ): DefaultPromptTemplate[] {
     return prompts.map(prompt => ({
         ...prompt,
         model: canonicalizeGeminiModel(prompt.model),
+        thinkingLevel: canonicalizeThinkingLevel(prompt.thinkingLevel),
     }));
 }
 
-function withCanonicalDefaultPromptModels(
+function withCanonicalDefaultPrompts(
     settings: AdminSettings,
     prompts: DefaultPromptTemplate[],
 ): AdminSettings {
     return {
         ...settings,
-        defaultPrompts: canonicalizeDefaultPromptModels(prompts),
+        defaultPrompts: canonicalizeDefaultPrompts(prompts),
     };
 }
 
@@ -221,7 +231,7 @@ export async function getAdminSettings(): Promise<AdminSettings> {
                 );
             }
 
-            return withCanonicalDefaultPromptModels(
+            return withCanonicalDefaultPrompts(
                 data,
                 data.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
             );
@@ -234,13 +244,13 @@ export async function getAdminSettings(): Promise<AdminSettings> {
             updatedAt: serverTimestamp(),
         });
 
-        return withCanonicalDefaultPromptModels(
+        return withCanonicalDefaultPrompts(
             DEFAULT_SETTINGS,
             DEFAULT_SETTINGS.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
         );
     } catch (error) {
         adminSettingsLogger.error('管理者設定の取得に失敗', error);
-        return withCanonicalDefaultPromptModels(
+        return withCanonicalDefaultPrompts(
             DEFAULT_SETTINGS,
             DEFAULT_SETTINGS.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
         );
@@ -256,10 +266,16 @@ export async function updateAdminSettings(
 ): Promise<void> {
     try {
         const docRef = doc(db, 'adminSettings', 'config');
+        const canonicalSettings = settings.defaultPrompts == null
+            ? settings
+            : {
+                ...settings,
+                defaultPrompts: canonicalizeDefaultPrompts(settings.defaultPrompts),
+            };
         await setDoc(
             docRef,
             {
-                ...settings,
+                ...canonicalSettings,
                 updatedAt: serverTimestamp(),
                 updatedBy,
             },
@@ -305,10 +321,10 @@ export async function validateDocumentSize(content: string): Promise<{ valid: bo
 export async function getDefaultPrompts(): Promise<DefaultPromptTemplate[]> {
     try {
         const settings = await getAdminSettings();
-        return settings.defaultPrompts ?? canonicalizeDefaultPromptModels(INITIAL_DEFAULT_PROMPTS);
+        return settings.defaultPrompts ?? canonicalizeDefaultPrompts(INITIAL_DEFAULT_PROMPTS);
     } catch (error) {
         adminSettingsLogger.error('デフォルトプロンプトの取得に失敗', error);
-        return INITIAL_DEFAULT_PROMPTS;
+        return canonicalizeDefaultPrompts(INITIAL_DEFAULT_PROMPTS);
     }
 }
 
@@ -325,7 +341,7 @@ export async function updateDefaultPrompts(
         await setDoc(
             docRef,
             {
-                defaultPrompts: prompts,
+                defaultPrompts: canonicalizeDefaultPrompts(prompts),
                 updatedAt: serverTimestamp(),
                 updatedBy,
             },

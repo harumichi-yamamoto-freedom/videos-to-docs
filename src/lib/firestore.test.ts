@@ -98,6 +98,7 @@ interface MockDocumentData {
     transcription?: string | null;
     text?: string | null;
     generatedByModel?: string;
+    generatedByThinkingLevel?: string;
     modelSelection?: 'default' | 'pinned';
 }
 
@@ -115,6 +116,7 @@ const mappingCases: Array<{ id: string; data: MockDocumentData; expected: string
             transcription: 'transcription の本文',
             text: '古い text の本文',
             generatedByModel: 'gemini-3.7-flash',
+            generatedByThinkingLevel: 'HIGH',
             modelSelection: 'default',
         },
         expected: 'transcription の本文',
@@ -131,6 +133,7 @@ const mappingCases: Array<{ id: string; data: MockDocumentData; expected: string
             createdBy: 'GUEST',
             text: 'text の本文',
             generatedByModel: 'gemini-2.5-pro',
+            generatedByThinkingLevel: 'unspecified',
             modelSelection: 'pinned',
         },
         expected: 'text の本文',
@@ -237,6 +240,7 @@ describe('firestore', () => {
                 'audio/recording.wav',
                 'gemini-3.7-flash',
                 'default',
+                'HIGH',
             );
 
             expect(documentId).toBe(mocks.documentReference.id);
@@ -259,9 +263,32 @@ describe('firestore', () => {
                 createdAt: mocks.timestamp,
                 audioStoragePath: 'audio/recording.wav',
                 generatedByModel: 'gemini-3.7-flash',
+                generatedByThinkingLevel: 'HIGH',
                 modelSelection: 'default',
             });
             expect(payload).not.toHaveProperty('text');
+        });
+
+        it('既存の10引数呼出しは modelSelection を保ち thinking level を保存しない', async () => {
+            await saveTranscription(
+                'recording.wav',
+                '新規文書の本文',
+                '議事録',
+                'audio',
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                'gemini-3.7-flash',
+                'default',
+            );
+
+            const payload = mocks.addDoc.mock.calls[0][1];
+            expect(payload).not.toHaveProperty('generatedByThinkingLevel');
+            expect(payload).toMatchObject({
+                generatedByModel: 'gemini-3.7-flash',
+                modelSelection: 'default',
+            });
         });
     });
 
@@ -298,9 +325,11 @@ describe('firestore', () => {
             );
             expect(documents.map(document => ({
                 generatedByModel: document.generatedByModel,
+                generatedByThinkingLevel: document.generatedByThinkingLevel,
                 modelSelection: document.modelSelection,
             }))).toEqual(mappingCases.map(row => ({
                 generatedByModel: row.data.generatedByModel,
+                generatedByThinkingLevel: row.data.generatedByThinkingLevel,
                 modelSelection: row.data.modelSelection,
             })));
         });
@@ -315,9 +344,11 @@ describe('firestore', () => {
             );
             expect(documents.map(document => ({
                 generatedByModel: document.generatedByModel,
+                generatedByThinkingLevel: document.generatedByThinkingLevel,
                 modelSelection: document.modelSelection,
             }))).toEqual(mappingCases.map(row => ({
                 generatedByModel: row.data.generatedByModel,
+                generatedByThinkingLevel: row.data.generatedByThinkingLevel,
                 modelSelection: row.data.modelSelection,
             })));
         });
@@ -332,9 +363,11 @@ describe('firestore', () => {
             );
             expect(documents.map(document => ({
                 generatedByModel: document.generatedByModel,
+                generatedByThinkingLevel: document.generatedByThinkingLevel,
                 modelSelection: document.modelSelection,
             }))).toEqual(mappingCases.map(row => ({
                 generatedByModel: row.data.generatedByModel,
+                generatedByThinkingLevel: row.data.generatedByThinkingLevel,
                 modelSelection: row.data.modelSelection,
             })));
         });

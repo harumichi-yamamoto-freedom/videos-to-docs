@@ -16,12 +16,20 @@ import {
 } from 'firebase/firestore';
 import { getCurrentUserId, getOwnerType } from './auth';
 import { logAudit } from './auditLog';
-import { validatePromptSize, getDefaultPrompts } from './adminSettings';
+import {
+    validatePromptSize,
+    getDefaultPrompts,
+    type DefaultPromptTemplate,
+} from './adminSettings';
 import { updateUserStats } from './userManagement';
 import {
     canonicalizeGeminiModel,
     GEMINI_DEFAULT_MODEL_SENTINEL,
 } from '../constants/geminiModels';
+import {
+    canonicalizeThinkingLevel,
+    type GeminiThinkingLevel,
+} from '../constants/geminiThinking';
 import { createLogger } from './logger';
 
 const promptsLogger = createLogger('prompts');
@@ -48,7 +56,7 @@ function generateDefaultPromptId(ownerId: string, templateName: string): string 
 }
 
 async function ensureDefaultPromptExists(
-    template: { name: string; content: string; model?: string },
+    template: DefaultPromptTemplate,
     ownerId: string,
     ownerType: 'guest' | 'user',
     createdBy: string
@@ -65,6 +73,7 @@ async function ensureDefaultPromptExists(
         name: template.name,
         content: template.content,
         model: canonicalizeGeminiModel(template.model),
+        thinkingLevel: canonicalizeThinkingLevel(template.thinkingLevel),
         isDefault: true,
         ownerType,
         ownerId,
@@ -78,7 +87,7 @@ async function ensureDefaultPromptsForOwner(
     ownerId: string,
     ownerType: 'guest' | 'user',
     createdBy: string,
-    templates?: { name: string; content: string; model?: string }[]
+    templates?: DefaultPromptTemplate[]
 ): Promise<void> {
     const defaultPromptTemplates = templates ?? (await getDefaultPrompts());
     await Promise.all(
@@ -93,6 +102,7 @@ export interface Prompt {
     name: string;
     content: string;
     model: string;
+    thinkingLevel?: GeminiThinkingLevel;
     isDefault: boolean;
     ownerType: 'guest' | 'user';
     ownerId: string; // "GUEST" または Auth uid
@@ -198,6 +208,7 @@ async function findExistingPromptsByBaseName(
                     name: data.name,
                     content: data.content,
                     model: canonicalizeGeminiModel(data.model),
+                    thinkingLevel: canonicalizeThinkingLevel(data.thinkingLevel),
                     isDefault: data.isDefault || false,
                     ownerType: ownerType as 'guest' | 'user',
                     ownerId: ownerId,
@@ -252,7 +263,7 @@ function getNextPromptName(existingPrompts: Prompt[], baseName: string): string 
  * デフォルトプロンプトを追加（連番付き、決定論的ID）
  */
 async function addDefaultPrompt(
-    template: { name: string; content: string; model?: string },
+    template: DefaultPromptTemplate,
     ownerId: string,
     ownerType: 'guest' | 'user',
     createdBy: string
@@ -283,6 +294,7 @@ async function addDefaultPrompt(
         name: newName,
         content: template.content,
         model: canonicalizeGeminiModel(template.model),
+        thinkingLevel: canonicalizeThinkingLevel(template.thinkingLevel),
         isDefault: true,
         ownerType,
         ownerId,
@@ -338,7 +350,8 @@ export async function createPrompt(
     name: string,
     content: string,
     isDefault: boolean = false,
-    model: string = GEMINI_DEFAULT_MODEL_SENTINEL
+    model: string = GEMINI_DEFAULT_MODEL_SENTINEL,
+    thinkingLevel: GeminiThinkingLevel = 'default',
 ): Promise<string> {
     const userId = getCurrentUserId();
     const ownerType = getOwnerType();
@@ -359,6 +372,7 @@ export async function createPrompt(
             name,
             content,
             model,
+            thinkingLevel: canonicalizeThinkingLevel(thinkingLevel),
             isDefault,
             ownerType,
             ownerId: userId,
@@ -437,6 +451,7 @@ export async function getPrompts(): Promise<Prompt[]> {
                 name: data.name,
                 content: data.content,
                 model: canonicalizeGeminiModel(data.model),
+                thinkingLevel: canonicalizeThinkingLevel(data.thinkingLevel),
                 isDefault: data.isDefault || false,
                 ownerType: ownerType as 'guest' | 'user',
                 ownerId: ownerId,
@@ -475,6 +490,7 @@ export async function getPromptsByOwnerId(ownerId: string, limitCount: number = 
                 name: data.name,
                 content: data.content,
                 model: canonicalizeGeminiModel(data.model),
+                thinkingLevel: canonicalizeThinkingLevel(data.thinkingLevel),
                 isDefault: data.isDefault || false,
                 ownerType: data.ownerType || 'user',
                 ownerId: data.ownerId || ownerId,
@@ -497,7 +513,12 @@ export async function getPromptsByOwnerId(ownerId: string, limitCount: number = 
  */
 export async function updatePrompt(
     promptId: string,
-    updates: { name?: string; content?: string; model?: string }
+    updates: {
+        name?: string;
+        content?: string;
+        model?: string;
+        thinkingLevel?: GeminiThinkingLevel;
+    }
 ): Promise<void> {
     try {
         // コンテンツが更新される場合、サイズチェック
@@ -512,13 +533,20 @@ export async function updatePrompt(
             }
         }
 
+        const canonicalUpdates = 'thinkingLevel' in updates
+            ? {
+                ...updates,
+                thinkingLevel: canonicalizeThinkingLevel(updates.thinkingLevel),
+            }
+            : updates;
+
         await updateDoc(doc(db, 'prompts', promptId), {
-            ...updates,
+            ...canonicalUpdates,
             updatedAt: serverTimestamp(),
         });
 
         // 監査ログを記録
-        await logAudit('prompt_update', 'prompt', promptId, updates);
+        await logAudit('prompt_update', 'prompt', promptId, canonicalUpdates);
     } catch (error) {
         promptsLogger.error('プロンプトの更新に失敗', error, { promptId });
         if (error instanceof Error) {

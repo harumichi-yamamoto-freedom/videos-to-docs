@@ -30,6 +30,7 @@ export interface TranscriptionDocument {
     transcription: string;
     promptName: string; // 使用したプロンプト名
     generatedByModel?: string;
+    generatedByThinkingLevel?: string;
     modelSelection?: 'default' | 'pinned';
     ownerType: 'guest' | 'user';
     ownerId: string; // "GUEST" または Auth uid
@@ -48,6 +49,7 @@ export interface Transcription {
     text: string; // transcription のエイリアス
     promptName: string;
     generatedByModel?: string;
+    generatedByThinkingLevel?: string;
     modelSelection?: 'default' | 'pinned';
     createdAt: Timestamp | Date;
 }
@@ -65,7 +67,9 @@ export async function saveTranscription(
     title?: string,
     audioStoragePath?: string,
     generatedByModel?: string,
-    modelSelection?: 'default' | 'pinned'
+    modelSelection?: 'default' | 'pinned',
+    // 既存の positional 呼び出しを維持するため、新規引数は末尾に追加する。
+    generatedByThinkingLevel?: string,
 ): Promise<string> {
     try {
         const userId = getCurrentUserId();
@@ -95,6 +99,7 @@ export async function saveTranscription(
             createdAt: serverTimestamp(),
             ...(audioStoragePath && { audioStoragePath }),
             ...(generatedByModel !== undefined && { generatedByModel }),
+            ...(generatedByThinkingLevel !== undefined && { generatedByThinkingLevel }),
             ...(modelSelection !== undefined && { modelSelection }),
         });
 
@@ -171,6 +176,7 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
                 transcription: data.transcription ?? data.text ?? '',
                 promptName: data.promptName || '不明',
                 generatedByModel: data.generatedByModel,
+                generatedByThinkingLevel: data.generatedByThinkingLevel,
                 modelSelection: data.modelSelection,
                 ownerType: ownerType as 'guest' | 'user',
                 ownerId: ownerId,
@@ -241,6 +247,7 @@ export async function getTranscriptions(limitCount: number = 100): Promise<Trans
                 text: data.transcription ?? data.text ?? '', // transcription を text にマッピング
                 promptName: data.promptName || '不明',
                 generatedByModel: data.generatedByModel,
+                generatedByThinkingLevel: data.generatedByThinkingLevel,
                 modelSelection: data.modelSelection,
                 createdAt,
             });
@@ -276,6 +283,7 @@ export async function getTranscriptionsByOwnerId(ownerId: string, limitCount: nu
                 text: data.transcription ?? data.text ?? '',
                 promptName: data.promptName || '不明',
                 generatedByModel: data.generatedByModel,
+                generatedByThinkingLevel: data.generatedByThinkingLevel,
                 modelSelection: data.modelSelection,
                 createdAt,
             });
