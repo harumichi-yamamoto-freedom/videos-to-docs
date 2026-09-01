@@ -1,0 +1,465 @@
+/*
+ * Navy / 紺碧
+ * A restrained corporate theme built from deep navy, steel blue, and cool gray.
+ * Structure remains explicit through filled headings, weighted rules, and spacing.
+ */
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-document {
+  --pdf-navy-ink: #17212b;
+  --pdf-navy-ink-soft: #374957;
+  --pdf-navy-muted: #526f82;
+  --pdf-navy-deep: #102a43;
+  --pdf-navy: #183b56;
+  --pdf-navy-steel: #365d78;
+  --pdf-navy-rule-strong: #879cab;
+  --pdf-navy-rule: #bbc7d0;
+  --pdf-navy-rule-soft: #dde4e9;
+  --pdf-navy-wash: #f4f7f9;
+  --pdf-navy-wash-strong: #e9eff3;
+  --pdf-navy-paper: #ffffff;
+
+  color: var(--pdf-navy-ink);
+  background: var(--pdf-navy-paper);
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 10.2pt;
+  font-weight: 400;
+  line-height: 1.76;
+  letter-spacing: 0.012em;
+  font-kerning: normal;
+}
+
+/* The optional document band uses the same double-weight rule as the body. */
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-document__header {
+  position: relative;
+  margin: 0 0 9.5mm;
+  padding: 4.8mm 0 4.5mm;
+  border-top: 0.85mm solid var(--pdf-navy-deep);
+  border-bottom: 0.22mm solid var(--pdf-navy-rule-strong);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-document__header::before {
+  content: "";
+  position: absolute;
+  top: -0.85mm;
+  left: 0;
+  width: 34mm;
+  border-top: 1.35mm solid var(--pdf-navy-steel);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-document__title {
+  margin: 0 0 4.5mm;
+  color: var(--pdf-navy-deep);
+  font-size: 24pt;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.012em;
+  font-feature-settings: "palt" 1;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-document__meta {
+  display: grid;
+  grid-template-columns: 20mm minmax(0, 1fr);
+  gap: 0.9mm 4mm;
+  margin: 0;
+  padding: 3.1mm 4mm;
+  border: 0.22mm solid var(--pdf-navy-rule);
+  border-left: 0.9mm solid var(--pdf-navy);
+  background: var(--pdf-navy-wash);
+  color: var(--pdf-navy-ink-soft);
+  font-size: 8.15pt;
+  line-height: 1.55;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-document__meta dt {
+  color: var(--pdf-navy-deep);
+  font-size: 7.7pt;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-document__meta dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--pdf-navy-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* This rule anchors a body-only document and remains a clear content divider. */
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown {
+  position: relative;
+  padding-top: 4.2mm;
+  border-top: 0.72mm solid var(--pdf-navy-deep);
+  color: var(--pdf-navy-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown::before {
+  content: "";
+  position: absolute;
+  top: -0.72mm;
+  left: 0;
+  width: 34mm;
+  border-top: 1.18mm solid var(--pdf-navy-steel);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--pdf-navy-deep);
+  font-weight: 700;
+  font-feature-settings: "palt" 1;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown > :first-child {
+  margin-top: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown h1 {
+  margin: 10.5mm 0 4.8mm;
+  padding: 3.1mm 4.2mm 3.2mm;
+  border-left: 1.25mm solid var(--pdf-navy-steel);
+  border-bottom: 0.65mm solid #091e30;
+  background: var(--pdf-navy-deep);
+  color: var(--pdf-navy-paper);
+  font-size: 20.5pt;
+  line-height: 1.35;
+  letter-spacing: 0.018em;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown h2 {
+  margin: 8.5mm 0 3.6mm;
+  padding: 2mm 3.4mm 2.1mm;
+  border-left: 1mm solid var(--pdf-navy);
+  border-bottom: 0.3mm solid var(--pdf-navy-rule-strong);
+  background: var(--pdf-navy-wash-strong);
+  color: var(--pdf-navy-deep);
+  font-size: 15pt;
+  line-height: 1.42;
+  letter-spacing: 0.024em;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown h3 {
+  margin: 6.8mm 0 2.8mm;
+  padding: 0 0 1.4mm;
+  border-bottom: 0.38mm solid var(--pdf-navy-steel);
+  color: var(--pdf-navy-deep);
+  font-size: 12.4pt;
+  line-height: 1.48;
+  letter-spacing: 0.028em;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown h4 {
+  margin: 5.5mm 0 2.3mm;
+  padding-left: 2.8mm;
+  border-left: 0.55mm solid var(--pdf-navy-rule-strong);
+  color: var(--pdf-navy-ink);
+  font-size: 10.8pt;
+  line-height: 1.55;
+  letter-spacing: 0.035em;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown h5 {
+  margin: 4.7mm 0 2mm;
+  padding-bottom: 0.6mm;
+  border-bottom: 0.2mm solid var(--pdf-navy-rule);
+  color: var(--pdf-navy-ink-soft);
+  font-size: 9.8pt;
+  line-height: 1.58;
+  letter-spacing: 0.065em;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown h6 {
+  margin: 4.3mm 0 1.8mm;
+  color: var(--pdf-navy-muted);
+  font-size: 9.2pt;
+  line-height: 1.58;
+  letter-spacing: 0.08em;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown p {
+  margin: 0 0 3.7mm;
+  color: var(--pdf-navy-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown > p:first-child {
+  color: var(--pdf-navy-ink-soft);
+  font-size: 10.7pt;
+  line-height: 1.8;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown :is(ul, ol) {
+  margin: 0 0 4.3mm;
+  padding-left: 1.9em;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown ul {
+  list-style: disc outside;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown ol {
+  list-style: decimal outside;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown ul ul {
+  list-style-type: circle;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown ul ul ul {
+  list-style-type: square;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown li {
+  margin: 0;
+  color: var(--pdf-navy-ink);
+  line-height: 1.74;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown li + li {
+  margin-top: 1.1mm;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown li > :is(ul, ol) {
+  margin-top: 1.1mm;
+  margin-bottom: 0.7mm;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown li > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown ul > li::marker {
+  color: var(--pdf-navy-steel);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown ol > li::marker {
+  color: var(--pdf-navy-deep);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown a {
+  color: var(--pdf-navy-deep);
+  font-weight: 600;
+  text-decoration-line: underline;
+  text-decoration-color: var(--pdf-navy-steel);
+  text-decoration-thickness: 0.18mm;
+  text-underline-offset: 0.16em;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown a:is(:hover, :focus-visible) {
+  color: var(--pdf-navy-deep);
+  text-decoration-color: var(--pdf-navy-deep);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown strong {
+  color: var(--pdf-navy-deep);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown hr {
+  height: 0.55mm;
+  width: 28mm;
+  margin: 8.5mm 0;
+  border: 0;
+  background: var(--pdf-navy-deep);
+}
+
+/* Dense rules, numeric alignment, and row shading favor rapid business review. */
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown table {
+  width: 100%;
+  max-width: 100%;
+  margin: 5.8mm 0 6.2mm;
+  border: 0.25mm solid var(--pdf-navy-rule-strong);
+  border-top: 0.9mm solid var(--pdf-navy-deep);
+  border-collapse: collapse;
+  table-layout: auto;
+  background: var(--pdf-navy-paper);
+  color: var(--pdf-navy-ink);
+  font-size: 8.55pt;
+  line-height: 1.52;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown thead {
+  background: var(--pdf-navy-deep);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown tr {
+  border-bottom: 0.2mm solid var(--pdf-navy-rule);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown :is(th, td) {
+  padding: 2.05mm 2.4mm;
+  border-right: 0.2mm solid var(--pdf-navy-rule-soft);
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown :is(th, td):last-child {
+  border-right: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown th {
+  border-right-color: var(--pdf-navy-rule);
+  background: var(--pdf-navy-deep);
+  color: var(--pdf-navy-paper);
+  font-size: 8.1pt;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: 0.035em;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown td {
+  color: var(--pdf-navy-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown tr:nth-child(even) > td {
+  background: var(--pdf-navy-wash);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown :is(th, td) > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown code {
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-variant-ligatures: none;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown pre {
+  margin: 5.6mm 0;
+  padding: 3.6mm 4mm;
+  border: 0.22mm solid var(--pdf-navy-rule);
+  border-top: 0.45mm solid var(--pdf-navy-steel);
+  border-left: 1mm solid var(--pdf-navy-deep);
+  background: var(--pdf-navy-wash);
+  color: var(--pdf-navy-ink);
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-size: 8.15pt;
+  line-height: 1.62;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown pre > code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: inherit;
+  overflow: visible;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown :not(pre) > code {
+  display: inline;
+  padding: 0.24mm 0.9mm;
+  border: 0.2mm solid var(--pdf-navy-rule);
+  border-bottom: 0.35mm solid var(--pdf-navy-steel);
+  border-radius: 0;
+  background: var(--pdf-navy-wash);
+  color: var(--pdf-navy-deep);
+  font-size: 0.88em;
+  line-height: 1;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown blockquote {
+  margin: 5.8mm 0;
+  padding: 3.4mm 4.2mm;
+  border-top: 0.22mm solid var(--pdf-navy-rule);
+  border-right: 0.22mm solid var(--pdf-navy-rule);
+  border-bottom: 0.22mm solid var(--pdf-navy-rule);
+  border-left: 1.05mm solid var(--pdf-navy-steel);
+  background: var(--pdf-navy-wash);
+  color: var(--pdf-navy-ink-soft);
+  font-size: 10.3pt;
+  font-style: normal;
+  line-height: 1.74;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
