@@ -1,303 +1,397 @@
 'use client';
 
-import React, { useCallback, useEffect, useReducer, useState } from 'react';
-import { Prompt, updatePrompt, deletePrompt } from '@/lib/prompts';
-import { ContentEditModal } from './ContentEditModal';
+import React, { useCallback, useId, useReducer, useRef, useState } from 'react';
 import { canonicalizeGeminiModel } from '@/constants/geminiModels';
 import {
     THINKING_LEVELS,
     canonicalizeThinkingLevel,
     type GeminiThinkingLevel,
 } from '@/constants/geminiThinking';
-import { ModelComboboxSelect } from './ModelComboboxSelect';
+import { createLogger } from '@/lib/logger';
+import { deletePrompt, type Prompt, updatePrompt } from '@/lib/prompts';
+import { ContentEditModal } from './ContentEditModal';
+import { Dialog } from './ui/Dialog';
+import {
+    effectiveThinkingLevel,
+    getThinkingLevelOptionLabel,
+    ModelComboboxSelect,
+    supportsThinkingLevel,
+} from './ModelComboboxSelect';
 
 interface PromptEditModalProps {
     isOpen: boolean;
     onClose: () => void;
     prompt: Prompt | null;
     onSave: () => void | Promise<void>;
-    onDelete: () => void;
+    onDelete: () => void | Promise<void>;
 }
 
-export interface PromptModelEditSessionState {
-    selectedModel: string;
-    savedModel: string;
-    selectedThinkingLevel: GeminiThinkingLevel;
-    savedThinkingLevel: GeminiThinkingLevel;
-    isViewMode: boolean;
+const promptEditLogger = createLogger('PromptEditModal');
+
+export interface PromptEditValues {
+    title: string;
+    content: string;
+    model: string;
+    thinkingLevel: GeminiThinkingLevel;
 }
 
-export type PromptModelEditSessionAction =
-    | { type: 'select'; model: string }
-    | { type: 'selectThinkingLevel'; thinkingLevel: string }
-    | { type: 'saveSucceeded' }
-    | { type: 'viewModeChanged'; isViewMode: boolean }
-    | {
-        type: 'reset';
-        savedModel: string;
-        savedThinkingLevel: string | null | undefined;
+export interface PromptEditSessionState {
+    saved: PromptEditValues;
+    draft: PromptEditValues;
+}
+
+export type PromptEditSessionAction =
+    | { type: 'textChanged'; title: string; content: string }
+    | { type: 'modelChanged'; model: string }
+    | { type: 'thinkingLevelChanged'; thinkingLevel: string }
+    | { type: 'saveSucceeded'; values: PromptEditValues }
+    | { type: 'discardChanges' };
+
+export function createPromptEditValues(prompt: Prompt): PromptEditValues {
+    const model = canonicalizeGeminiModel(prompt.model);
+    return {
+        title: prompt.name,
+        content: prompt.content,
+        model,
+        thinkingLevel: supportsThinkingLevel(model)
+            ? canonicalizeThinkingLevel(prompt.thinkingLevel)
+            : 'default',
     };
+}
 
-export function reducePromptModelEditSession(
-    state: PromptModelEditSessionState,
-    action: PromptModelEditSessionAction,
-): PromptModelEditSessionState {
+export function createPromptEditSession(
+    values: PromptEditValues,
+): PromptEditSessionState {
+    return {
+        saved: values,
+        draft: values,
+    };
+}
+
+export function reducePromptEditSession(
+    state: PromptEditSessionState,
+    action: PromptEditSessionAction,
+): PromptEditSessionState {
     switch (action.type) {
-        case 'select':
+        case 'textChanged':
             return {
                 ...state,
-                selectedModel: canonicalizeGeminiModel(action.model),
+                draft: {
+                    ...state.draft,
+                    title: action.title,
+                    content: action.content,
+                },
             };
-        case 'selectThinkingLevel':
+        case 'modelChanged':
+            // The picked level is kept so returning to a supporting model
+            // restores it; `effectiveThinkingLevel` decides what is saved.
             return {
                 ...state,
-                selectedThinkingLevel: canonicalizeThinkingLevel(action.thinkingLevel),
+                draft: {
+                    ...state.draft,
+                    model: canonicalizeGeminiModel(action.model),
+                },
             };
-        case 'saveSucceeded':
+        case 'thinkingLevelChanged':
+            if (!supportsThinkingLevel(state.draft.model)) return state;
             return {
                 ...state,
-                savedModel: state.selectedModel,
-                savedThinkingLevel: state.selectedThinkingLevel,
+                draft: {
+                    ...state.draft,
+                    thinkingLevel: canonicalizeThinkingLevel(action.thinkingLevel),
+                },
             };
-        case 'viewModeChanged': {
-            if (action.isViewMode === state.isViewMode) return state;
-
-            const returnedToViewMode = !state.isViewMode
-                && action.isViewMode;
-            return {
-                ...state,
-                isViewMode: action.isViewMode,
-                selectedModel: returnedToViewMode
-                    ? state.savedModel
-                    : state.selectedModel,
-                selectedThinkingLevel: returnedToViewMode
-                    ? state.savedThinkingLevel
-                    : state.selectedThinkingLevel,
+        case 'saveSucceeded': {
+            const model = canonicalizeGeminiModel(action.values.model);
+            const values = {
+                ...action.values,
+                model,
+                thinkingLevel: supportsThinkingLevel(model)
+                    ? canonicalizeThinkingLevel(action.values.thinkingLevel)
+                    : 'default' as const,
             };
+            return { saved: values, draft: values };
         }
-        case 'reset': {
-            const savedModel = canonicalizeGeminiModel(action.savedModel);
-            const savedThinkingLevel = canonicalizeThinkingLevel(
-                action.savedThinkingLevel,
-            );
-            return {
-                selectedModel: savedModel,
-                savedModel,
-                selectedThinkingLevel: savedThinkingLevel,
-                savedThinkingLevel,
-                isViewMode: true,
-            };
-        }
+        case 'discardChanges':
+            return { ...state, draft: state.saved };
     }
 }
 
-export function hasPromptModelChanges(state: PromptModelEditSessionState): boolean {
-    return state.selectedModel !== state.savedModel
-        || state.selectedThinkingLevel !== state.savedThinkingLevel;
+export function hasPromptEditChanges(state: PromptEditSessionState): boolean {
+    return state.draft.title !== state.saved.title
+        || state.draft.content !== state.saved.content
+        || state.draft.model !== state.saved.model
+        // The retained pick is invisible while the model cannot use it, so
+        // compare what would be saved rather than the intent behind it.
+        || effectiveThinkingLevel(state.draft.model, state.draft.thinkingLevel)
+            !== effectiveThinkingLevel(state.saved.model, state.saved.thinkingLevel);
 }
 
 interface PromptModelFieldProps {
-    selectedModel: string;
-    selectedThinkingLevel: GeminiThinkingLevel;
+    model: string;
+    thinkingLevel: GeminiThinkingLevel;
     isEditable: boolean;
     isViewMode: boolean;
     saving: boolean;
-    onSelect: (model: string) => void;
-    onThinkingLevelSelect: (thinkingLevel: string) => void;
-    onViewModeChange: (isViewMode: boolean) => void;
+    onModelChange: (model: string) => void;
+    onThinkingLevelChange: (thinkingLevel: string) => void;
 }
 
 const PromptModelField: React.FC<PromptModelFieldProps> = ({
-    selectedModel,
-    selectedThinkingLevel,
+    model,
+    thinkingLevel,
     isEditable,
     isViewMode,
     saving,
-    onSelect,
-    onThinkingLevelSelect,
-    onViewModeChange,
+    onModelChange,
+    onThinkingLevelChange,
 }) => {
-    useEffect(() => {
-        onViewModeChange(isViewMode);
-    }, [isViewMode, onViewModeChange]);
+    const thinkingLevelSupported = supportsThinkingLevel(model);
+    const thinkingLevelId = useId();
+    const thinkingLevelDescriptionId = useId();
 
     return (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2">
-                <label className="block text-sm font-semibold text-gray-700">
+                <span className="block text-sm font-semibold text-gray-700">
                     使用するGeminiモデル
-                </label>
+                </span>
                 <ModelComboboxSelect
-                    value={selectedModel}
-                    onChange={onSelect}
+                    value={model}
+                    onChange={onModelChange}
                     disabled={!isEditable || saving || isViewMode}
                 />
             </div>
             <div className="space-y-2">
                 <label
-                    htmlFor="prompt-edit-thinking-level"
+                    htmlFor={thinkingLevelId}
                     className="block text-sm font-semibold text-gray-700"
                 >
                     思考レベル
                 </label>
                 <select
-                    id="prompt-edit-thinking-level"
-                    value={selectedThinkingLevel}
-                    onChange={(event) => onThinkingLevelSelect(event.target.value)}
-                    disabled={!isEditable || saving || isViewMode}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm text-gray-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-700"
+                    id={thinkingLevelId}
+                    value={effectiveThinkingLevel(model, thinkingLevel)}
+                    onChange={(event) => onThinkingLevelChange(event.target.value)}
+                    disabled={!isEditable || saving || isViewMode || !thinkingLevelSupported}
+                    aria-describedby={!thinkingLevelSupported
+                        ? thinkingLevelDescriptionId
+                        : undefined}
+                    className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-base text-gray-800 focus:border-transparent focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-600"
                 >
                     {THINKING_LEVELS.map(level => (
                         <option key={level.id} value={level.id}>
-                            {level.description
-                                ? `${level.label}（${level.description}）`
-                                : level.label}
+                            {getThinkingLevelOptionLabel(level)}
                         </option>
                     ))}
                 </select>
+                {!thinkingLevelSupported && (
+                    <p
+                        id={thinkingLevelDescriptionId}
+                        className="text-xs leading-relaxed text-gray-600"
+                    >
+                        このモデルでは思考レベルを指定できません。
+                    </p>
+                )}
             </div>
         </div>
     );
 };
 
-export const PromptEditModal: React.FC<PromptEditModalProps> = ({
+interface PromptEditSessionModalProps extends Omit<PromptEditModalProps, 'prompt'> {
+    prompt: Prompt;
+}
+
+const PromptEditSessionModal: React.FC<PromptEditSessionModalProps> = ({
     isOpen,
     onClose,
     prompt,
     onSave,
     onDelete,
 }) => {
-    const savedModel = canonicalizeGeminiModel(prompt?.model);
-    const savedThinkingLevel = canonicalizeThinkingLevel(prompt?.thinkingLevel);
-    const [modelSession, dispatchModelSession] = useReducer(
-        reducePromptModelEditSession,
-        {
-            selectedModel: savedModel,
-            savedModel,
-            selectedThinkingLevel: savedThinkingLevel,
-            savedThinkingLevel,
-            isViewMode: true,
-        },
+    const [session, dispatch] = useReducer(
+        reducePromptEditSession,
+        createPromptEditValues(prompt),
+        createPromptEditSession,
     );
-    // Adjusting state during render: prompt の切り替え時とモーダルの再表示時に、
-    // モデル編集セッションを保存済みモデルへリセットする。
-    // useEffect 内での setState は React 19 で警告となるため、レンダー中比較で同期させる。
-    const sessionKey = isOpen ? prompt?.id ?? '__prompt_without_id__' : '__closed__';
-    const [lastSessionKey, setLastSessionKey] = useState(sessionKey);
-    if (sessionKey !== lastSessionKey) {
-        setLastSessionKey(sessionKey);
-        if (isOpen) {
-            dispatchModelSession({
-                type: 'reset',
-                savedModel,
-                savedThinkingLevel,
-            });
-        }
-    }
-
-    const handleModelSelect = useCallback((model: string) => {
-        dispatchModelSession({ type: 'select', model });
-    }, []);
-
-    const handleThinkingLevelSelect = useCallback((thinkingLevel: string) => {
-        dispatchModelSession({ type: 'selectThinkingLevel', thinkingLevel });
-    }, []);
-
-    const handleViewModeChange = useCallback((nextIsViewMode: boolean) => {
-        dispatchModelSession({
-            type: 'viewModeChanged',
-            isViewMode: nextIsViewMode,
-        });
-    }, []);
-
-    if (!prompt) return null;
-
-    // ゲストのデフォルトプロンプトかどうか
+    const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
+    const [deletionRefreshFailed, setDeletionRefreshFailed] = useState(false);
+    const deletionStatusTitleId = useId();
+    const deletionStatusHeadingRef = useRef<HTMLHeadingElement>(null);
     const isGuestDefaultPrompt = prompt.ownerType === 'guest' && prompt.isDefault;
-    // 編集・削除可能かどうか
     const isEditable = !isGuestDefaultPrompt;
 
+    const handleDraftChange = useCallback((draft: {
+        title: string;
+        content: string;
+    }) => {
+        dispatch({ type: 'textChanged', ...draft });
+    }, []);
+
+    const handleModelChange = useCallback((model: string) => {
+        dispatch({ type: 'modelChanged', model });
+    }, []);
+
+    const handleThinkingLevelChange = useCallback((thinkingLevel: string) => {
+        dispatch({ type: 'thinkingLevelChanged', thinkingLevel });
+    }, []);
+
+    const handleDiscardChanges = useCallback(() => {
+        dispatch({ type: 'discardChanges' });
+    }, []);
+
     const handleSave = async (title: string, content: string) => {
+        const values = { ...session.draft, title, content };
+        setRefreshWarning(null);
         await updatePrompt(prompt.id!, {
-            name: title,
-            content,
-            model: modelSession.selectedModel,
-            thinkingLevel: modelSession.selectedThinkingLevel,
+            name: values.title,
+            content: values.content,
+            model: values.model,
+            thinkingLevel: effectiveThinkingLevel(values.model, values.thinkingLevel),
         });
-        await onSave();
-        dispatchModelSession({ type: 'saveSucceeded' });
+        try {
+            await onSave();
+        } catch (error) {
+            promptEditLogger.error('プロンプト保存後の一覧更新に失敗', error);
+            setRefreshWarning(
+                '変更は保存されましたが、一覧を更新できませんでした。画面を再読み込みしてください。',
+            );
+        }
+        dispatch({ type: 'saveSucceeded', values });
     };
 
     const handleDelete = async () => {
-        if (!confirm(`「${prompt.name}」を削除しますか？`)) return;
+        setRefreshWarning(null);
         await deletePrompt(prompt.id!);
-        onDelete();
-        onClose();
-    };
-
-    const handleClose = () => {
-        if (hasPromptModelChanges(modelSession)) {
-            if (!confirm('保存されていない変更があります。変更を破棄して閉じますか？')) {
-                return;
-            }
+        try {
+            await onDelete();
+        } catch (error) {
+            promptEditLogger.error('プロンプト削除後の一覧更新に失敗', error);
+            setDeletionRefreshFailed(true);
+            return;
         }
-        dispatchModelSession({
-            type: 'reset',
-            savedModel,
-            savedThinkingLevel,
-        });
         onClose();
     };
 
-    // 警告メッセージ
-    const warningMessage = isGuestDefaultPrompt ? (
-        <div className="bg-amber-50 border border-amber-300 rounded-lg p-4">
+    const permissionWarningMessage = isGuestDefaultPrompt ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
             <div className="flex items-start gap-2">
-                <span className="text-amber-600 text-lg flex-shrink-0">🔒</span>
+                <span className="flex-shrink-0 text-lg text-amber-600">🔒</span>
                 <div>
                     <p className="text-sm font-medium text-amber-900">
-                        このプロンプトは編集・削除できません
+                        このプロンプトは編集・削除できません。
                     </p>
-                    <p className="text-xs text-amber-700 mt-1">
-                        未ログインユーザー向けのデフォルトプロンプトは保護されています
+                    <p className="mt-1 text-xs text-amber-700">
+                        未ログインユーザー向けのデフォルトプロンプトは保護されています。
                     </p>
                 </div>
             </div>
         </div>
     ) : prompt.isDefault ? (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
             <p className="text-xs text-blue-800">
-                ℹ️ このプロンプトはデフォルトプロンプトです
+                ℹ️ このプロンプトはデフォルトプロンプトです。
             </p>
         </div>
     ) : undefined;
 
+    const warningMessage = refreshWarning || permissionWarningMessage ? (
+        <div className="space-y-3">
+            {refreshWarning && (
+                <div
+                    role="status"
+                    className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900"
+                >
+                    {refreshWarning}
+                </div>
+            )}
+            {permissionWarningMessage}
+        </div>
+    ) : undefined;
+
+    if (deletionRefreshFailed) {
+        return (
+            <Dialog
+                isOpen={isOpen}
+                onClose={onClose}
+                initialFocusRef={deletionStatusHeadingRef}
+                aria-labelledby={deletionStatusTitleId}
+                className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+            >
+                <div className="flex max-h-[calc(100dvh-2rem)] min-h-0 flex-col">
+                    <div className="min-h-0 flex-1 overflow-y-auto p-6 sm:p-8">
+                        <h2
+                            ref={deletionStatusHeadingRef}
+                            id={deletionStatusTitleId}
+                            tabIndex={-1}
+                            className="text-xl font-bold text-gray-900 focus:outline-none"
+                        >
+                            プロンプトを削除しました
+                        </h2>
+                        <p
+                            role="status"
+                            className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-900"
+                        >
+                            削除は完了しましたが、一覧を更新できませんでした。画面を再読み込みしてください。
+                        </p>
+                    </div>
+                    <div className="sticky bottom-0 border-t border-gray-200 bg-white p-4 sm:px-8">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="min-h-11 w-full rounded-lg bg-gray-700 px-6 py-2.5 font-medium text-white transition-colors hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                        >
+                            閉じる
+                        </button>
+                    </div>
+                </div>
+            </Dialog>
+        );
+    }
+
     return (
         <ContentEditModal
             isOpen={isOpen}
-            onClose={handleClose}
-            title={prompt.name}
-            content={prompt.content}
+            onClose={onClose}
+            title={session.saved.title}
+            content={session.saved.content}
+            draftTitle={session.draft.title}
+            draftContent={session.draft.content}
+            onDraftChange={handleDraftChange}
+            isDirty={hasPromptEditChanges(session)}
+            onDiscardChanges={handleDiscardChanges}
             isEditable={isEditable}
             showDownload={false}
             onSave={isEditable ? handleSave : undefined}
             onDelete={isEditable ? handleDelete : undefined}
             warningMessage={warningMessage}
             contentLabel="プロンプト内容"
-            renderExtraContent={({ isViewMode, saving }) => {
-                return (
-                    <PromptModelField
-                        selectedModel={modelSession.selectedModel}
-                        selectedThinkingLevel={modelSession.selectedThinkingLevel}
-                        isEditable={isEditable}
-                        isViewMode={isViewMode}
-                        saving={saving}
-                        onSelect={handleModelSelect}
-                        onThinkingLevelSelect={handleThinkingLevelSelect}
-                        onViewModeChange={handleViewModeChange}
-                    />
-                );
-            }}
+            renderExtraContent={({ isViewMode, saving }) => (
+                <PromptModelField
+                    model={session.draft.model}
+                    thinkingLevel={session.draft.thinkingLevel}
+                    isEditable={isEditable}
+                    isViewMode={isViewMode}
+                    saving={saving}
+                    onModelChange={handleModelChange}
+                    onThinkingLevelChange={handleThinkingLevelChange}
+                />
+            )}
+        />
+    );
+};
+
+export const PromptEditModal: React.FC<PromptEditModalProps> = (props) => {
+    if (!props.prompt) return null;
+
+    const sessionKey = props.isOpen
+        ? `open:${props.prompt.id ?? props.prompt.name}`
+        : 'closed';
+    return (
+        <PromptEditSessionModal
+            key={sessionKey}
+            {...props}
+            prompt={props.prompt}
         />
     );
 };
