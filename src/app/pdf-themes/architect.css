@@ -18,7 +18,7 @@
   --architect-blue: #1e6089;
   --architect-paper: #ffffff;
   --architect-sans:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -26,7 +26,7 @@
     sans-serif;
   --architect-mono:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;
@@ -36,8 +36,8 @@
   font-family: var(--architect-sans);
   font-size: 10pt;
   font-weight: 400;
-  line-height: 1.76;
-  letter-spacing: 0.012em;
+  line-height: 1.68;
+  letter-spacing: 0;
   font-kerning: normal;
   font-optical-sizing: auto;
   text-autospace: ideograph-alpha ideograph-numeric;
@@ -81,7 +81,7 @@
   display: block;
   color: var(--architect-graphite);
   font-family: var(--architect-mono);
-  font-size: 6.5pt;
+  font-size: 7pt;
   font-weight: 600;
   line-height: 1;
   letter-spacing: 0.19em;
@@ -96,7 +96,7 @@
   min-width: 0;
   margin: 0;
   color: var(--architect-graphite);
-  font-size: 7.5pt;
+  font-size: 7.9pt;
   line-height: 1.42;
   font-variant-numeric: tabular-nums;
 }
@@ -116,7 +116,7 @@
   background: var(--architect-wash-strong);
   color: var(--architect-ink);
   font-family: var(--architect-mono);
-  font-size: 6.3pt;
+  font-size: 6.9pt;
   font-weight: 700;
   letter-spacing: 0.075em;
   white-space: nowrap;
@@ -184,7 +184,7 @@
   margin-bottom: 2.1mm;
   color: var(--architect-muted);
   font-family: var(--architect-mono);
-  font-size: 6.2pt;
+  font-size: 6.8pt;
   font-weight: 600;
   line-height: 1;
   letter-spacing: 0.2em;
@@ -214,7 +214,7 @@
   border-right: 0.2mm solid var(--architect-rule-strong);
   color: var(--architect-graphite);
   font-family: var(--architect-mono);
-  font-size: 6.5pt;
+  font-size: 7.2pt;
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: 0.12em;
@@ -257,7 +257,7 @@
   border: 0.2mm solid var(--architect-rule-strong);
   color: var(--architect-graphite);
   font-family: var(--architect-mono);
-  font-size: 7.8pt;
+  font-size: 8.1pt;
   line-height: 1.42;
   letter-spacing: 0.11em;
 }
@@ -286,7 +286,7 @@
   .pdf-markdown
   :is(ul, ol) {
   margin: 0 0 3.8mm;
-  padding-left: 2em;
+  padding-left: 2.4em;
 }
 
 :where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
@@ -365,7 +365,7 @@
   border-collapse: collapse;
   background: var(--architect-paper);
   color: var(--architect-ink);
-  font-size: 8.4pt;
+  font-size: 9pt;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
@@ -396,7 +396,7 @@
   border-bottom: 0.32mm solid var(--architect-ink);
   background: var(--architect-wash-strong);
   color: var(--architect-ink);
-  font-size: 7.3pt;
+  font-size: 7.9pt;
   font-weight: 700;
   line-height: 1.42;
   letter-spacing: 0.075em;
