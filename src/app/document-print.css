@@ -86,7 +86,7 @@ body.pdf-export-active > .pdf-print-root {
     --pdf-rule: #d8d2df;
     --pdf-rule-soft: #ebe7ee;
     --pdf-rule-strong: #bdb4c7;
-    --pdf-code: #faf8fc;
+    --pdf-code: #f2eef7;
     --pdf-code-ink: #292430;
 
     color: var(--pdf-ink);
