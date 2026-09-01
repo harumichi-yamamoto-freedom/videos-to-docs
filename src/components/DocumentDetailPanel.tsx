@@ -1,13 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import ReactMarkdown, { Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-
-type CodeProps = React.HTMLAttributes<HTMLElement> & { inline?: boolean };
-import { Eye, FileText, Check, FileTextIcon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Eye, FileText, Check, FileTextIcon, Download } from 'lucide-react';
 import { Transcription } from '@/lib/firestore';
 import { createLogger } from '@/lib/logger';
+import { MarkdownDocument } from '@/components/MarkdownDocument';
+import { DocumentPrintPortal } from '@/components/DocumentPrintPortal';
+import { useDocumentPrint } from '@/hooks/useDocumentPrint';
 
 const documentDetailLogger = createLogger('DocumentDetailPanel');
 
@@ -26,64 +25,7 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
     const [editedTitle, setEditedTitle] = useState('');
     const [editedContent, setEditedContent] = useState('');
     const [saving, setSaving] = useState(false);
-    const markdownComponents: Components = useMemo(() => ({
-        h1: (props) => (
-            <h1 className="text-2xl font-bold mt-6 mb-4 text-gray-900" {...props} />
-        ),
-        h2: (props) => (
-            <h2 className="text-xl font-bold mt-5 mb-3 text-gray-900" {...props} />
-        ),
-        h3: (props) => (
-            <h3 className="text-lg font-bold mt-4 mb-2 text-gray-900" {...props} />
-        ),
-        ul: (props) => (
-            <ul className="list-disc pl-6 mb-4 space-y-1" {...props} />
-        ),
-        ol: (props) => (
-            <ol className="list-decimal pl-6 mb-4 space-y-1" {...props} />
-        ),
-        li: (props) => (
-            <li className="leading-relaxed" {...props} />
-        ),
-        p: (props) => (
-            <p className="mb-4 leading-relaxed" {...props} />
-        ),
-        blockquote: (props) => (
-            <blockquote
-                className="border-l-4 border-purple-300 pl-4 italic my-4 text-gray-700"
-                {...props}
-            />
-        ),
-        code: ({ inline, ...props }: CodeProps) =>
-            inline ? (
-                <code
-                    className="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono text-purple-600"
-                    {...props}
-                />
-            ) : (
-                <code
-                    className="block bg-gray-100 p-4 rounded-lg text-sm font-mono overflow-x-auto mb-4"
-                    {...props}
-                />
-            ),
-        pre: (props) => (
-            <pre className="bg-gray-100 p-4 rounded-lg overflow-x-auto mb-4" {...props} />
-        ),
-        strong: (props) => (
-            <strong className="font-bold text-gray-900" {...props} />
-        ),
-        em: (props) => (
-            <em className="italic" {...props} />
-        ),
-        a: (props) => (
-            <a
-                className="text-blue-600 hover:text-blue-800 underline"
-                target="_blank"
-                rel="noopener noreferrer"
-                {...props}
-            />
-        ),
-    }), []);
+    const { printPdf, isPreparing } = useDocumentPrint(document);
 
     const isEditable = !!onContentUpdate;
 
@@ -193,47 +135,55 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                             <p>生成日時: {formatDate(document.createdAt)}</p>
                         </div>
                     </div>
-                    {isEditable && (
-                        <div className="flex items-center justify-end">
-                            <div className="flex items-center space-x-2 bg-white/80 rounded-lg p-1 shadow-sm">
-                                <button
-                                    onClick={handleViewModeSwitch}
-                                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${isViewMode
-                                        ? 'bg-purple-100 text-purple-700'
-                                        : 'text-gray-600 hover:text-gray-900'
-                                        }`}
-                                    disabled={saving}
-                                >
-                                    <Eye className="w-4 h-4" />
-                                    <span>表示</span>
-                                </button>
-                                <button
-                                    onClick={() => setIsViewMode(false)}
-                                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${!isViewMode
-                                        ? 'bg-purple-100 text-purple-700'
-                                        : 'text-gray-600 hover:text-gray-900'
-                                        }`}
-                                    disabled={saving}
-                                >
-                                    <FileText className="w-4 h-4" />
-                                    <span>編集</span>
-                                </button>
-                            </div>
+                    <div className="flex items-center justify-end">
+                        <div className="flex items-center space-x-2 bg-white/80 rounded-lg p-1 shadow-sm">
+                            <button
+                                type="button"
+                                onClick={() => void printPdf()}
+                                disabled={!isViewMode || isPreparing}
+                                title={!isViewMode ? '保存後に PDF 出力できます' : undefined}
+                                className="px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <Download className="w-4 h-4" />
+                                <span>{isPreparing ? '印刷を準備中…' : 'PDF に保存'}</span>
+                            </button>
+                            {isEditable && (
+                                <>
+                                    <button
+                                        onClick={handleViewModeSwitch}
+                                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${isViewMode
+                                            ? 'bg-purple-100 text-purple-700'
+                                            : 'text-gray-600 hover:text-gray-900'
+                                            }`}
+                                        disabled={saving}
+                                    >
+                                        <Eye className="w-4 h-4" />
+                                        <span>表示</span>
+                                    </button>
+                                    <button
+                                        onClick={() => setIsViewMode(false)}
+                                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${!isViewMode
+                                            ? 'bg-purple-100 text-purple-700'
+                                            : 'text-gray-600 hover:text-gray-900'
+                                            }`}
+                                        disabled={saving}
+                                    >
+                                        <FileText className="w-4 h-4" />
+                                        <span>編集</span>
+                                    </button>
+                                </>
+                            )}
                         </div>
-                    )}
+                    </div>
                 </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
                 {isViewMode ? (
-                    <div className="prose prose-sm max-w-none text-gray-800">
-                        <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={markdownComponents}
-                        >
-                            {document.text}
-                        </ReactMarkdown>
-                    </div>
+                    <MarkdownDocument
+                        className="prose prose-sm max-w-none text-gray-800"
+                        markdown={document.text}
+                    />
                 ) : (
                     <div className="h-full">
                         <textarea
@@ -275,8 +225,7 @@ export const DocumentDetailPanel: React.FC<DocumentDetailPanelProps> = ({
                     </button>
                 </div>
             )}
+            <DocumentPrintPortal document={document} />
         </div>
     );
 };
-
-
