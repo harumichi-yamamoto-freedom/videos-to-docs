@@ -1,0 +1,402 @@
+/* Web 表示と印刷で同じ日本語 font stack を使う。 */
+.markdown-document,
+.pdf-document {
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+}
+
+/* hidden 属性は Tailwind Preflight と競合し得るため使用しない。 */
+.pdf-print-root {
+  display: none;
+}
+
+/* window.print() 前に付与し、off-screen で font/layout を確定する。 */
+body.pdf-export-active > .pdf-print-root {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: -200vw;
+  width: 176mm; /* A4 210mm - 左右余白 17mm × 2 */
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* 名前付き page にして、通常の画面印刷へ A4 設定を波及させない。 */
+@page pdf-document {
+  size: A4 portrait;
+  margin: 18mm 17mm 20mm;
+
+  /* Chromium 131+。未対応ブラウザは margin box のみ無視する。 */
+  @bottom-center {
+    content: counter(page) " / " counter(pages);
+    font-family: Arial, sans-serif;
+    font-size: 8pt;
+    line-height: 1;
+    color: #6b7280;
+  }
+}
+
+@media print {
+  body.pdf-export-active {
+    width: auto !important;
+    min-width: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  /* portal 以外の AppHeader、sidebar、編集 UI をまとめて除外する。 */
+  body.pdf-export-active > :not(.pdf-print-root) {
+    display: none !important;
+  }
+
+  body.pdf-export-active > .pdf-print-root {
+    display: block !important;
+    position: static !important;
+    width: auto !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    page: pdf-document;
+  }
+
+  .pdf-document {
+    color: #111827;
+    background: #ffffff;
+    font-size: 10.5pt;
+    font-weight: 400;
+    line-height: 1.75;
+    letter-spacing: 0.01em;
+    line-break: strict;
+    word-break: normal;
+    overflow-wrap: break-word;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .pdf-document *,
+  .pdf-document *::before,
+  .pdf-document *::after {
+    box-sizing: border-box;
+  }
+
+  .pdf-document__header {
+    margin: 0 0 9mm;
+    padding: 0 0 5mm;
+    border-bottom: 0.4mm solid #7c3aed;
+    break-inside: avoid;
+    break-inside: avoid-page;
+    break-after: avoid;
+    break-after: avoid-page;
+    page-break-inside: avoid;
+    page-break-after: avoid;
+  }
+
+  .pdf-document__title {
+    margin: 0 0 3mm;
+    color: #111827;
+    font-size: 22pt;
+    font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: 0.025em;
+    overflow-wrap: anywhere;
+  }
+
+  .pdf-document__meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.8mm 3mm;
+    margin: 0;
+    color: #6b7280;
+    font-size: 8.5pt;
+    line-height: 1.55;
+  }
+
+  .pdf-document__meta dt {
+    font-weight: 700;
+  }
+
+  .pdf-document__meta dd {
+    min-width: 0;
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .pdf-markdown > :first-child {
+    margin-top: 0;
+  }
+
+  .pdf-markdown > :last-child {
+    margin-bottom: 0;
+  }
+
+  .pdf-markdown h1,
+  .pdf-markdown h2,
+  .pdf-markdown h3,
+  .pdf-markdown h4,
+  .pdf-markdown h5,
+  .pdf-markdown h6 {
+    color: #111827;
+    font-weight: 700;
+    break-inside: avoid;
+    break-inside: avoid-page;
+    break-after: avoid;
+    break-after: avoid-page;
+    page-break-inside: avoid;
+    page-break-after: avoid;
+  }
+
+  /* 見出しと直後の段落・表・リストの分離を抑える。 */
+  .pdf-markdown :is(h1, h2, h3, h4, h5, h6) + * {
+    break-before: avoid;
+    break-before: avoid-page;
+    page-break-before: avoid;
+  }
+
+  .pdf-markdown h1 {
+    margin: 10mm 0 4mm;
+    padding-bottom: 2mm;
+    border-bottom: 0.25mm solid #d1d5db;
+    font-size: 18pt;
+    line-height: 1.45;
+    letter-spacing: 0.035em;
+  }
+
+  .pdf-markdown h2 {
+    margin: 8mm 0 3mm;
+    padding-left: 3mm;
+    border-left: 1mm solid #8b5cf6;
+    font-size: 14.5pt;
+    line-height: 1.5;
+    letter-spacing: 0.025em;
+  }
+
+  .pdf-markdown h3 {
+    margin: 6mm 0 2.5mm;
+    font-size: 12pt;
+    line-height: 1.55;
+    letter-spacing: 0.02em;
+  }
+
+  .pdf-markdown h4 {
+    margin: 5mm 0 2mm;
+    font-size: 10.5pt;
+    line-height: 1.6;
+  }
+
+  .pdf-markdown h5,
+  .pdf-markdown h6 {
+    margin: 4mm 0 1.5mm;
+    font-size: 9.5pt;
+    line-height: 1.6;
+  }
+
+  .pdf-markdown p {
+    margin: 0 0 3.5mm;
+    orphans: 3;
+    widows: 3;
+  }
+
+  .pdf-markdown ul,
+  .pdf-markdown ol {
+    margin: 0 0 4mm;
+    padding-left: 1.8em;
+  }
+
+  .pdf-markdown ul {
+    list-style: disc outside;
+  }
+
+  .pdf-markdown ol {
+    list-style: decimal outside;
+  }
+
+  .pdf-markdown ul ul {
+    list-style: circle outside;
+  }
+
+  .pdf-markdown li {
+    margin: 0;
+    line-height: 1.72;
+    orphans: 2;
+    widows: 2;
+  }
+
+  .pdf-markdown li + li {
+    margin-top: 1.2mm;
+  }
+
+  .pdf-markdown li > :last-child {
+    margin-bottom: 0;
+  }
+
+  .pdf-markdown .contains-task-list {
+    padding-left: 0;
+    list-style: none;
+  }
+
+  .pdf-markdown .task-list-item input[type="checkbox"] {
+    margin-right: 1.5mm;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .pdf-markdown a {
+    color: #1d4ed8;
+    text-decoration: underline;
+    text-underline-offset: 0.12em;
+    overflow-wrap: anywhere;
+  }
+
+  .pdf-markdown strong {
+    color: #111827;
+    font-weight: 700;
+  }
+
+  .pdf-markdown hr {
+    height: 0;
+    margin: 7mm 0;
+    border: 0;
+    border-top: 0.25mm solid #d1d5db;
+  }
+
+  /* 表全体はページを跨げる。行は可能な限り分断しない。 */
+  .pdf-markdown table {
+    width: 100%;
+    max-width: 100%;
+    margin: 5mm 0;
+    border-collapse: collapse;
+    border-spacing: 0;
+    table-layout: auto;
+    color: #111827;
+    font-size: 8.7pt;
+    line-height: 1.55;
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  .pdf-markdown thead {
+    display: table-header-group;
+  }
+
+  .pdf-markdown tfoot {
+    display: table-footer-group;
+  }
+
+  .pdf-markdown tr {
+    break-inside: avoid;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  .pdf-markdown th,
+  .pdf-markdown td {
+    padding: 1.8mm 2mm;
+    border: 0.25mm solid #d1d5db;
+    vertical-align: top;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+
+  .pdf-markdown th {
+    background: #f3f4f6;
+    font-weight: 700;
+  }
+
+  .pdf-markdown tbody tr:nth-child(even) td {
+    background: #fafafa;
+  }
+
+  /* 長いコードはページを跨がせる。 */
+  .pdf-markdown pre {
+    margin: 4mm 0;
+    padding: 3mm;
+    overflow: visible;
+    border: 0.25mm solid #d1d5db;
+    border-radius: 1.5mm;
+    background: #f6f8fa;
+    color: #1f2937;
+    font-family:
+      var(--font-geist-mono, "SFMono-Regular"),
+      var(--font-noto-sans-jp, "Noto Sans JP"),
+      "Yu Gothic",
+      Meiryo,
+      monospace;
+    font-size: 8.3pt;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 4;
+    orphans: 3;
+    widows: 3;
+    break-inside: auto;
+    page-break-inside: auto;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+
+  /* 現行 pre/code の二重 padding と背景を除去する。 */
+  .pdf-markdown pre > code {
+    display: block;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    white-space: inherit;
+  }
+
+  .pdf-markdown :not(pre) > code {
+    display: inline;
+    padding: 0.2mm 1mm;
+    border: 0.2mm solid #e5e7eb;
+    border-radius: 0.8mm;
+    background: #f3f4f6;
+    color: #6d28d9;
+    font-family:
+      var(--font-geist-mono, "SFMono-Regular"),
+      var(--font-noto-sans-jp, "Noto Sans JP"),
+      monospace;
+    font-size: 0.88em;
+    overflow-wrap: anywhere;
+  }
+
+  /* 長い引用は分割し、各 fragment の装飾を再描画する。 */
+  .pdf-markdown blockquote {
+    margin: 5mm 0;
+    padding: 2.5mm 3mm 2.5mm 4mm;
+    border-left: 1mm solid #a78bfa;
+    background: #faf7ff;
+    color: #374151;
+    font-style: normal;
+    orphans: 3;
+    widows: 3;
+    break-inside: auto;
+    page-break-inside: auto;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+
+  .pdf-markdown blockquote > :last-child {
+    margin-bottom: 0;
+  }
+
+  .pdf-markdown img,
+  .pdf-markdown svg,
+  .pdf-markdown figure {
+    max-width: 100%;
+    height: auto;
+    break-inside: avoid;
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+}

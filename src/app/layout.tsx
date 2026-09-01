@@ -1,10 +1,26 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const notoSansJP = localFont({
+  src: [
+    {
+      path: "./fonts/NotoSansJP-Regular.otf",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "./fonts/NotoSansJP-Bold.otf",
+      weight: "700",
+      style: "normal",
+    },
+  ],
+  variable: "--font-noto-sans-jp",
+  display: "swap",
+  preload: false,
+  fallback: ["Hiragino Sans", "Yu Gothic", "Meiryo", "sans-serif"],
+  adjustFontFallback: false,
 });
 
 const geistMono = Geist_Mono({
@@ -24,8 +40,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
+      <head>
+        <meta name="color-scheme" content="light" />
+      </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${notoSansJP.variable} ${geistMono.variable} antialiased`}
       >
         {children}
       </body>
