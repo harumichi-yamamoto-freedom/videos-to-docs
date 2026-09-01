@@ -10,24 +10,28 @@ const retry = vi.hoisted(() => vi.fn());
 const state = vi.hoisted(() => ({
     user: { uid: 'u1' } as { uid: string } | null,
     loading: false,
-    banner: [] as unknown[],
+    banner: [] as SystemNotification[],
     error: null as Error | null,
     stale: false,
+    retrying: false,
 }));
 
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: state.user, loading: false }) }));
 
-vi.mock('@/hooks/useSystemNotifications', () => ({
-    useSystemNotifications: () => ({
-        notifications: state.banner,
-        dismissedIds: [],
-        loading: state.loading,
-        bannerNotifications: state.banner,
-        error: state.error,
-        stale: state.stale,
-        retry,
-    }),
-}));
+vi.mock('@/hooks/useSystemNotifications', async () => {
+    const { systemNotificationsResult } = await import('@/testUtils/hookResults');
+    return {
+        useSystemNotifications: () => systemNotificationsResult({
+            notifications: state.banner,
+            bannerNotifications: state.banner,
+            loading: state.loading,
+            error: state.error,
+            stale: state.stale,
+            retrying: state.retrying,
+            retry,
+        }),
+    };
+});
 
 vi.mock('@/lib/systemNotifications', () => ({ dismissNotification: vi.fn() }));
 vi.mock('@/lib/logger', () => ({ createLogger: () => ({ error: vi.fn() }) }));
@@ -54,6 +58,7 @@ beforeEach(() => {
     state.banner = [notification()];
     state.error = null;
     state.stale = false;
+    state.retrying = false;
 });
 
 describe('NotificationBanner の入れ子解消 (E7)', () => {
@@ -123,6 +128,25 @@ describe('NotificationBanner が購読エラーを捨てない (E10)', () => {
 
         expect(html).toContain('最新ではない可能性があります');
         expect(html).toContain('メンテナンスのお知らせ');
+    });
+
+    it('再取得中は再試行ボタンを押せなくし、進行中だと分かる文言にする', () => {
+        state.banner = [];
+        state.error = new Error('network');
+        state.retrying = true;
+        const html = render();
+
+        expect(html).toContain('再試行しています...');
+        expect(html).toContain('disabled=""');
+    });
+
+    it('再取得中でなければ押せる状態で出す', () => {
+        state.banner = [];
+        state.error = new Error('network');
+        const html = render();
+
+        expect(html).toContain('>再試行<');
+        expect(html).not.toContain('disabled=""');
     });
 
     it('読み込み中は何も出さない（エラーと読み込み中を混同しない）', () => {

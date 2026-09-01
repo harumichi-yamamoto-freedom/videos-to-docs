@@ -1,5 +1,8 @@
-import type { ReactElement, ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+// @vitest-environment jsdom
+
+import React, { act, type ReactElement, type ReactNode } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hookHarness = vi.hoisted(() => {
     interface EffectSlot {
@@ -21,8 +24,23 @@ const hookHarness = vi.hoisted(() => {
 
     let activeHarness: HarnessState | null = null;
 
+    // The helper-level tests below drive the component function directly with
+    // these fake hooks. The mount-level tests render it for real in jsdom, and
+    // there no harness is active, so the real hooks have to take over.
+    interface ReactHookFallback {
+        useState: <T>(initialValue: T | (() => T)) => [T, (value: T) => void];
+        useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => void;
+    }
+    let reactFallback: ReactHookFallback | null = null;
+    const setReactFallback = (hooks: ReactHookFallback) => {
+        reactFallback = hooks;
+    };
+
     const useState = <T,>(initialValue: T | (() => T)) => {
-        if (!activeHarness) throw new Error('useState was called outside the test harness');
+        if (!activeHarness) {
+            if (!reactFallback) throw new Error('React hook fallback was not installed');
+            return reactFallback.useState(initialValue);
+        }
 
         const harness = activeHarness;
         const index = harness.stateCursor;
@@ -48,7 +66,11 @@ const hookHarness = vi.hoisted(() => {
         effect: () => void | (() => void),
         deps?: readonly unknown[],
     ) => {
-        if (!activeHarness) throw new Error('useEffect was called outside the test harness');
+        if (!activeHarness) {
+            if (!reactFallback) throw new Error('React hook fallback was not installed');
+            reactFallback.useEffect(effect, deps);
+            return;
+        }
 
         const index = activeHarness.effectCursor;
         activeHarness.effectCursor += 1;
@@ -107,7 +129,7 @@ const hookHarness = vi.hoisted(() => {
         };
     };
 
-    return { create, useEffect, useState };
+    return { create, setReactFallback, useEffect, useState };
 });
 
 const mocks = vi.hoisted(() => ({
@@ -121,12 +143,21 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('react', async () => {
     const actual = await vi.importActual<typeof import('react')>('react');
+    hookHarness.setReactFallback({
+        useState: actual.useState as ReactHookFallbackShape['useState'],
+        useEffect: actual.useEffect as ReactHookFallbackShape['useEffect'],
+    });
     return {
         ...actual,
         useEffect: hookHarness.useEffect,
         useState: hookHarness.useState,
     };
 });
+
+interface ReactHookFallbackShape {
+    useState: <T>(initialValue: T | (() => T)) => [T, (value: T) => void];
+    useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => void;
+}
 
 vi.mock('firebase/auth', () => ({
     EmailAuthProvider: { credential: mocks.createCredential },
@@ -318,5 +349,215 @@ describe('ReauthModal UI lifecycle', () => {
         expect(props.onSuccess).not.toHaveBeenCalled();
         expect(props.onClose).not.toHaveBeenCalled();
         harness.unmount();
+    });
+});
+
+describe('ReauthModal 共通Dialog移行', () => {
+    let container: HTMLDivElement;
+    let root: Root;
+    let onClose: ReturnType<typeof vi.fn>;
+    let onSuccess: ReturnType<typeof vi.fn>;
+
+    const originalShowModal = Object.getOwnPropertyDescriptor(
+        HTMLDialogElement.prototype,
+        'showModal',
+    );
+    const originalClose = Object.getOwnPropertyDescriptor(
+        HTMLDialogElement.prototype,
+        'close',
+    );
+
+    beforeAll(() => {
+        Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+            configurable: true,
+            value(this: HTMLDialogElement) {
+                this.setAttribute('open', '');
+            },
+        });
+        Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+            configurable: true,
+            value(this: HTMLDialogElement) {
+                if (!this.open) return;
+                this.removeAttribute('open');
+                // Native queues the close event; dispatching it inline would
+                // hide races with a controlled close.
+                queueMicrotask(() => {
+                    this.dispatchEvent(new Event('close'));
+                });
+            },
+        });
+        (
+            globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+        ).IS_REACT_ACT_ENVIRONMENT = true;
+    });
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mocks.auth.currentUser = emailUser;
+        mocks.createCredential.mockReturnValue(mocks.credential);
+        mocks.reauthenticateWithCredential.mockResolvedValue(undefined);
+        mocks.reauthenticateWithPopup.mockResolvedValue(undefined);
+        onClose = vi.fn();
+        onSuccess = vi.fn().mockResolvedValue(undefined);
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+    });
+
+    afterEach(async () => {
+        await act(async () => {
+            root.unmount();
+        });
+        container.remove();
+    });
+
+    afterAll(() => {
+        if (originalShowModal) {
+            Object.defineProperty(
+                HTMLDialogElement.prototype,
+                'showModal',
+                originalShowModal,
+            );
+        } else {
+            delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal;
+        }
+        if (originalClose) {
+            Object.defineProperty(HTMLDialogElement.prototype, 'close', originalClose);
+        } else {
+            delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).close;
+        }
+        (
+            globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+        ).IS_REACT_ACT_ENVIRONMENT = false;
+    });
+
+    async function renderModal(isOpen = true): Promise<void> {
+        await act(async () => {
+            root.render(React.createElement(ReauthModal, { isOpen, onClose, onSuccess }));
+        });
+    }
+
+    function dialogElement(): HTMLDialogElement {
+        const dialog = container.querySelector('dialog');
+        if (!dialog) throw new Error('dialog not found');
+        return dialog;
+    }
+
+    function passwordInput(): HTMLInputElement {
+        const input = container.querySelector<HTMLInputElement>('input[type="password"]');
+        if (!input) throw new Error('password input not found');
+        return input;
+    }
+
+    async function typePassword(value: string): Promise<void> {
+        const input = passwordInput();
+        const valueSetter = Object.getOwnPropertyDescriptor(
+            HTMLInputElement.prototype,
+            'value',
+        )?.set;
+        await act(async () => {
+            valueSetter?.call(input, value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    }
+
+    async function pressEscape(): Promise<void> {
+        await act(async () => {
+            dialogElement().dispatchEvent(new Event('cancel', { cancelable: true }));
+        });
+    }
+
+    async function submitForm(): Promise<void> {
+        const form = container.querySelector('form');
+        if (!form) throw new Error('form not found');
+        await act(async () => {
+            form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        });
+    }
+
+    it('native dialogをmodalとして開き、見出しで命名して初期focusを中へ置く', async () => {
+        const outsideButton = document.createElement('button');
+        document.body.appendChild(outsideButton);
+        outsideButton.focus();
+
+        await renderModal();
+
+        const dialog = dialogElement();
+        expect(dialog.open).toBe(true);
+        expect(dialog.getAttribute('role')).toBe('dialog');
+        expect(dialog.getAttribute('aria-modal')).toBe('true');
+
+        const labelId = dialog.getAttribute('aria-labelledby');
+        expect(labelId).toBeTruthy();
+        expect(document.getElementById(labelId ?? '')?.textContent).toBe('セキュリティ確認');
+        expect(dialog.contains(document.activeElement)).toBe(true);
+        expect(document.activeElement).toBe(passwordInput());
+
+        outsideButton.remove();
+    });
+
+    it('親がisOpen=falseに更新するcontrolled closeでhidden DOMのパスワードを消去する', async () => {
+        await renderModal();
+        await typePassword('secret-password');
+        expect(passwordInput().value).toBe('secret-password');
+
+        await renderModal(false);
+
+        const dialog = dialogElement();
+        expect(dialog.open).toBe(false);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(container.querySelector('input[type="password"]')).not.toBeNull();
+        expect(passwordInput().value).toBe('');
+    });
+
+    it('処理中はEscで閉じられず、処理が終われば閉じられる', async () => {
+        const deferred = createDeferred<void>();
+        mocks.reauthenticateWithCredential.mockReturnValueOnce(deferred.promise);
+
+        await renderModal();
+        await typePassword('correct-password');
+        await submitForm();
+
+        expect(dialogElement().getAttribute('aria-busy')).toBe('true');
+        await pressEscape();
+        expect(onClose).not.toHaveBeenCalled();
+        expect(dialogElement().open).toBe(true);
+
+        await act(async () => {
+            deferred.resolve(undefined);
+        });
+
+        // Negative control: the same gesture works once the attempt is over.
+        expect(onClose).toHaveBeenCalledWith('complete');
+    });
+
+    it('失敗した試行のパスワードをDOMに残さない', async () => {
+        mocks.reauthenticateWithCredential.mockRejectedValueOnce({
+            code: 'auth/wrong-password',
+        });
+
+        await renderModal();
+        await typePassword('wrong-password');
+        await submitForm();
+
+        expect(container.querySelector('[role="alert"]')?.textContent)
+            .toBe('パスワードが正しくありません。');
+        expect(passwordInput().value).toBe('');
+        expect(onClose).not.toHaveBeenCalled();
+        expect(dialogElement().open).toBe(true);
+
+        // The dialog is dismissible again, so Esc closes it.
+        await pressEscape();
+        expect(onClose).toHaveBeenCalledWith('dismiss');
+    });
+
+    it('成功して閉じたあともパスワードをDOMに残さない', async () => {
+        await renderModal();
+        await typePassword('correct-password');
+        await submitForm();
+
+        expect(onSuccess).toHaveBeenCalledOnce();
+        expect(onClose).toHaveBeenCalledWith('complete');
+        expect(passwordInput().value).toBe('');
     });
 });

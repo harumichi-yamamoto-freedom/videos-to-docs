@@ -1,6 +1,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { SystemNotification } from '@/lib/systemNotifications';
 import { ariaReferenceCount, danglingAriaReferences } from '@/testUtils/ariaReferences';
 import { SIGN_IN_LABEL } from '@/components/ui/labels';
 
@@ -12,7 +13,7 @@ const state = vi.hoisted(() => ({
     isAdmin: false,
     pathname: '/home',
     search: '',
-    notifications: [] as { id: string }[],
+    notifications: [] as SystemNotification[],
     dismissedIds: [] as string[],
     notificationsError: null as Error | null,
 }));
@@ -21,34 +22,37 @@ vi.mock('@/hooks/useAuth', () => ({
     useAuth: () => ({ user: state.user, loading: state.authLoading }),
 }));
 
-vi.mock('@/hooks/useAdmin', () => ({
-    useAdmin: () => ({ isAdmin: state.isAdmin, loading: false, error: null, retry: vi.fn() }),
-}));
+vi.mock('@/hooks/useAdmin', async () => {
+    const { adminAccessResult } = await import('@/testUtils/hookResults');
+    return { useAdmin: () => adminAccessResult(state.isAdmin ? 'allowed' : 'denied') };
+});
 
-vi.mock('@/hooks/useSystemNotifications', () => ({
-    useSystemNotifications: () => ({
-        notifications: state.notifications,
-        dismissedIds: state.dismissedIds,
-        loading: false,
-        bannerNotifications: [],
-        error: state.notificationsError,
-        stale: false,
-        retry: vi.fn(),
-    }),
-}));
+vi.mock('@/hooks/useSystemNotifications', async () => {
+    const { systemNotificationsResult } = await import('@/testUtils/hookResults');
+    return {
+        useSystemNotifications: () => systemNotificationsResult({
+            notifications: state.notifications,
+            dismissedIds: state.dismissedIds,
+            error: state.notificationsError,
+        }),
+    };
+});
 
 vi.mock('next/navigation', () => ({
     usePathname: () => state.pathname,
     useSearchParams: () => new URLSearchParams(state.search),
 }));
 
-vi.mock('@/lib/auth', () => ({ signOutNow: vi.fn(), deleteAccount: vi.fn() }));
-vi.mock('@/lib/accountDeletion', () => ({ getUserDeletionInfo: vi.fn() }));
+vi.mock('@/lib/auth', () => ({ signOutNow: vi.fn() }));
+// X1 が削除フローを AccountDeletionFlow へ抽出した。ここを差し替えないと
+// 実物が @/lib/firebase を読み込み、API キー未設定でモジュール読込ごと落ちる。
+vi.mock('./AccountDeletionFlow', () => ({
+    useAccountDeletionFlow: () => ({ beginAccountDeletion: vi.fn(), accountDeletionDialog: null }),
+}));
 vi.mock('@/lib/relationships', () => ({ subscribeToPendingSubordinateRelationships: vi.fn(() => vi.fn()) }));
 vi.mock('@/lib/logger', () => ({ createLogger: () => ({ error: vi.fn(), info: vi.fn(), warn: vi.fn() }) }));
 vi.mock('./AuthModal', () => ({ default: () => null }));
 vi.mock('./PasswordChangeModal', () => ({ default: () => null }));
-vi.mock('./ReauthModal', () => ({ default: () => null }));
 vi.mock('./DisplayNameModal', () => ({ default: () => null }));
 
 const { AppHeader } = await import('./AppHeader');
@@ -64,6 +68,17 @@ function anchors(html: string): Anchor[] {
         .map(match => match[0])
         .map(tag => ({ tag, href: /href="([^"]*)"/.exec(tag)?.[1] ?? '' }));
 }
+
+/** 未読件数の計算にしか使わないが、フックの実型と同じ形で作る。 */
+const systemNotification = (id: string): SystemNotification => ({
+    id,
+    title: 'お知らせ',
+    body: '本文',
+    severity: 'info',
+    published: true,
+    publishedAt: new Date('2026-08-01T00:00:00Z'),
+    publishedBy: 'admin',
+});
 
 const render = () => renderToStaticMarkup(<AppHeader />);
 
@@ -210,7 +225,7 @@ describe('AppHeader が購読エラーを捨てない (E10)', () => {
     });
 
     it('正常時は失敗表示を出さない', () => {
-        state.notifications = [{ id: 'n1' }];
+        state.notifications = [systemNotification('n1')];
         const html = render();
         expect(html).not.toContain('お知らせを取得できませんでした');
         expect(html).toContain('未読 1 件');

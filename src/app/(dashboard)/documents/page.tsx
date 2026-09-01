@@ -11,8 +11,9 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { FilePlus2 } from 'lucide-react';
+import { FilePlus2, FileText } from 'lucide-react';
 import { DocumentListSidebar } from '@/components/DocumentListSidebar';
+import { PageHeader } from '@/components/ui/PageHeader';
 import {
   DocumentDetailPanel,
   type DocumentDetailPanelHandle,
@@ -748,6 +749,11 @@ export default function DocumentsPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
+      <PageHeader
+        icon={FileText}
+        title="文書"
+        description="生成された文書の閲覧・編集・PDF出力を行います"
+      />
       {ownerChangeDraft && (
         <section
           role="alert"

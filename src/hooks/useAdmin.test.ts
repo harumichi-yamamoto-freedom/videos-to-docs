@@ -130,6 +130,7 @@ describe('useAdmin', () => {
             checkedUid: 'admin-1',
             isAdmin: true,
             loading: false,
+            retry: expect.any(Function),
         });
         expect(mocks.doc).toHaveBeenCalledWith(mocks.database, 'users', 'admin-1');
     });
@@ -147,6 +148,7 @@ describe('useAdmin', () => {
             checkedUid: 'user-1',
             isAdmin: false,
             loading: false,
+            retry: expect.any(Function),
         });
         expect(mocks.loggerError).toHaveBeenCalledWith(
             '管理者権限チェックに失敗',

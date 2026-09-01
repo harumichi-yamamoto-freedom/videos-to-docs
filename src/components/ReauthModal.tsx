@@ -4,8 +4,11 @@ import { useEffect, useState } from 'react';
 import { reauthenticateWithCredential, EmailAuthProvider, reauthenticateWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { createLogger } from '@/lib/logger';
+import { Dialog } from './ui/Dialog';
 
 const reauthModalLogger = createLogger('ReauthModal');
+
+const REAUTH_TITLE_ID = 'reauth-modal-title';
 
 export type ReauthenticationCloseReason = 'dismiss' | 'complete';
 
@@ -85,6 +88,10 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
         } else {
             attemptGuard.invalidate();
             setLoading(false);
+            // The dialog stays mounted while closed, so a parent which only
+            // flips isOpen would otherwise leave the password in its DOM.
+            setPassword('');
+            setError('');
         }
 
         return () => {
@@ -92,14 +99,15 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
         };
     }, [attemptGuard, isOpen]);
 
-    if (!isOpen) return null;
-
     const user = auth.currentUser;
-    if (!user) return null;
 
     // メール認証ユーザーかどうか
-    const isEmailProvider = user.providerData.some(p => p.providerId === 'password');
-    const isGoogleProvider = user.providerData.some(p => p.providerId === 'google.com');
+    const isEmailProvider = Boolean(
+        user?.providerData.some(p => p.providerId === 'password'),
+    );
+    const isGoogleProvider = Boolean(
+        user?.providerData.some(p => p.providerId === 'google.com'),
+    );
 
     const handleDismiss = () => {
         if (!canDismissReauthentication(loading)) return;
@@ -114,6 +122,8 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
         provider: 'email' | 'google',
         reauthenticate: () => Promise<unknown>,
     ) => {
+        if (!user) return;
+
         const attemptToken = attemptGuard.begin();
         let reauthenticationCompleted = false;
 
@@ -148,6 +158,9 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
                 err,
                 { userId: user.uid, provider },
             );
+            // The attempt is over either way: a credential which failed, or one
+            // which already did its job, must not stay in the DOM.
+            setPassword('');
             setError(
                 reauthenticationCompleted
                     ? '認証後の処理を完了できませんでした。もう一度お試しください。'
@@ -164,7 +177,7 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
         event.preventDefault();
 
         await runReauthentication('email', async () => {
-            if (!user.email) {
+            if (!user?.email) {
                 throw new Error('auth/email-unavailable');
             }
 
@@ -174,22 +187,25 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
     };
 
     const handleGoogleReauth = async () => {
+        if (!user) return;
+
         await runReauthentication('google', () =>
             reauthenticateWithPopup(user, new GoogleAuthProvider()),
         );
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="reauth-modal-title"
-                aria-busy={loading}
-                className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl"
-            >
-                <div className="flex justify-between items-center mb-4">
-                    <h2 id="reauth-modal-title" className="text-xl font-bold text-red-600">
+        <Dialog
+            isOpen={isOpen && Boolean(user)}
+            onClose={handleDismiss}
+            dismissible={canDismissReauthentication(loading)}
+            aria-labelledby={REAUTH_TITLE_ID}
+            aria-busy={loading}
+            className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-hidden rounded-lg border-0 bg-white shadow-xl"
+        >
+            <div className="flex max-h-[calc(100dvh-2rem)] min-h-0 flex-col p-6">
+                <div className="mb-4 flex items-center justify-between">
+                    <h2 id={REAUTH_TITLE_ID} className="text-xl font-bold text-red-600">
                         セキュリティ確認
                     </h2>
                     <button
@@ -197,20 +213,20 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
                         onClick={handleDismiss}
                         disabled={loading}
                         aria-label="再認証画面を閉じる"
-                        className="text-gray-500 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-xl text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                        ✕
+                        <span aria-hidden="true">✕</span>
                     </button>
                 </div>
 
-                <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded">
+                <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-3">
                     <p className="text-sm text-amber-900">
                         アカウント削除などの重要な操作を行うには、再認証が必要です。
                     </p>
                 </div>
 
                 {error && (
-                    <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
+                    <div role="alert" className="mb-4 rounded bg-red-100 p-3 text-red-700">
                         {error}
                     </div>
                 )}
@@ -218,16 +234,19 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
                 {isEmailProvider ? (
                     <form onSubmit={handleEmailReauth} className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium mb-1">
+                            <label htmlFor="reauth-password" className="mb-1 block text-sm font-medium text-gray-800">
                                 現在のパスワードを入力してください
                             </label>
                             <input
+                                id="reauth-password"
+                                data-dialog-initial-focus
                                 type="password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 disabled={loading}
-                                className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                className="min-h-11 w-full rounded-lg border border-gray-300 px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-blue-700"
                                 placeholder="現在のパスワード"
+                                autoComplete="current-password"
                                 required
                             />
                         </div>
@@ -237,14 +256,14 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
                                 type="button"
                                 onClick={handleDismiss}
                                 disabled={loading}
-                                className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="min-h-11 flex-1 rounded-lg border border-gray-400 px-4 py-2 font-medium text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 キャンセル
                             </button>
                             <button
                                 type="submit"
                                 disabled={loading}
-                                className="flex-1 bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 disabled:bg-gray-400"
+                                className="min-h-11 flex-1 rounded-lg bg-blue-700 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-500"
                             >
                                 {loading ? '処理中...' : '確認'}
                             </button>
@@ -252,16 +271,18 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
                     </form>
                 ) : isGoogleProvider ? (
                     <div className="space-y-4">
-                        <p className="text-sm text-gray-600 mb-4">
+                        <p className="mb-4 text-sm text-gray-600">
                             Googleアカウントで再度ログインして確認してください。
                         </p>
 
                         <button
+                            type="button"
+                            data-dialog-initial-focus
                             onClick={handleGoogleReauth}
                             disabled={loading}
-                            className="w-full border border-gray-300 py-2 rounded-lg hover:bg-gray-50 disabled:bg-gray-100 flex items-center justify-center gap-2"
+                            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-gray-300 py-2 text-gray-800 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:opacity-60"
                         >
-                            <svg className="w-5 h-5" viewBox="0 0 24 24">
+                            <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24">
                                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                                 <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
                                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
@@ -274,26 +295,27 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
                             type="button"
                             onClick={handleDismiss}
                             disabled={loading}
-                            className="w-full rounded-lg border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="min-h-11 w-full rounded-lg border border-gray-400 px-4 py-2 font-medium text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             キャンセル
                         </button>
                     </div>
                 ) : (
                     <div>
-                        <p className="text-sm text-gray-600 mb-4">
+                        <p className="mb-4 text-sm text-gray-600">
                             このアカウントの認証方法が不明です。
                         </p>
                         <button
                             type="button"
+                            data-dialog-initial-focus
                             onClick={handleDismiss}
-                            className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+                            className="min-h-11 w-full rounded-lg bg-gray-700 px-4 py-2 font-medium text-white transition-colors hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
                         >
                             閉じる
                         </button>
                     </div>
                 )}
             </div>
-        </div>
+        </Dialog>
     );
 }

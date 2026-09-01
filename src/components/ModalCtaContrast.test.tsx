@@ -12,6 +12,7 @@ import { ContentEditModal } from './ContentEditModal';
 import DisplayNameModal from './DisplayNameModal';
 import { NotificationDetailModal } from './NotificationDetailModal';
 import PasswordChangeModal from './PasswordChangeModal';
+import ReauthModal from './ReauthModal';
 import { PromptCreateModal } from './PromptCreateModal';
 import { PromptEditModal } from './PromptEditModal';
 import { AdminNotificationCreateModal } from './admin/AdminNotificationCreateModal';
@@ -27,12 +28,22 @@ vi.mock('@/lib/auth', () => ({
 
 vi.mock('firebase/auth', () => ({
     EmailAuthProvider: { credential: vi.fn() },
+    GoogleAuthProvider: vi.fn(),
     reauthenticateWithCredential: vi.fn(),
+    reauthenticateWithPopup: vi.fn(),
     updatePassword: vi.fn(),
 }));
 
+// ReauthModal only renders for a signed-in user, and picks its form from the
+// provider list.
 vi.mock('@/lib/firebase', () => ({
-    auth: { currentUser: null },
+    auth: {
+        currentUser: {
+            uid: 'user-1',
+            email: 'user@example.com',
+            providerData: [{ providerId: 'password' }],
+        },
+    },
 }));
 
 vi.mock('@/lib/auditLog', () => ({
@@ -205,6 +216,10 @@ const MODALS: readonly [string, React.ReactElement][] = [
         />,
     ],
     [
+        'ReauthModal',
+        <ReauthModal key="reauth" isOpen onClose={vi.fn()} onSuccess={vi.fn()} />,
+    ],
+    [
         'DefaultPromptEditModal',
         <DefaultPromptEditModal
             key="default-prompt"
@@ -222,9 +237,7 @@ const MODALS: readonly [string, React.ReactElement][] = [
  * Modals which deliberately do not use the shared Dialog yet. Each entry needs
  * a reason, and disappears as the modal migrates.
  */
-const NOT_ON_SHARED_DIALOG: Record<string, string> = {
-    'ReauthModal.tsx': '統合時のX1版で共通Dialogへ移行予定（別便）',
-};
+const NOT_ON_SHARED_DIALOG: Record<string, string> = {};
 
 function buttonsOf(element: React.ReactElement): HTMLButtonElement[] {
     const template = document.createElement('template');

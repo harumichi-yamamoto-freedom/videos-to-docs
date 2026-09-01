@@ -20,9 +20,10 @@ vi.mock('@/components/ui/Button', () => ({
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: routerPush }) }));
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: { uid: 'u1' }, loading: false }) }));
-vi.mock('@/hooks/useAdmin', () => ({
-    useAdmin: () => ({ isAdmin: true, loading: false, error: null, retry: vi.fn() }),
-}));
+vi.mock('@/hooks/useAdmin', async () => {
+    const { adminAccessResult } = await import('@/testUtils/hookResults');
+    return { useAdmin: () => adminAccessResult('allowed') };
+});
 vi.mock('@/components/admin/AuditLogPanel', () => ({ default: () => null }));
 vi.mock('@/components/admin/SettingsPanel', () => ({ default: () => null }));
 vi.mock('@/components/admin/UsersPanel', () => ({ default: () => null }));

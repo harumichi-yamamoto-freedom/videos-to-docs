@@ -40,7 +40,7 @@ const SEVERITY_STYLE: Record<SystemNotification['severity'], {
 
 export const NotificationBanner: React.FC = () => {
     const { user } = useAuth();
-    const { bannerNotifications, loading, error, stale, retry } = useSystemNotifications();
+    const { bannerNotifications, loading, error, stale, retrying, retry } = useSystemNotifications();
 
     if (loading) return null;
     if (!error && bannerNotifications.length === 0) return null;
@@ -63,12 +63,18 @@ export const NotificationBanner: React.FC = () => {
                 >
                     <AlertTriangle className="h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
                     <p className="min-w-0 flex-1 text-sm text-status-warning">
-                        {stale
+                        {stale && bannerNotifications.length > 0
                             ? 'お知らせを更新できませんでした。表示中の内容は最新ではない可能性があります。'
                             : 'お知らせを取得できませんでした。'}
                     </p>
-                    <Button variant="secondary" onClick={retry} className="shrink-0">
-                        再試行
+                    {/* 再取得中に押し直せると、何度も購読を張り直して状況が読めなくなる。 */}
+                    <Button
+                        variant="secondary"
+                        onClick={retry}
+                        disabled={retrying}
+                        className="shrink-0"
+                    >
+                        {retrying ? '再試行しています...' : '再試行'}
                     </Button>
                 </div>
             )}

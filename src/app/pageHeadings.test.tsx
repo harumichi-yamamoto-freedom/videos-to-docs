@@ -13,25 +13,20 @@ import { renderToStaticMarkup } from 'react-dom/server';
 const state = vi.hoisted(() => ({
     user: { uid: 'u1' } as { uid: string } | null,
     authLoading: false,
-    isAdmin: true,
-    adminLoading: false,
-    adminError: null as Error | null,
+    adminStatus: 'allowed' as 'checking' | 'allowed' | 'denied' | 'error',
     teamView: 'view=subordinates',
 }));
 
 vi.mock('next/navigation', () => ({
     useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
     useSearchParams: () => new URLSearchParams(state.teamView),
+    usePathname: () => '/documents',
 }));
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: state.user, loading: state.authLoading }) }));
-vi.mock('@/hooks/useAdmin', () => ({
-    useAdmin: () => ({
-        isAdmin: state.isAdmin,
-        loading: state.adminLoading,
-        error: state.adminError,
-        retry: vi.fn(),
-    }),
-}));
+vi.mock('@/hooks/useAdmin', async () => {
+    const { adminAccessResult } = await import('@/testUtils/hookResults');
+    return { useAdmin: () => adminAccessResult(state.adminStatus) };
+});
 vi.mock('@/components/admin/AuditLogPanel', () => ({ default: () => <div>監査ログ</div> }));
 vi.mock('@/components/admin/SettingsPanel', () => ({ default: () => <div>設定</div> }));
 vi.mock('@/components/admin/UsersPanel', () => ({ default: () => <div>ユーザー</div> }));
@@ -39,24 +34,74 @@ vi.mock('@/components/admin/AudioFilesPanel', () => ({ default: () => <div>音�
 vi.mock('@/components/admin/SystemNotificationPanel', () => ({ default: () => <div>通知</div> }));
 vi.mock('@/components/team/TeamPanel', () => ({ TeamPanel: () => <div>チームパネル</div> }));
 
+// --- /home を描画するための最小モック（X2 レーンの page.test.tsx と同じ形） ---
+vi.mock('@/hooks/usePromptManagement', () => ({
+    usePromptManagement: () => ({
+        data: [], availablePrompts: [], status: 'success', error: null,
+        retry: vi.fn(), reloadPrompts: vi.fn(),
+        bulkSelectedPromptIds: [], toggleBulkPrompt: vi.fn(),
+    }),
+}));
+vi.mock('@/hooks/useFileManagement', () => ({
+    useFileManagement: () => ({
+        selectedFiles: [], handleFilesSelected: vi.fn(), handleRemoveFile: vi.fn(),
+        toggleFilePrompt: vi.fn(), clearFiles: vi.fn(), cleanupDeletedPrompts: vi.fn(),
+    }),
+}));
+vi.mock('@/hooks/useVideoProcessing', () => ({
+    useVideoProcessing: () => ({
+        processingStatuses: [], setProcessingStatuses: vi.fn(),
+        isProcessing: false, setIsProcessing: vi.fn(),
+        ffmpegLoaded: false, setFfmpegLoaded: vi.fn(),
+        converterRef: { current: null }, geminiClientRef: { current: null },
+        audioConversionQueueRef: { current: false },
+        processTranscription: vi.fn(), processTranscriptionResume: vi.fn(),
+        activeJobIds: [], hasActiveJobs: false,
+        pendingSaveCount: 0, needsDiscardConfirm: false,
+        pendingSavesForFile: () => 0, needsRemovalConfirm: () => false,
+        isCanceling: false, claimJob: vi.fn(), cancelJob: vi.fn(), markJobCanceled: vi.fn(),
+        resetProcessing: vi.fn(), forceDiscardProcessing: vi.fn(), countPendingSaves: vi.fn(() => 0),
+    }),
+}));
+vi.mock('@/hooks/useProcessingWorkflow', () => ({
+    useProcessingWorkflow: () => ({
+        handleStartProcessing: vi.fn(), handleResumeFile: vi.fn(),
+        workflowError: null, clearWorkflowError: vi.fn(), reportWorkflowError: vi.fn(),
+    }),
+}));
+vi.mock('@/components/PromptListSidebar', () => ({ PromptListSidebar: () => null }));
+vi.mock('@/components/prompts/PromptModals', () => ({ PromptModals: () => null }));
+vi.mock('@/components/NotificationBanner', () => ({ NotificationBanner: () => null }));
+vi.mock('@/components/DebugControls', () => ({ DebugControls: () => null }));
+vi.mock('@/lib/logger', () => ({ createLogger: () => ({ error: vi.fn(), info: vi.fn(), warn: vi.fn() }) }));
+
+// --- /documents を描画するための最小モック ---
+vi.mock('@/components/DocumentListSidebar', () => ({ DocumentListSidebar: () => null }));
+vi.mock('@/components/DocumentDetailPanel', () => ({ DocumentDetailPanel: () => null }));
+vi.mock('@/lib/firestore', () => ({
+    restoreTranscription: vi.fn(),
+    updateTranscription: vi.fn(),
+}));
+
 const AdminPage = (await import('./admin/page')).default;
 const TeamPage = (await import('./(dashboard)/team/page')).default;
+const HomePage = (await import('./(dashboard)/home/page')).default;
+const DocumentsPage = (await import('./(dashboard)/documents/page')).default;
 
 /** このツリーで見出しを適用済みのページ。実際に描画して h1 を数える。 */
 const APPLIED_PAGES: { name: string; render: () => string }[] = [
     { name: '/admin', render: () => renderToStaticMarkup(<AdminPage />) },
     { name: '/team', render: () => renderToStaticMarkup(<TeamPage />) },
+    { name: '/home', render: () => renderToStaticMarkup(<HomePage />) },
+    { name: '/documents', render: () => renderToStaticMarkup(<DocumentsPage />) },
 ];
 
 /**
- * 🔴 統合チェックリスト項目: 統合ツリーではこの 2 件を APPLIED_PAGES へ移すこと。
- * 移すまで、この錠は全ページを覆っていない。移動は 1 行で済む形にしてある。
- * ここを空にせずに「見出しは全ページ対応済み」と記録してはならない。
+ * 統合待ちのページ置き場。統合で全ページが APPLIED_PAGES へ移り、現在は空。
+ * 新しいページを他レーンが持ち込んだときは、描画して h1 を数えられるように
+ * なるまでここへ理由つきで置く。空でない間、この錠は全ページを覆っていない。
  */
-const INTEGRATION_PENDING_PAGES = [
-    { name: '/home', reason: 'X2 レーンが R11 で適用済み・このツリーからは見えない' },
-    { name: '/documents', reason: '凍結中の X3 レーン所有・統合時に lead が適用' },
-] as const;
+const INTEGRATION_PENDING_PAGES: { name: string; reason: string }[] = [];
 
 /** 見出しを自前で持っており PageHeader 経由でないページ。 */
 const SELF_HEADED_PAGES = [
@@ -71,9 +116,7 @@ const NO_HEADING_REQUIRED = [
 beforeEach(() => {
     state.user = { uid: 'u1' };
     state.authLoading = false;
-    state.isAdmin = true;
-    state.adminLoading = false;
-    state.adminError = null;
+    state.adminStatus = 'allowed';
     state.teamView = 'view=subordinates';
 });
 
@@ -108,16 +151,23 @@ describe('見出しの覆い範囲 (Y11)', () => {
         expect(unaccounted, `名簿に無いルート: ${unaccounted.join(', ')}`).toEqual([]);
     });
 
-    it('統合待ちが残っている間は「全ページ適用済み」と記録しない', () => {
-        // このツリーで描画して確かめられているのは APPLIED_PAGES だけ。
-        // 統合で 2 件を移した時点で、ここが 0 件になり錠が全ページを覆う。
-        const pending = INTEGRATION_PENDING_PAGES.map(page => page.name);
-        expect(pending.length, '統合待ちが 0 件なら APPLIED_PAGES 側へ移動済みのはず').toBeGreaterThan(0);
+    it('見出しを持つべきページはすべて実際に描画して数えている', () => {
+        // 統合完了時点で統合待ちは 0 件。ここに何か積まれている間は、
+        // その分だけ錠が覆えていないので理由が要る。
         for (const page of INTEGRATION_PENDING_PAGES) {
             expect(page.reason.length, `${page.name} に理由が無い`).toBeGreaterThan(0);
         }
-        expect(APPLIED_PAGES.map(page => page.name)).not.toContain('/home');
-        expect(APPLIED_PAGES.map(page => page.name)).not.toContain('/documents');
+
+        const rendered = new Set<string>(APPLIED_PAGES.map(page => page.name));
+        const selfHeaded = new Set<string>(SELF_HEADED_PAGES.map(page => page.name));
+        const exempt = new Set<string>(NO_HEADING_REQUIRED.map(page => page.name));
+        const pending = new Set<string>(INTEGRATION_PENDING_PAGES.map(page => page.name));
+
+        const uncovered = routePagesOnDisk()
+            .filter(route => !exempt.has(route) && !selfHeaded.has(route))
+            .filter(route => !rendered.has(route));
+        expect(uncovered, `描画検査から漏れているルート: ${uncovered.join(', ')}`)
+            .toEqual([...pending].filter(route => uncovered.includes(route)));
     });
 
     it('自前見出しのページは実際に h1 を持っている', () => {
@@ -156,16 +206,14 @@ describe('適用済みページの見出し (Y1)', () => {
 
     it('/admin はどの権限状態でも h1 を保つ', () => {
         for (const setup of [
-            () => { state.adminLoading = true; },
-            () => { state.adminError = new Error('x'); },
-            () => { state.isAdmin = false; },
+            () => { state.adminStatus = 'checking'; },
+            () => { state.adminStatus = 'error'; },
+            () => { state.adminStatus = 'denied'; },
             () => { state.user = null; },
         ]) {
             state.user = { uid: 'u1' };
             state.authLoading = false;
-            state.isAdmin = true;
-            state.adminLoading = false;
-            state.adminError = null;
+            state.adminStatus = 'allowed';
             setup();
             expect(renderToStaticMarkup(<AdminPage />).match(/<h1\b/g) ?? []).toHaveLength(1);
         }

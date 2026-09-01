@@ -10,21 +10,15 @@ const retryAdminCheck = vi.hoisted(() => vi.fn());
 const state = vi.hoisted(() => ({
     user: { uid: 'u1' } as { uid: string } | null,
     authLoading: false,
-    isAdmin: true,
-    adminLoading: false,
-    adminError: null as Error | null,
+    adminStatus: 'allowed' as 'checking' | 'allowed' | 'denied' | 'error',
 }));
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: routerPush }) }));
 vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user: state.user, loading: state.authLoading }) }));
-vi.mock('@/hooks/useAdmin', () => ({
-    useAdmin: () => ({
-        isAdmin: state.isAdmin,
-        loading: state.adminLoading,
-        error: state.adminError,
-        retry: retryAdminCheck,
-    }),
-}));
+vi.mock('@/hooks/useAdmin', async () => {
+    const { adminAccessResult } = await import('@/testUtils/hookResults');
+    return { useAdmin: () => adminAccessResult(state.adminStatus, { retry: retryAdminCheck }) };
+});
 vi.mock('@/components/admin/AuditLogPanel', () => ({ default: () => <div>監査ログパネル</div> }));
 vi.mock('@/components/admin/SettingsPanel', () => ({ default: () => <div>設定パネル</div> }));
 vi.mock('@/components/admin/UsersPanel', () => ({ default: () => <div>ユーザーパネル</div> }));
@@ -40,9 +34,7 @@ beforeEach(() => {
     retryAdminCheck.mockClear();
     state.user = { uid: 'u1' };
     state.authLoading = false;
-    state.isAdmin = true;
-    state.adminLoading = false;
-    state.adminError = null;
+    state.adminStatus = 'allowed';
 });
 
 describe('管理者画面のタブ (E6)', () => {
@@ -103,14 +95,14 @@ describe('管理者画面のタブ (E6)', () => {
 
 describe('管理者画面が checking / error / denied を区別する (E11)', () => {
     it('確認中は「確認しています」と伝える（無言の空画面にしない）', () => {
-        state.adminLoading = true;
+        state.adminStatus = 'checking';
         const html = render();
         expect(html).toContain('権限を確認しています');
         expect(html).not.toContain('role="tablist"');
     });
 
     it('権限確認が失敗したら、権限なし扱いにせず再試行の出口を出す', () => {
-        state.adminError = new Error('unavailable');
+        state.adminStatus = 'error';
         const html = render();
 
         expect(html).toContain('権限を確認できませんでした');
@@ -120,7 +112,7 @@ describe('管理者画面が checking / error / denied を区別する (E11)', (
     });
 
     it('権限不足は 403 相当の説明を出す（無言でホームへ送り返さない）', () => {
-        state.isAdmin = false;
+        state.adminStatus = 'denied';
         const html = render();
 
         expect(html).toContain('この画面を表示する権限がありません');
@@ -130,7 +122,7 @@ describe('管理者画面が checking / error / denied を区別する (E11)', (
 
     it('未認証はログイン導線を出す（画面上にある操作だけを案内する）', () => {
         state.user = null;
-        state.isAdmin = false;
+        state.adminStatus = 'denied';
         const html = render();
 
         expect(html).toContain('ログインが必要です');
@@ -142,23 +134,23 @@ describe('管理者画面が checking / error / denied を区別する (E11)', (
 
     it('案内は読み上げを中断しない / 失敗と拒否だけが alert (Y10)', () => {
         state.user = null;
-        state.isAdmin = false;
+        state.adminStatus = 'denied';
         expect(render()).toContain('role="status"');
 
         beforeEachState();
-        state.adminError = new Error('unavailable');
+        state.adminStatus = 'error';
         expect(render()).toContain('role="alert"');
 
         beforeEachState();
-        state.isAdmin = false;
+        state.adminStatus = 'denied';
         expect(render()).toContain('role="alert"');
     });
 
     it('どの状態でも見出しを失わない (E4)', () => {
         for (const setup of [
-            () => { state.adminLoading = true; },
-            () => { state.adminError = new Error('x'); },
-            () => { state.isAdmin = false; },
+            () => { state.adminStatus = 'checking'; },
+            () => { state.adminStatus = 'error'; },
+            () => { state.adminStatus = 'denied'; },
             () => { state.user = null; },
             () => { },
         ]) {
@@ -174,7 +166,5 @@ describe('管理者画面が checking / error / denied を区別する (E11)', (
 function beforeEachState() {
     state.user = { uid: 'u1' };
     state.authLoading = false;
-    state.isAdmin = true;
-    state.adminLoading = false;
-    state.adminError = null;
+    state.adminStatus = 'allowed';
 }

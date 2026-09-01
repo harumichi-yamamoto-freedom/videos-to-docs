@@ -63,7 +63,7 @@ const StateCard: React.FC<{
 export default function AdminPage() {
     const router = useRouter();
     const { user, loading: authLoading } = useAuth();
-    const { isAdmin, loading: adminLoading, error: adminError, retry: retryAdminCheck } = useAdmin();
+    const { status: adminStatus, isAdmin, loading: adminLoading, retry: retryAdminCheck } = useAdmin();
     const [activeTab, setActiveTab] = useState<Tab>('audit');
     const settingsPanelRef = useRef<SettingsPanelRef>(null);
     const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
@@ -156,7 +156,7 @@ export default function AdminPage() {
 
     // 権限の判定に失敗した状態を「権限なし」へ畳み込むと、正規の管理者が
     // 一時障害で締め出される。再試行の出口を必ず出す。
-    if (adminError) {
+    if (adminStatus === 'error') {
         return (
             <>
                 {header}

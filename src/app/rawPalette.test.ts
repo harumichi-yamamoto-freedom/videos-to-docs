@@ -38,6 +38,8 @@ const ALLOWED: { file: string; utility: string; reason: string }[] = [
     { file: 'components/AppHeader.tsx', utility: 'from-blue-600', reason: 'ロゴタイルのブランド装飾グラデーション' },
     { file: 'components/AppHeader.tsx', utility: 'to-indigo-600', reason: 'ロゴタイルのブランド装飾グラデーション' },
     { file: 'components/AppHeader.tsx', utility: 'text-white', reason: 'ロゴタイルのグラデーション上に載るアイコン。地が装飾色なので役割トークンを持たない' },
+    // X4 が統合で追加した共有ダイアログ。走査対象が components/ui 全体なので自動で拾われる。
+    { file: 'components/ui/Dialog.tsx', utility: 'bg-black', reason: 'モーダルの ::backdrop スクリム(bg-black/50)。背後を覆う遮蔽であって役割色ではない' },
 ];
 
 function unallowedRawColor(file: string): string[] {
@@ -70,9 +72,11 @@ describe('生の色指定の禁止 (Y6 / Y17 / P1)', () => {
         }
     });
 
-    it('許可はブランド装飾に限る（役割を持つ地色や境界色を紛れ込ませない）', () => {
+    it('許可はブランド装飾とスクリムに限る（役割を持つ地色や境界色を紛れ込ませない）', () => {
+        // 装飾グラデーション / 装飾上の前景 / 遮蔽スクリム の 3 種だけを許す。
+        const ALLOWED_SHAPES = /^(?:from|to|via)-|^text-white$|^bg-black$/;
         for (const entry of ALLOWED) {
-            expect(entry.utility, entry.utility).toMatch(/^(?:from|to|via)-|^text-white$/);
+            expect(entry.utility, entry.utility).toMatch(ALLOWED_SHAPES);
         }
     });
 

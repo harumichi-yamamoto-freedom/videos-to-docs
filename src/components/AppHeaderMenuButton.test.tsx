@@ -36,24 +36,28 @@ vi.mock('@/hooks/useAuth', () => ({
         loading: false,
     }),
 }));
-vi.mock('@/hooks/useAdmin', () => ({ useAdmin: () => ({ isAdmin: false, loading: false, error: null, retry: vi.fn() }) }));
-vi.mock('@/hooks/useSystemNotifications', () => ({
-    useSystemNotifications: () => ({
-        notifications: [], dismissedIds: [], loading: false, bannerNotifications: [],
-        error: null, stale: false, retry: vi.fn(),
-    }),
-}));
+vi.mock('@/hooks/useAdmin', async () => {
+    const { adminAccessResult } = await import('@/testUtils/hookResults');
+    return { useAdmin: () => adminAccessResult('denied') };
+});
+vi.mock('@/hooks/useSystemNotifications', async () => {
+    const { systemNotificationsResult } = await import('@/testUtils/hookResults');
+    return { useSystemNotifications: () => systemNotificationsResult() };
+});
 vi.mock('next/navigation', () => ({
     usePathname: () => '/home',
     useSearchParams: () => new URLSearchParams(''),
 }));
-vi.mock('@/lib/auth', () => ({ signOutNow: vi.fn(), deleteAccount: vi.fn() }));
-vi.mock('@/lib/accountDeletion', () => ({ getUserDeletionInfo: vi.fn() }));
+vi.mock('@/lib/auth', () => ({ signOutNow: vi.fn() }));
+// X1 が削除フローを AccountDeletionFlow へ抽出した。ここを差し替えないと
+// 実物が @/lib/firebase を読み込み、API キー未設定でモジュール読込ごと落ちる。
+vi.mock('./AccountDeletionFlow', () => ({
+    useAccountDeletionFlow: () => ({ beginAccountDeletion: vi.fn(), accountDeletionDialog: null }),
+}));
 vi.mock('@/lib/relationships', () => ({ subscribeToPendingSubordinateRelationships: vi.fn(() => vi.fn()) }));
 vi.mock('@/lib/logger', () => ({ createLogger: () => ({ error: vi.fn(), info: vi.fn(), warn: vi.fn() }) }));
 vi.mock('./AuthModal', () => ({ default: () => null }));
 vi.mock('./PasswordChangeModal', () => ({ default: () => null }));
-vi.mock('./ReauthModal', () => ({ default: () => null }));
 vi.mock('./DisplayNameModal', () => ({ default: () => null }));
 
 const { AppHeader } = await import('./AppHeader');
