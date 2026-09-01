@@ -46,14 +46,31 @@ export interface GeminiModelOption {
     benchmark?: GeminiModelBenchmark;
 }
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash';
 
 // 配列順 = ドロップダウン・比較表での表示順。新しい世代のモデルを上に並べる。
 export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
     {
+        value: 'gemini-3.7-flash',
+        label: 'Gemini 3.7 Flash',
+        description: 'Google推奨の現行フラッグシップFlash（2026-08 GA）。動画・音声・PDF入力対応、1Mコンテキスト。3.5 Flashより高速・低価格',
+        // ⚠️ プロモ価格: 2026-12-31まで。2027-01-01から入力$1.50/出力$7.50に倍額（公式料金表に明記）。
+        pricing: {
+            inputPerMTok: 0.75,
+            outputPerMTok: 3.75,
+        },
+        benchmark: {
+            recognitionQuality: 5,
+            analysisQuality: 5,
+            // 出力 ≈315-340 tok/s（Artificial Analysis実測）・思考は既定OFFのため 3.5 Flash より短い見積もり
+            estimatedSeconds: 40,
+            recommendedFor: '動画・音声→文書の総合おすすめ。現行の既定モデル',
+        },
+    },
+    {
         value: 'gemini-3.5-flash',
         label: 'Gemini 3.5 Flash',
-        description: '3.1 Proを超えるコーディング・エージェント性能を実現しつつ高速・低コスト化。1Mコンテキスト対応の最新Flash世代',
+        description: '3.1 Proを超えるコーディング・エージェント性能を実現しつつ高速・低コスト化した前世代Flash。1Mコンテキスト対応',
         pricing: {
             inputPerMTok: 1.5,
             outputPerMTok: 9.0,
@@ -63,6 +80,21 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             analysisQuality: 5,
             estimatedSeconds: 60,
             recommendedFor: '動画・音声→文書の総合おすすめ。品質最高クラス',
+        },
+    },
+    {
+        value: 'gemini-3.5-flash-lite',
+        label: 'Gemini 3.5 Flash Lite',
+        description: '3.5世代の軽量モデル。テキスト・画像・動画・音声とも同一単価で、大量処理を低コストに実行',
+        pricing: {
+            inputPerMTok: 0.3,
+            outputPerMTok: 2.5,
+        },
+        benchmark: {
+            recognitionQuality: 3,
+            analysisQuality: 3,
+            estimatedSeconds: 30,
+            recommendedFor: '大量バッチ処理・コスト重視の運用',
         },
     },
     {

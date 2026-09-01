@@ -59,11 +59,12 @@ WebAssembly (FFmpeg.wasm) とGemini AIを使用して、ブラウザ内で動画
   - 試験的な機能のため、標準の音声変換方式を推奨
 - **簡単に無効化可能**: コード内の🎬絵文字でマークされた部分をコメントアウトまたは削除するだけで機能を除去できます
 
-### 🤖 AI文書生成（Gemini 2.5/3.0モデル）
+### 🤖 AI文書生成（Gemini 2.5〜3.7モデル）
 - **複数のGeminiモデルに対応**:
-  - Gemini 2.5 Flash: 高速・低コストの標準モデル
-  - Gemini 2.5 Flash Lite: 軽量・超高速でドラフト生成や大量処理向け
-  - Gemini 3 Pro (Preview): 最新の高精度モデル
+  - Gemini 3.7 Flash: 現行フラッグシップFlash（既定モデル）
+  - Gemini 3.5 Flash / 3.5 Flash Lite: 高性能・軽量の3.5世代
+  - Gemini 3.1 Pro (Preview): 最高難度の推論向け
+  - Gemini 2.5 Flash / Flash Lite / Pro: 安定・低コストの旧世代
 - **プロンプトごとのモデル選択**: 各プロンプトに最適なモデルを個別に指定可能
 - **カスタマイズ可能なプロンプト**:
   - デフォルト4種類（詳細な文字起こし、議事録形式、要約のみ、学習ノート形式）
@@ -97,10 +98,10 @@ WebAssembly (FFmpeg.wasm) とGemini AIを使用して、ブラウザ内で動画
 - **フロントエンド**: Next.js 15 (App Router) + React 19 + TypeScript
 - **スタイリング**: Tailwind CSS v4
 - **動画変換**: FFmpeg.wasm (WebAssembly) - ブラウザ内で動画から音声を抽出
-- **AI処理**: Google Gemini 2.5/3.0モデル - 音声認識と文書生成
-  - Gemini 2.5 Flash: 高速・低コスト
-  - Gemini 2.5 Flash Lite: 軽量・超高速
-  - Gemini 3 Pro (Preview): 最新・高精度
+- **AI処理**: Google Gemini 2.5〜3.7モデル - 音声認識と文書生成
+  - Gemini 3.7 Flash: 現行フラッグシップFlash（既定）
+  - Gemini 3.5 Flash / Flash Lite: 高性能・軽量
+  - Gemini 3.1 Pro (Preview) / 2.5系: 高精度・低コストの選択肢
 - **認証**: Firebase Authentication - メール/パスワード、Google認証
 - **データベース**: Firebase Firestore - 文書・プロンプト・ユーザー管理
 - **アイコン**: Lucide React

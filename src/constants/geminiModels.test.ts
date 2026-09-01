@@ -11,6 +11,7 @@ describe('geminiModels', () => {
         it('既知のモデル ID から表示用ラベルを返す', () => {
             expect(getGeminiModelLabel('gemini-2.5-flash')).toBe('Gemini 2.5 Flash');
             expect(getGeminiModelLabel('gemini-3.5-flash')).toBe('Gemini 3.5 Flash');
+            expect(getGeminiModelLabel('gemini-3.7-flash')).toBe('Gemini 3.7 Flash');
         });
 
         it('未知のモデル ID は入力をそのまま返す', () => {
@@ -22,6 +23,9 @@ describe('geminiModels', () => {
         it('入力/出力価格を USD 表記で返す', () => {
             expect(getGeminiPricingLabelShort('gemini-2.5-flash')).toBe(
                 '入力 $0.30 / 出力 $2.50',
+            );
+            expect(getGeminiPricingLabelShort('gemini-3.7-flash')).toBe(
+                '入力 $0.75 / 出力 $3.75',
             );
         });
 
