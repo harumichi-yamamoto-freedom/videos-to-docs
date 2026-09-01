@@ -1,1 +1,547 @@
-/* Rich theme placeholder. Decorative rules will be added by the rich-theme task. */
+/*
+ * Rich theme
+ * Deep, restrained color accents keep meeting documents lively without
+ * making color the only carrier of hierarchy.
+ */
+
+.pdf-print-root.pdf-theme-rich .pdf-document {
+  --pdf-rich-ink: #202331;
+  --pdf-rich-ink-soft: #454d5e;
+  --pdf-rich-navy: #263b63;
+  --pdf-rich-indigo: #554a86;
+  --pdf-rich-plum: #7a405f;
+  --pdf-rich-teal: #1f6b68;
+  --pdf-rich-gold: #8b5a20;
+  --pdf-rich-berry: #91475a;
+  --pdf-rich-paper: #ffffff;
+  --pdf-rich-navy-tint: #f1f4f8;
+  --pdf-rich-plum-tint: #f6eff4;
+  --pdf-rich-teal-tint: #eef6f4;
+  --pdf-rich-gold-tint: #fbf4e8;
+  --pdf-rich-berry-tint: #f8eef1;
+  --pdf-rich-rule: #c8ced8;
+  --pdf-rich-rule-soft: #e4e7ed;
+  --pdf-rich-rule-strong: #9ca7b8;
+  --pdf-rich-spectrum: linear-gradient(
+    90deg,
+    #263b63 0%,
+    #554a86 28%,
+    #7a405f 52%,
+    #1f6b68 76%,
+    #8b5a20 100%
+  );
+  --pdf-rich-spectrum-vertical: linear-gradient(
+    180deg,
+    #263b63 0%,
+    #7a405f 48%,
+    #1f6b68 100%
+  );
+
+  color: var(--pdf-rich-ink);
+  background: var(--pdf-rich-paper);
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 10.2pt;
+  font-weight: 400;
+  line-height: 1.78;
+  letter-spacing: 0.012em;
+  font-kerning: normal;
+}
+
+/* Document title: a dark typographic anchor with a restrained spectrum rail. */
+.pdf-print-root.pdf-theme-rich .pdf-document__header {
+  position: relative;
+  margin: 0 0 10mm;
+  padding: 5mm 0 0;
+  border-top: 0.35mm solid var(--pdf-rich-ink);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-document__header::before {
+  content: "";
+  position: absolute;
+  top: -0.8mm;
+  left: 0;
+  width: 58mm;
+  height: 1.25mm;
+  border: 0.18mm solid var(--pdf-rich-ink-soft);
+  border-radius: 0 1mm 1mm 0;
+  background: var(--pdf-rich-spectrum);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-document__title {
+  position: relative;
+  margin: 0 0 4.8mm;
+  padding: 0 0 3.2mm;
+  border-bottom: 0.25mm solid var(--pdf-rich-rule-strong);
+  color: var(--pdf-rich-navy);
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 25.5pt;
+  font-weight: 700;
+  line-height: 1.27;
+  letter-spacing: 0.008em;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-document__title::after {
+  content: "";
+  display: block;
+  width: 34mm;
+  height: 0.75mm;
+  margin-top: 2.8mm;
+  border-top: 0.18mm solid var(--pdf-rich-ink-soft);
+  background: var(--pdf-rich-spectrum);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-document__meta {
+  margin: 0;
+  padding: 3.4mm 4.2mm;
+  border: 0.22mm solid var(--pdf-rich-rule);
+  border-left: 0.95mm solid var(--pdf-rich-plum);
+  border-radius: 1.5mm;
+  background: linear-gradient(
+    105deg,
+    var(--pdf-rich-navy-tint) 0%,
+    var(--pdf-rich-paper) 58%,
+    var(--pdf-rich-plum-tint) 100%
+  );
+  color: var(--pdf-rich-ink-soft);
+  font-size: 8.25pt;
+  line-height: 1.55;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-document__meta dt {
+  color: var(--pdf-rich-plum);
+  font-size: 7.7pt;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-document__meta dt::before {
+  content: "";
+  display: inline-block;
+  width: 1.35mm;
+  height: 1.35mm;
+  margin-right: 1.4mm;
+  border: 0.18mm solid var(--pdf-rich-teal);
+  border-radius: 50%;
+  background: var(--pdf-rich-teal-tint);
+  vertical-align: 0.02em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-document__meta dd {
+  margin: 0;
+  color: var(--pdf-rich-ink-soft);
+}
+
+/* The content spine repeats the title palette without relying on color alone. */
+.pdf-print-root.pdf-theme-rich .pdf-markdown {
+  position: relative;
+  padding-top: 4.2mm;
+  border-top: 0.45mm solid var(--pdf-rich-ink);
+  color: var(--pdf-rich-ink);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown::before {
+  content: "";
+  position: absolute;
+  top: -0.78mm;
+  left: 0;
+  width: 58mm;
+  height: 1.1mm;
+  border: 0.18mm solid var(--pdf-rich-ink-soft);
+  border-radius: 0 1mm 1mm 0;
+  background: var(--pdf-rich-spectrum);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h1,
+.pdf-print-root.pdf-theme-rich .pdf-markdown h2,
+.pdf-print-root.pdf-theme-rich .pdf-markdown h3,
+.pdf-print-root.pdf-theme-rich .pdf-markdown h4,
+.pdf-print-root.pdf-theme-rich .pdf-markdown h5,
+.pdf-print-root.pdf-theme-rich .pdf-markdown h6 {
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-weight: 700;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h1 {
+  position: relative;
+  margin: 10.5mm 0 4.8mm;
+  padding: 3.2mm 4.3mm 3mm 5.2mm;
+  border: 0.22mm solid var(--pdf-rich-rule);
+  border-left: 1.1mm solid var(--pdf-rich-plum);
+  border-bottom-color: var(--pdf-rich-navy);
+  border-radius: 0 1.5mm 1.5mm 0;
+  background: linear-gradient(
+    100deg,
+    var(--pdf-rich-plum-tint) 0%,
+    var(--pdf-rich-paper) 62%,
+    var(--pdf-rich-navy-tint) 100%
+  );
+  color: var(--pdf-rich-navy);
+  font-size: 21.5pt;
+  line-height: 1.32;
+  letter-spacing: 0.012em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h1::after {
+  content: "";
+  display: block;
+  width: 31mm;
+  height: 0.65mm;
+  margin-top: 2.2mm;
+  border-top: 0.18mm solid var(--pdf-rich-ink-soft);
+  background: var(--pdf-rich-spectrum);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h2 {
+  position: relative;
+  margin: 8.5mm 0 3.5mm;
+  padding: 1.5mm 2.5mm 1.6mm 4.7mm;
+  border-left: 0.85mm solid var(--pdf-rich-teal);
+  border-bottom: 0.28mm solid var(--pdf-rich-rule-strong);
+  background: linear-gradient(
+    90deg,
+    var(--pdf-rich-teal-tint) 0%,
+    var(--pdf-rich-paper) 72%
+  );
+  color: var(--pdf-rich-plum);
+  font-size: 15.5pt;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h2::before {
+  content: "";
+  position: absolute;
+  top: -0.15mm;
+  bottom: -0.28mm;
+  left: -0.85mm;
+  width: 0.85mm;
+  background: var(--pdf-rich-spectrum-vertical);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h3 {
+  position: relative;
+  margin: 6.8mm 0 2.9mm;
+  padding: 0 0 1.4mm;
+  border-bottom: 0.28mm solid var(--pdf-rich-rule-strong);
+  color: var(--pdf-rich-teal);
+  font-size: 12.4pt;
+  line-height: 1.48;
+  letter-spacing: 0.03em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h3::after {
+  content: "";
+  position: absolute;
+  bottom: -0.28mm;
+  left: 0;
+  width: 25mm;
+  height: 0.72mm;
+  border-top: 0.18mm solid var(--pdf-rich-ink-soft);
+  background: var(--pdf-rich-spectrum);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h4 {
+  margin: 5.5mm 0 2.3mm;
+  padding: 0.5mm 0 0.5mm 3mm;
+  border-left: 0.6mm solid var(--pdf-rich-gold);
+  color: var(--pdf-rich-navy);
+  font-size: 10.8pt;
+  line-height: 1.55;
+  letter-spacing: 0.035em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h5 {
+  margin: 4.7mm 0 2mm;
+  padding: 0 0 0.8mm;
+  border-bottom: 0.2mm dashed var(--pdf-rich-rule-strong);
+  color: var(--pdf-rich-berry);
+  font-size: 9.8pt;
+  line-height: 1.58;
+  letter-spacing: 0.065em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h6 {
+  position: relative;
+  margin: 4.3mm 0 1.8mm;
+  padding-left: 3.2mm;
+  color: var(--pdf-rich-indigo);
+  font-size: 9.2pt;
+  line-height: 1.58;
+  letter-spacing: 0.075em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown h6::before {
+  content: "";
+  position: absolute;
+  top: 0.52em;
+  left: 0;
+  width: 1.45mm;
+  height: 1.45mm;
+  border: 0.2mm solid var(--pdf-rich-indigo);
+  background: var(--pdf-rich-navy-tint);
+  transform: rotate(45deg);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown p {
+  margin: 0 0 3.8mm;
+  color: var(--pdf-rich-ink);
+  font-size: 10.2pt;
+  line-height: 1.8;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown > p:first-child {
+  color: var(--pdf-rich-ink-soft);
+  font-size: 10.8pt;
+  line-height: 1.84;
+}
+
+/* Marker shape remains meaningful when the palette is rendered in grayscale. */
+.pdf-print-root.pdf-theme-rich .pdf-markdown ul,
+.pdf-print-root.pdf-theme-rich .pdf-markdown ol {
+  margin: 0 0 4.5mm;
+  padding-left: 1.95em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown ul {
+  list-style: disc outside;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown ol {
+  list-style: decimal outside;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul {
+  list-style-type: circle;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul ul {
+  list-style-type: square;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown li {
+  margin: 0;
+  color: var(--pdf-rich-ink);
+  line-height: 1.76;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown li + li {
+  margin-top: 1.25mm;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown ul > li::marker {
+  color: var(--pdf-rich-teal);
+  font-weight: 700;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown ol > li::marker {
+  color: var(--pdf-rich-plum);
+  font-weight: 700;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul > li::marker,
+.pdf-print-root.pdf-theme-rich .pdf-markdown ol ol > li::marker {
+  color: var(--pdf-rich-gold);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul ul > li::marker {
+  color: var(--pdf-rich-berry);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown a {
+  color: var(--pdf-rich-navy);
+  font-weight: 700;
+  text-decoration-line: underline;
+  text-decoration-color: var(--pdf-rich-teal);
+  text-decoration-thickness: 0.2mm;
+  text-underline-offset: 0.16em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown strong {
+  color: var(--pdf-rich-plum);
+  background: linear-gradient(
+    transparent 72%,
+    var(--pdf-rich-berry-tint) 72%
+  );
+  font-weight: 700;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown hr {
+  width: 42mm;
+  height: 0.9mm;
+  margin: 9mm 0;
+  border: 0;
+  border-top: 0.28mm solid var(--pdf-rich-ink-soft);
+  background: var(--pdf-rich-spectrum);
+}
+
+/* A pale header keeps table labels legible even when backgrounds are omitted. */
+.pdf-print-root.pdf-theme-rich .pdf-markdown table {
+  margin: 5.8mm 0;
+  border: 0.25mm solid var(--pdf-rich-rule-strong);
+  border-top: 0.9mm solid var(--pdf-rich-navy);
+  border-radius: 1.6mm;
+  background: var(--pdf-rich-paper);
+  color: var(--pdf-rich-ink);
+  font-size: 8.65pt;
+  line-height: 1.54;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown th,
+.pdf-print-root.pdf-theme-rich .pdf-markdown td {
+  padding: 2.15mm 2.45mm;
+  border: 0;
+  border-bottom: 0.2mm solid var(--pdf-rich-rule);
+  color: var(--pdf-rich-ink);
+  vertical-align: top;
+  text-align: left;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown thead th {
+  border-bottom: 0.65mm solid var(--pdf-rich-navy);
+  background: linear-gradient(
+    105deg,
+    var(--pdf-rich-navy-tint) 0%,
+    var(--pdf-rich-plum-tint) 50%,
+    var(--pdf-rich-teal-tint) 100%
+  );
+  color: var(--pdf-rich-navy);
+  font-size: 8.15pt;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: 0.035em;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown th + th {
+  border-left: 0.2mm solid var(--pdf-rich-rule-strong);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown td + td {
+  border-left: 0.2mm solid var(--pdf-rich-rule-soft);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown tr:nth-child(even) td {
+  background: var(--pdf-rich-navy-tint);
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown tr:last-child td {
+  border-bottom-color: transparent;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown code {
+  color: var(--pdf-rich-plum);
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-variant-ligatures: none;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown pre {
+  margin: 5.8mm 0;
+  padding: 3.8mm 4.1mm;
+  border: 0.22mm solid var(--pdf-rich-rule);
+  border-top: 0.38mm solid var(--pdf-rich-gold);
+  border-left: 1.05mm solid var(--pdf-rich-navy);
+  border-radius: 0 1.7mm 1.7mm 0;
+  background: linear-gradient(
+    105deg,
+    var(--pdf-rich-navy-tint) 0%,
+    var(--pdf-rich-paper) 100%
+  );
+  color: var(--pdf-rich-ink);
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-size: 8.2pt;
+  line-height: 1.62;
+  letter-spacing: 0;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown pre > code {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown :not(pre) > code {
+  padding: 0.28mm 1mm;
+  border: 0.2mm solid var(--pdf-rich-rule);
+  border-left: 0.6mm solid var(--pdf-rich-gold);
+  border-radius: 0 0.8mm 0.8mm 0;
+  background: var(--pdf-rich-gold-tint);
+  color: var(--pdf-rich-plum);
+  font-size: 0.88em;
+  line-height: 1;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown blockquote {
+  position: relative;
+  margin: 5.8mm 0;
+  padding: 3.7mm 4.3mm 3.5mm 10.5mm;
+  border: 0.22mm solid var(--pdf-rich-rule);
+  border-top: 0.35mm solid var(--pdf-rich-gold);
+  border-left: 1.05mm solid var(--pdf-rich-plum);
+  border-radius: 0 1.6mm 1.6mm 0;
+  background: linear-gradient(
+    105deg,
+    var(--pdf-rich-plum-tint) 0%,
+    var(--pdf-rich-paper) 58%,
+    var(--pdf-rich-teal-tint) 100%
+  );
+  color: var(--pdf-rich-ink-soft);
+  font-size: 10.35pt;
+  font-style: normal;
+  line-height: 1.76;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown blockquote::before {
+  content: "“";
+  position: absolute;
+  top: 1.6mm;
+  left: 3mm;
+  color: var(--pdf-rich-gold);
+  font-family:
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 24pt;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.pdf-print-root.pdf-theme-rich .pdf-markdown blockquote strong {
+  color: var(--pdf-rich-plum);
+}
