@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { useAdmin } from '@/hooks/useAdmin';
-import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User, Edit3, Bell } from 'lucide-react';
+import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User, Edit3, Bell, Menu, X } from 'lucide-react';
 import { signOutNow, deleteAccount } from '@/lib/auth';
 import { getUserDeletionInfo } from '@/lib/accountDeletion';
 import { createLogger } from '@/lib/logger';
@@ -37,22 +37,87 @@ export const AppHeader: React.FC = () => {
 
     const [showTeamMenu, setShowTeamMenu] = useState(false);
     const teamMenuRef = useRef<HTMLDivElement>(null);
+    const [showMobileMenu, setShowMobileMenu] = useState(false);
+    const [showMobileTeamMenu, setShowMobileTeamMenu] = useState(false);
+    const mobileMenuRef = useRef<HTMLDivElement>(null);
+    const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+    const desktopNavRef = useRef<HTMLElement>(null);
     const [pendingSubordinateCount, setPendingSubordinateCount] = useState(0);
 
-    // ドロップダウンの外側クリックで閉じる
+    // ドロップダウンの外側クリック、または Esc キーで閉じる
     useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
+        const handleClickOutside = (event: PointerEvent) => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
                 setShowDropdown(false);
             }
             if (teamMenuRef.current && !teamMenuRef.current.contains(event.target as Node)) {
                 setShowTeamMenu(false);
             }
+            if (mobileMenuRef.current && !mobileMenuRef.current.contains(event.target as Node)) {
+                const shouldRestoreFocus = showMobileMenu && mobileMenuRef.current.contains(document.activeElement);
+                if (shouldRestoreFocus) {
+                    // pointerdown の既定動作(クリック先へのフォーカス移動)は
+                    // ハンドラ実行後に走るため、同期 focus() は上書きされて効かない。
+                    // rAF で既定動作の後ろへ逃がし、フォーカスが body に落ちた場合
+                    // (=クリック先がフォーカス不可)だけ復帰させる。クリック先が
+                    // フォーカス可能ならそちらを尊重する。
+                    window.requestAnimationFrame(() => {
+                        if (document.activeElement === document.body) {
+                            mobileMenuButtonRef.current?.focus();
+                        }
+                    });
+                }
+                setShowMobileMenu(false);
+                setShowMobileTeamMenu(false);
+            }
         };
 
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return;
+
+            setShowDropdown(false);
+            setShowTeamMenu(false);
+
+            if (showMobileMenu) {
+                setShowMobileMenu(false);
+                setShowMobileTeamMenu(false);
+                window.requestAnimationFrame(() => mobileMenuButtonRef.current?.focus());
+            }
+        };
+
+        document.addEventListener('pointerdown', handleClickOutside);
+        document.addEventListener('keydown', handleKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', handleClickOutside);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [showMobileMenu]);
+
+    // デスクトップ幅へ切り替えた後に、非表示のモバイルメニュー状態を残さない
+    useEffect(() => {
+        const desktopMediaQuery = window.matchMedia('(min-width: 1024px)');
+        const handleBreakpointChange = (event: MediaQueryListEvent) => {
+            if (event.matches) {
+                setShowMobileMenu(false);
+                setShowMobileTeamMenu(false);
+                if (showMobileMenu) {
+                    window.requestAnimationFrame(() => {
+                        desktopNavRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+                    });
+                }
+                return;
+            }
+
+            setShowDropdown(false);
+            setShowTeamMenu(false);
+            if (showDropdown || showTeamMenu) {
+                window.requestAnimationFrame(() => mobileMenuButtonRef.current?.focus());
+            }
+        };
+
+        desktopMediaQuery.addEventListener('change', handleBreakpointChange);
+        return () => desktopMediaQuery.removeEventListener('change', handleBreakpointChange);
+    }, [showDropdown, showMobileMenu, showTeamMenu]);
 
     const currentTeamView = isValidTeamView(searchParams.get('view')) ? (searchParams.get('view') as TeamView) : 'subordinates';
     const effectivePendingCount = user?.uid ? pendingSubordinateCount : 0;
@@ -78,6 +143,7 @@ export const AppHeader: React.FC = () => {
         );
         return () => {
             unsubscribe();
+            setPendingSubordinateCount(0);
         };
     }, [user?.uid]);
 
@@ -112,6 +178,16 @@ export const AppHeader: React.FC = () => {
         }
     };
 
+    const closeMobileMenu = () => {
+        setShowMobileMenu(false);
+        setShowMobileTeamMenu(false);
+    };
+
+    const handleMobileNavigate = (tab: Tab, view?: TeamView) => {
+        closeMobileMenu();
+        navigateToTab(tab, view);
+    };
+
     const handleTeamMenuSelect = (view: TeamView) => {
         navigateToTab('team', view);
         setShowTeamMenu(false);
@@ -119,16 +195,19 @@ export const AppHeader: React.FC = () => {
 
     const handleLogout = async () => {
         setShowDropdown(false);
+        closeMobileMenu();
         await signOutNow();
     };
 
     const handlePasswordChange = () => {
         setShowDropdown(false);
+        closeMobileMenu();
         setShowPasswordModal(true);
     };
 
     const handleDeleteAccount = async () => {
         setShowDropdown(false);
+        closeMobileMenu();
 
         if (!user) return;
 
@@ -196,22 +275,26 @@ export const AppHeader: React.FC = () => {
             <div className="container mx-auto px-4 max-w-7xl">
                 <div className="flex items-center justify-between h-20 py-2">
                     {/* 左側: ロゴとタイトル */}
-                    <div className="flex items-center space-x-3">
-                        <div className="p-2 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl shadow-lg">
+                    <div className="mr-3 flex min-w-0 flex-1 items-center space-x-3 lg:mr-0 lg:flex-initial">
+                        <div className="shrink-0 p-2 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl shadow-lg">
                             <Music className="w-6 h-6 text-white" />
                         </div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                                商談くんミニ（簡易版）
+                        <div className="min-w-0">
+                            <h1
+                                aria-label="商談くんミニ（簡易版）"
+                                className="flex min-w-0 items-center gap-2 text-xl font-bold text-gray-900 sm:text-2xl"
+                            >
+                                <span className="block truncate lg:hidden" aria-hidden="true">商談くんミニ</span>
+                                <span className="hidden truncate lg:block" aria-hidden="true">商談くんミニ（簡易版）</span>
                             </h1>
                         </div>
                     </div>
 
                     {/* 中央: タブ */}
-                    <nav className="flex items-center space-x-1">
+                    <nav ref={desktopNavRef} className="hidden items-center space-x-1 lg:flex lg:shrink-0">
                         <button
                             onClick={() => navigateToTab('home')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'home'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'home'
                                 ? 'bg-blue-100 text-blue-700'
                                 : 'text-gray-600 hover:bg-gray-100'
                                 }`}
@@ -221,7 +304,7 @@ export const AppHeader: React.FC = () => {
                         </button>
                         <button
                             onClick={() => navigateToTab('documents')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'documents'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'documents'
                                 ? 'bg-blue-100 text-blue-700'
                                 : 'text-gray-600 hover:bg-gray-100'
                                 }`}
@@ -231,17 +314,20 @@ export const AppHeader: React.FC = () => {
                         </button>
                         <div className="relative" ref={teamMenuRef}>
                             <button
+                                type="button"
                                 onClick={() => {
                                     setShowTeamMenu((prev) => !prev);
                                 }}
-                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 relative ${activeTab === 'team'
+                                aria-expanded={showTeamMenu}
+                                aria-controls={showTeamMenu ? 'app-header-team-menu' : undefined}
+                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 relative whitespace-nowrap ${activeTab === 'team'
                                     ? 'bg-blue-100 text-blue-700'
                                     : 'text-gray-600 hover:bg-gray-100'
                                     }`}
                             >
                                 <Users className="w-4 h-4" />
                                 チーム
-                                {pendingSubordinateCount > 0 && (
+                                {effectivePendingCount > 0 && (
                                     <span className="absolute -top-1 -right-1 inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold min-w-[18px] h-[18px] px-1 shadow">
                                         {pendingBadgeDisplay}
                                     </span>
@@ -251,14 +337,14 @@ export const AppHeader: React.FC = () => {
                                 />
                             </button>
                             {showTeamMenu && (
-                                <div className="absolute left-0 mt-2 w-40 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-40">
+                                <div id="app-header-team-menu" className="absolute left-0 mt-2 w-40 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-40">
                                     <button
                                         onClick={() => handleTeamMenuSelect('subordinates')}
                                         className={`w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-gray-50 ${currentTeamView === 'subordinates' ? 'text-blue-600 font-semibold' : 'text-gray-700'
                                             }`}
                                     >
                                         <span>部下</span>
-                                        {pendingSubordinateCount > 0 && (
+                                        {effectivePendingCount > 0 && (
                                             <span className="inline-flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold min-w-[18px] h-[18px] px-1">
                                                 {pendingBadgeDisplay}
                                             </span>
@@ -276,7 +362,7 @@ export const AppHeader: React.FC = () => {
                         </div>
                         <button
                             onClick={() => navigateToTab('notifications')}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 relative ${activeTab === 'notifications'
+                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 relative whitespace-nowrap ${activeTab === 'notifications'
                                 ? 'bg-blue-100 text-blue-700'
                                 : 'text-gray-600 hover:bg-gray-100'
                                 }`}
@@ -292,7 +378,7 @@ export const AppHeader: React.FC = () => {
                         {isAdmin && (
                             <button
                                 onClick={() => navigateToTab('admin')}
-                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'admin'
+                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'admin'
                                     ? 'bg-blue-100 text-blue-700'
                                     : 'text-gray-600 hover:bg-gray-100'
                                     }`}
@@ -304,27 +390,33 @@ export const AppHeader: React.FC = () => {
                     </nav>
 
                     {/* 右側: ユーザーメニュー */}
-                    <div className="flex items-center">
+                    <div className="hidden min-w-0 items-center lg:flex lg:shrink-0">
                         {authLoading ? (
                             <div className="px-4 py-2 text-gray-500 text-sm">読み込み中...</div>
                         ) : user ? (
                             <div className="relative" ref={dropdownRef}>
                                 <button
+                                    type="button"
                                     onClick={() => setShowDropdown(!showDropdown)}
-                                    className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-gray-50 rounded-lg border border-gray-300 transition-colors text-sm"
+                                    aria-expanded={showDropdown}
+                                    aria-controls={showDropdown ? 'app-header-account-menu' : undefined}
+                                    className="flex min-w-0 items-center gap-2 px-4 py-2 bg-white hover:bg-gray-50 rounded-lg border border-gray-300 transition-colors text-sm"
                                 >
-                                    <User className="w-4 h-4 text-gray-600" />
-                                    <span className="text-gray-700">
+                                    <User className="w-4 h-4 shrink-0 text-gray-600" />
+                                    <span
+                                        className="max-w-24 truncate text-gray-700 lg:max-w-48 xl:max-w-56"
+                                        title={user.displayName || user.email || 'ログイン中'}
+                                    >
                                         {user.displayName || user.email || 'ログイン中'}
                                     </span>
-                                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
+                                    <ChevronDown className={`w-4 h-4 shrink-0 text-gray-500 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
                                 </button>
 
                                 {showDropdown && (
-                                    <div className="absolute right-0 mt-2 w-60 bg-white rounded-lg shadow-xl border border-gray-200 py-1 z-50">
+                                    <div id="app-header-account-menu" className="absolute right-0 mt-2 w-60 bg-white rounded-lg shadow-xl border border-gray-200 py-1 z-50">
                                         <div className="px-4 py-3 border-b border-gray-100">
                                             <p className="text-xs text-gray-500">表示名</p>
-                                            <p className="text-sm font-semibold text-gray-900">
+                                            <p className="truncate text-sm font-semibold text-gray-900" title={user.displayName || '未設定'}>
                                                 {user.displayName || '未設定'}
                                             </p>
                                             <p className="text-xs text-gray-500 mt-1 break-all">{user.email}</p>
@@ -365,21 +457,6 @@ export const AppHeader: React.FC = () => {
                                         </button>
                                     </div>
                                 )}
-
-                                <PasswordChangeModal
-                                    isOpen={showPasswordModal}
-                                    onClose={() => setShowPasswordModal(false)}
-                                />
-
-                                <ReauthModal
-                                    isOpen={showReauthModal}
-                                    onClose={() => setShowReauthModal(false)}
-                                    onSuccess={handleReauthSuccess}
-                                />
-                                <DisplayNameModal
-                                    isOpen={showDisplayNameModal}
-                                    onClose={() => setShowDisplayNameModal(false)}
-                                />
                             </div>
                         ) : (
                             <button
@@ -390,6 +467,247 @@ export const AppHeader: React.FC = () => {
                             </button>
                         )}
                     </div>
+
+                    {/* モバイル: ナビゲーションとアカウント操作を集約 */}
+                    <div className="shrink-0 lg:hidden" ref={mobileMenuRef}>
+                        <button
+                            ref={mobileMenuButtonRef}
+                            type="button"
+                            onClick={() => {
+                                if (showMobileMenu) setShowMobileTeamMenu(false);
+                                setShowMobileMenu(!showMobileMenu);
+                                setShowDropdown(false);
+                                setShowTeamMenu(false);
+                            }}
+                            aria-label={showMobileMenu ? 'メニューを閉じる' : 'メニューを開く'}
+                            aria-expanded={showMobileMenu}
+                            aria-controls="app-header-mobile-menu"
+                            className={`inline-flex h-11 w-11 items-center justify-center rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${showMobileMenu
+                                ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                                }`}
+                        >
+                            {showMobileMenu ? (
+                                <X className="h-5 w-5" aria-hidden="true" />
+                            ) : (
+                                <Menu className="h-5 w-5" aria-hidden="true" />
+                            )}
+                        </button>
+
+                        <div
+                            id="app-header-mobile-menu"
+                            aria-hidden={!showMobileMenu}
+                            inert={!showMobileMenu}
+                            className={`absolute inset-x-0 top-full z-50 max-h-[calc(100dvh-5rem)] overflow-y-auto overscroll-contain border-y border-gray-200 bg-white shadow-lg transition-all duration-150 ease-out motion-reduce:transition-none ${showMobileMenu
+                                ? 'visible translate-y-0 opacity-100'
+                                : 'invisible pointer-events-none -translate-y-1 opacity-0'
+                                }`}
+                        >
+                            <div className="container mx-auto max-w-7xl px-4 py-2">
+                                <nav aria-label="モバイルメインナビゲーション" className="space-y-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleMobileNavigate('home')}
+                                        aria-current={activeTab === 'home' ? 'page' : undefined}
+                                        className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'home'
+                                            ? 'bg-blue-100 text-blue-700'
+                                            : 'text-gray-700 hover:bg-gray-100'
+                                            }`}
+                                    >
+                                        <Home className="h-5 w-5 shrink-0" aria-hidden="true" />
+                                        ホーム
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => handleMobileNavigate('documents')}
+                                        aria-current={activeTab === 'documents' ? 'page' : undefined}
+                                        className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'documents'
+                                            ? 'bg-blue-100 text-blue-700'
+                                            : 'text-gray-700 hover:bg-gray-100'
+                                            }`}
+                                    >
+                                        <FileText className="h-5 w-5 shrink-0" aria-hidden="true" />
+                                        文書
+                                    </button>
+
+                                    <div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowMobileTeamMenu((previous) => !previous)}
+                                            aria-expanded={showMobileTeamMenu}
+                                            aria-controls={showMobileTeamMenu ? 'app-header-mobile-team-menu' : undefined}
+                                            className={`flex min-h-11 w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'team'
+                                                ? 'bg-blue-100 text-blue-700'
+                                                : 'text-gray-700 hover:bg-gray-100'
+                                                }`}
+                                        >
+                                            <span className="flex min-w-0 items-center gap-3">
+                                                <Users className="h-5 w-5 shrink-0" aria-hidden="true" />
+                                                <span>チーム</span>
+                                            </span>
+                                            <span className="flex shrink-0 items-center gap-2">
+                                                {effectivePendingCount > 0 && (
+                                                    <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white shadow">
+                                                        {pendingBadgeDisplay}
+                                                    </span>
+                                                )}
+                                                <ChevronDown
+                                                    className={`h-4 w-4 transition-transform ${showMobileTeamMenu ? 'rotate-180' : ''}`}
+                                                    aria-hidden="true"
+                                                />
+                                            </span>
+                                        </button>
+
+                                        {showMobileTeamMenu && (
+                                            <div id="app-header-mobile-team-menu" className="ml-5 mt-1 space-y-1 border-l-2 border-blue-100 pl-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleMobileNavigate('team', 'subordinates')}
+                                                    aria-current={activeTab === 'team' && currentTeamView === 'subordinates' ? 'page' : undefined}
+                                                    className={`flex min-h-11 w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'team' && currentTeamView === 'subordinates'
+                                                        ? 'bg-blue-50 font-semibold text-blue-700'
+                                                        : 'text-gray-700 hover:bg-gray-100'
+                                                        }`}
+                                                >
+                                                    <span>部下</span>
+                                                    {effectivePendingCount > 0 && (
+                                                        <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
+                                                            {pendingBadgeDisplay}
+                                                        </span>
+                                                    )}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleMobileNavigate('team', 'supervisors')}
+                                                    aria-current={activeTab === 'team' && currentTeamView === 'supervisors' ? 'page' : undefined}
+                                                    className={`flex min-h-11 w-full items-center rounded-xl px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'team' && currentTeamView === 'supervisors'
+                                                        ? 'bg-blue-50 font-semibold text-blue-700'
+                                                        : 'text-gray-700 hover:bg-gray-100'
+                                                        }`}
+                                                >
+                                                    上司
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => handleMobileNavigate('notifications')}
+                                        aria-current={activeTab === 'notifications' ? 'page' : undefined}
+                                        className={`flex min-h-11 w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'notifications'
+                                            ? 'bg-blue-100 text-blue-700'
+                                            : 'text-gray-700 hover:bg-gray-100'
+                                            }`}
+                                    >
+                                        <span className="flex min-w-0 items-center gap-3">
+                                            <Bell className="h-5 w-5 shrink-0" aria-hidden="true" />
+                                            <span>お知らせ</span>
+                                        </span>
+                                        {unreadNotificationCount > 0 && (
+                                            <span className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white shadow">
+                                                {unreadNotificationBadge}
+                                            </span>
+                                        )}
+                                    </button>
+
+                                    {isAdmin && (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleMobileNavigate('admin')}
+                                            aria-current={activeTab === 'admin' ? 'page' : undefined}
+                                            className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${activeTab === 'admin'
+                                                ? 'bg-blue-100 text-blue-700'
+                                                : 'text-gray-700 hover:bg-gray-100'
+                                                }`}
+                                        >
+                                            <Shield className="h-5 w-5 shrink-0" aria-hidden="true" />
+                                            管理者画面
+                                        </button>
+                                    )}
+                                </nav>
+
+                                <div className="mt-2 border-t border-gray-200 pt-2">
+                                    {authLoading ? (
+                                        <div role="status" className="flex min-h-11 items-center px-3 text-sm text-gray-500">
+                                            読み込み中...
+                                        </div>
+                                    ) : user ? (
+                                        <>
+                                            <div className="mb-1 flex min-w-0 items-center gap-3 rounded-xl bg-gray-50 px-3 py-3">
+                                                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-gray-600 shadow-sm ring-1 ring-gray-200">
+                                                    <User className="h-4 w-4" aria-hidden="true" />
+                                                </span>
+                                                <div className="min-w-0 flex-1">
+                                                    <p
+                                                        className="max-w-full truncate text-sm font-semibold text-gray-900"
+                                                        title={user.displayName || '未設定'}
+                                                    >
+                                                        {user.displayName || '未設定'}
+                                                    </p>
+                                                    {user.email && (
+                                                        <p className="max-w-full truncate text-xs text-gray-500" title={user.email}>
+                                                            {user.email}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    closeMobileMenu();
+                                                    setShowDisplayNameModal(true);
+                                                }}
+                                                className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
+                                            >
+                                                <Edit3 className="h-5 w-5 shrink-0 text-gray-600" aria-hidden="true" />
+                                                表示名を編集
+                                            </button>
+                                            {isEmailProvider && (
+                                                <button
+                                                    type="button"
+                                                    onClick={handlePasswordChange}
+                                                    className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
+                                                >
+                                                    <Key className="h-5 w-5 shrink-0 text-blue-600" aria-hidden="true" />
+                                                    パスワードを変更
+                                                </button>
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={handleLogout}
+                                                className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
+                                            >
+                                                <LogOut className="h-5 w-5 shrink-0 text-gray-600" aria-hidden="true" />
+                                                ログアウト
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={handleDeleteAccount}
+                                                className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-1"
+                                            >
+                                                <Trash2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+                                                アカウントを削除
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                closeMobileMenu();
+                                                setShowAuthModal(true);
+                                            }}
+                                            className="flex min-h-11 w-full items-center justify-center rounded-xl bg-blue-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                                        >
+                                            ログイン / アカウント作成
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -397,7 +715,23 @@ export const AppHeader: React.FC = () => {
                 isOpen={showAuthModal}
                 onClose={() => setShowAuthModal(false)}
             />
+            {!authLoading && user && (
+                <>
+                    <PasswordChangeModal
+                        isOpen={showPasswordModal}
+                        onClose={() => setShowPasswordModal(false)}
+                    />
+                    <ReauthModal
+                        isOpen={showReauthModal}
+                        onClose={() => setShowReauthModal(false)}
+                        onSuccess={handleReauthSuccess}
+                    />
+                    <DisplayNameModal
+                        isOpen={showDisplayNameModal}
+                        onClose={() => setShowDisplayNameModal(false)}
+                    />
+                </>
+            )}
         </header>
     );
 };
-
