@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
+  /* 背景色・前景色は意図的に単一（ライト）テーマとする。 */
   --background: #ffffff;
   --foreground: #171717;
 }
@@ -8,19 +10,20 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* ライト設定の font-medium 日本語は可読性向上のため意図的に中太化する。 */
+  /* このスタックは body の font-family と同一に保つこと（片側だけ編集すると html/body で書体が乖離する）。 */
+  --font-sans: Arial, Helvetica, "Hiragino Sans", "Yu Gothic Medium",
+    "Yu Gothic", Meiryo, sans-serif;
+  --font-mono: var(--font-geist-mono), "BIZ UDGothic",
+    "Noto Sans Mono CJK JP", "MS Gothic", "Hiragino Sans", monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* @theme inline の変数を body から var() 参照してはならない。
+     理由: @theme inline は実CSSカスタムプロパティを :root へ出力しないため、
+     var() は guaranteed-invalid になり font-family が preflight 既定へ静かに落ちる。 */
+  font-family: Arial, Helvetica, "Hiragino Sans", "Yu Gothic Medium",
+    "Yu Gothic", Meiryo, sans-serif;
 }
