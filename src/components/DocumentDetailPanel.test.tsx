@@ -1,7 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, {
+    useEffect,
+    useImperativeHandle,
+    useRef,
+    useState,
+} from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Transcription } from '@/lib/firestore';
-import { DocumentDetailPanel } from './DocumentDetailPanel';
+import { DocumentSizeLimitError, type Transcription } from '@/lib/firestore';
+import {
+    DocumentDetailPanelView as DocumentDetailPanel,
+    type DocumentDetailPanelHandle,
+} from './DocumentDetailPanel';
 import { PdfDocumentHeader } from './PdfDocumentHeader';
 
 const { createPortal, documentPrintPortal, printPdf } = vi.hoisted(() => ({
@@ -16,6 +24,8 @@ vi.mock('react', async importOriginal => {
     return {
         ...actual,
         useEffect: vi.fn(),
+        useImperativeHandle: vi.fn(),
+        useRef: vi.fn(),
         useState: vi.fn(),
     };
 });
@@ -26,6 +36,13 @@ vi.mock('@/hooks/useDocumentPrint', () => ({
 
 vi.mock('@/lib/logger', () => ({
     createLogger: () => ({ error: vi.fn() }),
+}));
+
+// firestore.ts の実クラスを使うため、SDK初期化だけを差し替える。
+vi.mock('@/lib/firebase', () => ({
+    db: { name: 'mock-firestore' },
+    auth: { currentUser: null },
+    storage: { name: 'mock-storage' },
 }));
 
 vi.mock('@/lib/pdfExport', () => ({
@@ -45,6 +62,7 @@ vi.mock('react-dom', () => ({
 }));
 
 type ButtonProps = {
+    className?: string;
     children?: React.ReactNode;
     disabled?: boolean;
     onClick: () => void;
@@ -83,6 +101,8 @@ const document: Transcription = {
     createdAt: new Date('2026-09-01T05:30:00.000Z'),
 };
 
+const createdRefs: Array<{ current: unknown }> = [];
+
 function getText(node: React.ReactNode): string {
     if (typeof node === 'string' || typeof node === 'number') {
         return String(node);
@@ -102,12 +122,35 @@ function findPdfButton(
         return null;
     }
 
-    if (node.type === 'button' && getText(node).includes('PDF に保存')) {
+    if (node.type === 'button' && getText(node).includes('印刷してPDF保存')) {
         return node as React.ReactElement<ButtonProps>;
     }
 
     for (const child of React.Children.toArray(node.props.children)) {
         const button = findPdfButton(child);
+
+        if (button) {
+            return button;
+        }
+    }
+
+    return null;
+}
+
+function findButtonByText(
+    node: React.ReactNode,
+    label: string,
+): React.ReactElement<ButtonProps> | null {
+    if (!React.isValidElement<{ children?: React.ReactNode }>(node)) {
+        return null;
+    }
+
+    if (node.type === 'button' && getText(node).includes(label)) {
+        return node as React.ReactElement<ButtonProps>;
+    }
+
+    for (const child of React.Children.toArray(node.props.children)) {
+        const button = findButtonByText(child, label);
 
         if (button) {
             return button;
@@ -259,30 +302,57 @@ function findPdfDocumentHeader(
 }
 
 function mockPanelState({
+    isViewMode = true,
+    editedTitle = document.title,
+    editedContent = document.text,
     includeMetadata = false,
     pdfTheme = 'editorial',
     pdfFont = 'auto',
     saving = false,
+    saveError = null,
+    showDiscardConfirmation = false,
+    setIsViewMode = vi.fn(),
+    setEditedTitle = vi.fn(),
+    setEditedContent = vi.fn(),
+    setSaving = vi.fn(),
+    setSaveError = vi.fn(),
+    setShowDiscardConfirmation = vi.fn(),
     setIncludeMetadata = vi.fn(),
     setPdfTheme = vi.fn(),
     setPdfFont = vi.fn(),
+    setDraftRevision = vi.fn(),
 }: {
+    isViewMode?: boolean;
+    editedTitle?: string;
+    editedContent?: string;
     includeMetadata?: boolean;
     pdfTheme?: string;
     pdfFont?: string;
     saving?: boolean;
+    saveError?: string | null;
+    showDiscardConfirmation?: boolean;
+    setIsViewMode?: ReturnType<typeof vi.fn>;
+    setEditedTitle?: ReturnType<typeof vi.fn>;
+    setEditedContent?: ReturnType<typeof vi.fn>;
+    setSaving?: ReturnType<typeof vi.fn>;
+    setSaveError?: ReturnType<typeof vi.fn>;
+    setShowDiscardConfirmation?: ReturnType<typeof vi.fn>;
     setIncludeMetadata?: ReturnType<typeof vi.fn>;
     setPdfTheme?: ReturnType<typeof vi.fn>;
     setPdfFont?: ReturnType<typeof vi.fn>;
+    setDraftRevision?: ReturnType<typeof vi.fn>;
 } = {}): void {
     vi.mocked(useState)
-        .mockImplementationOnce(() => [true, vi.fn()])
-        .mockImplementationOnce(() => [document.title, vi.fn()])
-        .mockImplementationOnce(() => [document.text, vi.fn()])
-        .mockImplementationOnce(() => [saving, vi.fn()])
+        .mockImplementationOnce(() => [isViewMode, setIsViewMode])
+        .mockImplementationOnce(() => [editedTitle, setEditedTitle])
+        .mockImplementationOnce(() => [editedContent, setEditedContent])
+        .mockImplementationOnce(() => [saving, setSaving])
+        .mockImplementationOnce(() => [saveError, setSaveError])
+        .mockImplementationOnce(() => [showDiscardConfirmation, setShowDiscardConfirmation])
         .mockImplementationOnce(() => [includeMetadata, setIncludeMetadata])
         .mockImplementationOnce(() => [pdfTheme, setPdfTheme])
-        .mockImplementationOnce(() => [pdfFont, setPdfFont]);
+        .mockImplementationOnce(() => [pdfFont, setPdfFont])
+        .mockImplementationOnce(() => [0, setDraftRevision]);
 }
 
 describe('DocumentDetailPanel', () => {
@@ -294,6 +364,29 @@ describe('DocumentDetailPanel', () => {
         printPdf.mockClear();
         vi.mocked(useState).mockReset();
         vi.mocked(useEffect).mockReset();
+        vi.mocked(useRef).mockReset();
+        vi.mocked(useRef).mockImplementation((initialValue: unknown) => {
+            const createdRef = { current: initialValue };
+            createdRefs.push(createdRef);
+            return createdRef as never;
+        });
+        vi.mocked(useImperativeHandle).mockReset();
+        vi.mocked(useImperativeHandle).mockImplementation((
+            forwardedRef: React.Ref<unknown> | undefined,
+            createHandle: () => unknown,
+        ) => {
+            if (!forwardedRef) {
+                return;
+            }
+
+            const handle = createHandle();
+            if (typeof forwardedRef === 'function') {
+                forwardedRef(handle);
+            } else {
+                forwardedRef.current = handle;
+            }
+        });
+        createdRefs.length = 0;
         localStorageGetItem.mockReset();
         localStorageGetItem.mockReturnValue(null);
         localStorageSetItem.mockReset();
@@ -423,7 +516,7 @@ describe('DocumentDetailPanel', () => {
         const preview = findPdfPreview(tree);
         const portal = findPrintPortal(tree);
 
-        expect(useState).toHaveBeenNthCalledWith(5, false);
+        expect(useState).toHaveBeenNthCalledWith(7, false);
         expect(checkbox?.props.checked).toBe(false);
         expect(preview).not.toBeNull();
         expect(findPdfDocumentHeader(preview)).toBeNull();
@@ -462,11 +555,11 @@ describe('DocumentDetailPanel', () => {
         const select = findPdfThemeSelect(tree);
         const portal = findPrintPortal(tree);
 
-        expect(useState).toHaveBeenNthCalledWith(6, 'editorial');
+        expect(useState).toHaveBeenNthCalledWith(8, 'editorial');
         expect(select).not.toBeNull();
         expect(select?.props.value).toBe('editorial');
         expect(findPdfPreview(tree)?.props.className).toBe(
-            'pdf-preview pdf-theme-editorial pdf-font-gothic shadow',
+            'pdf-preview pdf-preview--reading pdf-theme-editorial pdf-font-gothic shadow',
         );
         expect(portal?.props.theme).toBe('editorial');
     });
@@ -491,7 +584,7 @@ describe('DocumentDetailPanel', () => {
 
         const selectedTree = DocumentDetailPanel({ document }) as React.ReactNode;
         expect(findPdfPreview(selectedTree)?.props.className).toBe(
-            'pdf-preview pdf-theme-minimal pdf-font-gothic shadow',
+            'pdf-preview pdf-preview--reading pdf-theme-minimal pdf-font-gothic shadow',
         );
         expect(findPrintPortal(selectedTree)?.props.theme).toBe('minimal');
     });
@@ -503,11 +596,11 @@ describe('DocumentDetailPanel', () => {
         const select = findPdfFontSelect(tree);
         const portal = findPrintPortal(tree);
 
-        expect(useState).toHaveBeenNthCalledWith(7, 'auto');
+        expect(useState).toHaveBeenNthCalledWith(9, 'auto');
         expect(select).not.toBeNull();
         expect(select?.props.value).toBe('auto');
         expect(findPdfPreview(tree)?.props.className).toBe(
-            'pdf-preview pdf-theme-architect pdf-font-zen shadow',
+            'pdf-preview pdf-preview--reading pdf-theme-architect pdf-font-zen shadow',
         );
         expect(portal?.props.font).toBe('auto');
     });
@@ -532,7 +625,7 @@ describe('DocumentDetailPanel', () => {
 
         const selectedTree = DocumentDetailPanel({ document }) as React.ReactNode;
         expect(findPdfPreview(selectedTree)?.props.className).toBe(
-            'pdf-preview pdf-theme-editorial pdf-font-mincho shadow',
+            'pdf-preview pdf-preview--reading pdf-theme-editorial pdf-font-mincho shadow',
         );
         expect(findPrintPortal(selectedTree)?.props.font).toBe('mincho');
     });
@@ -607,17 +700,398 @@ describe('DocumentDetailPanel', () => {
 
         const tree = DocumentDetailPanel({
             document,
-            onContentUpdate: async () => undefined,
+            onDocumentUpdate: async () => undefined,
         }) as React.ReactNode;
         const pdfButton = findPdfButton(tree);
 
         expect(pdfButton).not.toBeNull();
         expect(pdfButton?.props.disabled).toBe(true);
-        expect(pdfButton?.props.title).toBe('保存完了後に PDF 出力できます');
+        expect(pdfButton?.props.title).toBe('保存完了後に印刷できます');
 
         pdfButton?.props.onClick();
 
         expect(printPdf).not.toHaveBeenCalled();
+    });
+
+    it('タイトルと本文を文書 ID 付きの一回の更新で保存する', async () => {
+        const onDocumentUpdate = vi.fn(async (): Promise<void> => undefined);
+        const onDirtyChange = vi.fn();
+        const setIsViewMode = vi.fn();
+        const setEditedTitle = vi.fn();
+        const setEditedContent = vi.fn();
+        const panelRef = {
+            current: null as DocumentDetailPanelHandle | null,
+        };
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: '編集後のタイトル',
+            editedContent: '編集後の本文',
+            setIsViewMode,
+            setEditedTitle,
+            setEditedContent,
+        });
+
+        DocumentDetailPanel({
+            document,
+            onDocumentUpdate,
+            onDirtyChange,
+        }, panelRef);
+
+        await expect(panelRef.current?.save()).resolves.toBe(true);
+        expect(onDocumentUpdate).toHaveBeenCalledTimes(1);
+        expect(onDocumentUpdate).toHaveBeenCalledWith('document-1', {
+            title: '編集後のタイトル',
+            text: '編集後の本文',
+        });
+        expect(setEditedTitle).toHaveBeenCalledWith('編集後のタイトル');
+        expect(setEditedContent).toHaveBeenCalledWith('編集後の本文');
+        expect(setIsViewMode).toHaveBeenCalledWith(true);
+        expect(onDirtyChange).toHaveBeenCalledWith(false);
+    });
+
+    it('保存中に選択 ID が変わった場合は新しい選択へドラフトを反映しない', async () => {
+        let finishUpdate: (() => void) | undefined;
+        const onDocumentUpdate = vi.fn(() => new Promise<void>(resolve => {
+            finishUpdate = resolve;
+        }));
+        const setIsViewMode = vi.fn();
+        const setEditedTitle = vi.fn();
+        const setEditedContent = vi.fn();
+        const onDirtyChange = vi.fn();
+        const panelRef = {
+            current: null as DocumentDetailPanelHandle | null,
+        };
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: '保存対象のタイトル',
+            editedContent: '保存対象の本文',
+            setIsViewMode,
+            setEditedTitle,
+            setEditedContent,
+        });
+        DocumentDetailPanel({
+            document,
+            onDocumentUpdate,
+            onDirtyChange,
+        }, panelRef);
+
+        const savingResult = panelRef.current!.save();
+        createdRefs[1].current = 'document-2';
+        finishUpdate?.();
+
+        await expect(savingResult).resolves.toBe(true);
+        expect(onDocumentUpdate).toHaveBeenCalledWith('document-1', {
+            title: '保存対象のタイトル',
+            text: '保存対象の本文',
+        });
+        expect(setEditedTitle).not.toHaveBeenCalled();
+        expect(setEditedContent).not.toHaveBeenCalled();
+        expect(setIsViewMode).not.toHaveBeenCalled();
+        expect(onDirtyChange).not.toHaveBeenCalledWith(false);
+    });
+
+    it('保存失敗時はドラフトを保ち、画面内に失敗理由を表示する', async () => {
+        const onDocumentUpdate = vi.fn(async (): Promise<void> => {
+            throw new Error('network error');
+        });
+        const setEditedTitle = vi.fn();
+        const setEditedContent = vi.fn();
+        const setSaveError = vi.fn();
+        const panelRef = {
+            current: null as DocumentDetailPanelHandle | null,
+        };
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: '未保存タイトル',
+            editedContent: '未保存本文',
+            setEditedTitle,
+            setEditedContent,
+            setSaveError,
+        });
+        DocumentDetailPanel({ document, onDocumentUpdate }, panelRef);
+
+        await expect(panelRef.current?.save()).resolves.toBe(false);
+        expect(setEditedTitle).not.toHaveBeenCalled();
+        expect(setEditedContent).not.toHaveBeenCalled();
+        expect(setSaveError).toHaveBeenLastCalledWith(
+            '保存に失敗しました。編集内容は保持されています。',
+        );
+    });
+
+    it('上限超過の保存失敗はサイズ超過と対処を伝え、汎用文言で潰さない', async () => {
+        const onDocumentUpdate = vi.fn(async (): Promise<void> => {
+            throw new DocumentSizeLimitError(
+                '文書のサイズが上限を超えています。（現在: 4.00KB / 上限: 1.00KB）',
+            );
+        });
+        const setSaveError = vi.fn();
+        const panelRef = {
+            current: null as DocumentDetailPanelHandle | null,
+        };
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: '未保存タイトル',
+            editedContent: '未保存本文',
+            setSaveError,
+        });
+        DocumentDetailPanel({ document, onDocumentUpdate }, panelRef);
+
+        await expect(panelRef.current?.save()).resolves.toBe(false);
+        expect(setSaveError).toHaveBeenLastCalledWith(
+            '文書のサイズが上限を超えています。（現在: 4.00KB / 上限: 1.00KB）'
+            + ' 本文を短くしてから保存してください。',
+        );
+    });
+
+    it('空のドラフトは保存せず dirty 状態を保持する', async () => {
+        const onDocumentUpdate = vi.fn(async (): Promise<void> => undefined);
+        const setSaveError = vi.fn();
+        const panelRef = {
+            current: null as DocumentDetailPanelHandle | null,
+        };
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: ' ',
+            editedContent: '本文',
+            setSaveError,
+        });
+        DocumentDetailPanel({ document, onDocumentUpdate }, panelRef);
+
+        await expect(panelRef.current?.save()).resolves.toBe(false);
+        expect(onDocumentUpdate).not.toHaveBeenCalled();
+        expect(setSaveError).toHaveBeenCalledWith(
+            'タイトルと本文を入力してください。',
+        );
+    });
+
+    it('dirty 通知と命令的な破棄操作を親へ公開する', () => {
+        const onDirtyChange = vi.fn();
+        const setEditedTitle = vi.fn();
+        const setEditedContent = vi.fn();
+        const panelRef = {
+            current: null as DocumentDetailPanelHandle | null,
+        };
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: '未保存タイトル',
+            editedContent: document.text,
+            setEditedTitle,
+            setEditedContent,
+        });
+        DocumentDetailPanel({
+            document,
+            onDocumentUpdate: async () => undefined,
+            onDirtyChange,
+        }, panelRef);
+
+        vi.mocked(useEffect).mock.calls[1]?.[0]();
+        expect(onDirtyChange).toHaveBeenCalledWith(true);
+        expect(panelRef.current?.getDraft()).toEqual({
+            title: '未保存タイトル',
+            text: document.text,
+        });
+
+        panelRef.current?.discard();
+        expect(setEditedTitle).toHaveBeenCalledWith(document.title);
+        expect(setEditedContent).toHaveBeenCalledWith(document.text);
+        expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it('同じ ID の一覧再取得は dirty ドラフトを上書きしない', () => {
+        const setEditedTitle = vi.fn();
+        const setEditedContent = vi.fn();
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: '入力中のタイトル',
+            editedContent: document.text,
+            setEditedTitle,
+            setEditedContent,
+        });
+        DocumentDetailPanel({
+            document: { ...document, title: '一覧で更新されたタイトル' },
+            onDocumentUpdate: async () => undefined,
+        });
+        createdRefs[6].current = {
+            documentId: 'document-1',
+            title: document.title,
+            text: document.text,
+        };
+
+        vi.mocked(useEffect).mock.calls[0]?.[0]();
+
+        expect(setEditedTitle).not.toHaveBeenCalled();
+        expect(setEditedContent).not.toHaveBeenCalled();
+    });
+
+    it('本文だけ編集中なら一覧で更新されたタイトルをドラフトへrebaseする', () => {
+        const setEditedTitle = vi.fn();
+        const setEditedContent = vi.fn();
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: document.title,
+            editedContent: '入力中の本文',
+            setEditedTitle,
+            setEditedContent,
+        });
+        DocumentDetailPanel({
+            document: { ...document, title: '一覧で更新されたタイトル' },
+            onDocumentUpdate: async () => undefined,
+        });
+        createdRefs[6].current = {
+            documentId: 'document-1',
+            title: document.title,
+            text: document.text,
+        };
+
+        vi.mocked(useEffect).mock.calls[0]?.[0]();
+
+        expect(setEditedTitle).toHaveBeenCalledWith('一覧で更新されたタイトル');
+        expect(setEditedContent).not.toHaveBeenCalled();
+        expect(createdRefs[6].current).toEqual({
+            documentId: 'document-1',
+            title: '一覧で更新されたタイトル',
+            text: document.text,
+        });
+    });
+
+    it('タイトルだけ編集中なら外部更新された本文をドラフトへrebaseする', () => {
+        const setEditedTitle = vi.fn();
+        const setEditedContent = vi.fn();
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: '入力中のタイトル',
+            editedContent: document.text,
+            setEditedTitle,
+            setEditedContent,
+        });
+        DocumentDetailPanel({
+            document: { ...document, text: '外部更新された本文' },
+            onDocumentUpdate: async () => undefined,
+        });
+        createdRefs[6].current = {
+            documentId: 'document-1',
+            title: document.title,
+            text: document.text,
+        };
+
+        vi.mocked(useEffect).mock.calls[0]?.[0]();
+
+        expect(setEditedTitle).not.toHaveBeenCalled();
+        expect(setEditedContent).toHaveBeenCalledWith('外部更新された本文');
+        expect(createdRefs[6].current).toEqual({
+            documentId: 'document-1',
+            title: document.title,
+            text: '外部更新された本文',
+        });
+    });
+
+    it('外部更新がdirtyドラフトへ追いついた場合はdirty判定を再計算する', () => {
+        const setDraftRevision = vi.fn();
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: '外部更新と一致するタイトル',
+            editedContent: document.text,
+            setDraftRevision,
+        });
+        DocumentDetailPanel({
+            document: { ...document, title: '外部更新と一致するタイトル' },
+            onDocumentUpdate: async () => undefined,
+        });
+        createdRefs[6].current = {
+            documentId: 'document-1',
+            title: document.title,
+            text: document.text,
+        };
+
+        vi.mocked(useEffect).mock.calls[0]?.[0]();
+
+        expect(createdRefs[6].current).toEqual({
+            documentId: 'document-1',
+            title: '外部更新と一致するタイトル',
+            text: document.text,
+        });
+        expect(setDraftRevision).toHaveBeenCalledOnce();
+        const updateRevision = setDraftRevision.mock.calls[0][0] as (revision: number) => number;
+        expect(updateRevision(4)).toBe(5);
+    });
+
+    it('同じ ID の一覧再取得は clean なドラフトへ同期する', () => {
+        const setEditedTitle = vi.fn();
+        const setEditedContent = vi.fn();
+        mockPanelState({
+            editedTitle: document.title,
+            editedContent: document.text,
+            setEditedTitle,
+            setEditedContent,
+        });
+        DocumentDetailPanel({
+            document: {
+                ...document,
+                title: '一覧で更新されたタイトル',
+                text: '一覧で更新された本文',
+            },
+            onDocumentUpdate: async () => undefined,
+        });
+        createdRefs[6].current = {
+            documentId: 'document-1',
+            title: document.title,
+            text: document.text,
+        };
+
+        vi.mocked(useEffect).mock.calls[0]?.[0]();
+
+        expect(setEditedTitle).toHaveBeenCalledWith('一覧で更新されたタイトル');
+        expect(setEditedContent).toHaveBeenCalledWith('一覧で更新された本文');
+    });
+
+    it('モバイル向けの戻る操作と詳細フォーカス契約を提供する', () => {
+        const onBackToList = vi.fn();
+        const focus = vi.fn();
+        const panelRef = {
+            current: null as DocumentDetailPanelHandle | null,
+        };
+        mockPanelState();
+        const tree = DocumentDetailPanel({ document, onBackToList }, panelRef);
+        const backButton = findButtonByText(tree, '一覧へ戻る');
+        createdRefs[0].current = { focus };
+
+        expect(backButton?.props.className).toContain('lg:hidden');
+        backButton?.props.onClick();
+        expect(onBackToList).toHaveBeenCalledOnce();
+
+        panelRef.current?.focus();
+        expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    });
+
+    it('PDF 操作の実態と文書情報の列挙を正確に案内する', () => {
+        mockPanelState();
+
+        const tree = DocumentDetailPanel({ document });
+
+        expect(getText(tree)).toContain('印刷してPDF保存');
+        expect(getText(tree)).toContain(
+            '文書情報を含める（元ファイル・プロンプト・生成日時・使用モデル・思考）',
+        );
+        expect(findPdfPreview(tree)?.props.className).toContain(
+            'pdf-preview--reading',
+        );
+    });
+
+    it('dirty な編集のキャンセルは画面内確認を開く', () => {
+        const setShowDiscardConfirmation = vi.fn();
+        mockPanelState({
+            isViewMode: false,
+            editedTitle: '未保存タイトル',
+            setShowDiscardConfirmation,
+        });
+        const tree = DocumentDetailPanel({
+            document,
+            onDocumentUpdate: async () => undefined,
+        });
+
+        findButtonByText(tree, 'キャンセル')?.props.onClick();
+
+        expect(setShowDiscardConfirmation).toHaveBeenCalledWith(true);
     });
 });
 
