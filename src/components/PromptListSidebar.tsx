@@ -423,11 +423,10 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                         {prompts.map((prompt) => (
                             <div
                                 key={prompt.id}
-                                onClick={() => onPromptClick(prompt)}
-                                className="bg-white rounded-xl p-4 shadow-sm hover:shadow-md cursor-pointer transition-all group border border-gray-100 hover:border-blue-200"
+                                className="group relative rounded-xl border border-gray-100 bg-white shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
                             >
-                                <div className="flex items-start justify-between">
-                                    <div className="flex-1 min-w-0 mr-2">
+                                <div className={`p-4 ${canDeletePrompt(prompt) ? 'pr-14' : ''}`}>
+                                    <div className="min-w-0">
                                         <div className="flex items-center space-x-2">
                                             <h3 className="text-sm font-semibold text-gray-900 truncate group-hover:text-blue-700 transition-colors">
                                                 {prompt.name}
@@ -446,16 +445,23 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                                             Geminiモデル: {getGeminiModelLabel(prompt.model)}
                                         </p>
                                     </div>
-                                    {canDeletePrompt(prompt) && (
-                                        <button
-                                            onClick={(e) => handleDelete(prompt, e)}
-                                            className="p-2 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                                            title="削除"
-                                        >
-                                            <Trash2 className="w-4 h-4 text-red-600" />
-                                        </button>
-                                    )}
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={() => onPromptClick(prompt)}
+                                    aria-label={`「${prompt.name}」を開く`}
+                                    className="absolute inset-0 z-10 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+                                />
+                                {canDeletePrompt(prompt) && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => handleDelete(prompt, e)}
+                                        className="absolute right-4 top-4 z-20 flex min-h-11 min-w-11 items-center justify-center rounded-lg opacity-0 transition-colors hover:bg-red-50 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
+                                        title="削除"
+                                    >
+                                        <Trash2 className="w-4 h-4 text-red-600" />
+                                    </button>
+                                )}
                             </div>
                         ))}
                     </div>

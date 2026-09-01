@@ -1,15 +1,20 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useId, useMemo, useRef } from 'react';
 import { X, Trash2, Eye, FileText, Check } from 'lucide-react';
 import ReactMarkdown, { Components } from 'react-markdown';
-import { DefaultPromptTemplate } from '@/lib/adminSettings';
+import type { DefaultPromptTemplate } from '@/lib/adminSettings';
 import { canonicalizeGeminiModel } from '@/constants/geminiModels';
 import {
     canonicalizeThinkingLevel,
     THINKING_LEVELS,
 } from '@/constants/geminiThinking';
-import { ModelComboboxSelect } from '../ModelComboboxSelect';
+import { Dialog } from '@/components/ui/Dialog';
+import {
+    effectiveThinkingLevel,
+    ModelComboboxSelect,
+    supportsThinkingLevel,
+} from '../ModelComboboxSelect';
 
 type CodeProps = React.HTMLAttributes<HTMLElement> & { inline?: boolean };
 
@@ -103,8 +108,19 @@ export default function DefaultPromptEditModal({
     const [editedContent, setEditedContent] = useState(initialContent);
     const [editedModel, setEditedModel] = useState(initialModel);
     const [editedThinkingLevel, setEditedThinkingLevel] = useState(initialThinkingLevel);
-    const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [saving, setSaving] = useState(false);
+    const titleId = useId();
+    const titleInputRef = useRef<HTMLInputElement>(null);
+
+    // The title input is exactly the edit mode's rendering of the heading, so it
+    // is derived instead of mirrored into state: a separate state only re-synced
+    // on isViewMode changes stayed stale when the modal reopened in the mode it
+    // already held.
+    const isEditingTitle = !isViewMode;
+    const thinkingLevelDescriptionId = useId();
+    const thinkingLevelSupported = supportsThinkingLevel(
+        isViewMode ? selectedModel : editedModel,
+    );
 
     // 初期値が変更されたときにstateを更新
     useEffect(() => {
@@ -127,27 +143,19 @@ export default function DefaultPromptEditModal({
             setSelectedThinkingLevel(initialThinkingLevel);
             setEditedThinkingLevel(initialThinkingLevel);
             setIsViewMode(mode === 'create' ? false : true);
-            setIsEditingTitle(false);
         }
     }, [isOpen, initialName, initialContent, initialModel, initialThinkingLevel, mode]);
-
-    // 編集モードに切り替えたときにタイトルも編集可能にする
-    useEffect(() => {
-        if (!isViewMode) {
-            setIsEditingTitle(true);
-        } else {
-            setIsEditingTitle(false);
-        }
-    }, [isViewMode]);
-
-    if (!isOpen) return null;
 
     // 変更があるかどうかをチェック
     const hasChanges =
         editedTitle !== title ||
         editedContent !== content ||
         editedModel !== selectedModel ||
-        editedThinkingLevel !== selectedThinkingLevel;
+        effectiveThinkingLevel(editedModel, editedThinkingLevel)
+            !== effectiveThinkingLevel(selectedModel, selectedThinkingLevel);
+
+    const headingText = title
+        || (mode === 'create' ? 'デフォルトプロンプトを追加' : 'デフォルトプロンプトを編集');
 
     const handleSave = async () => {
         if (!editedTitle.trim() || !editedContent.trim()) {
@@ -161,13 +169,19 @@ export default function DefaultPromptEditModal({
                 name: editedTitle.trim(),
                 content: editedContent.trim(),
                 model: canonicalizeGeminiModel(editedModel),
-                thinkingLevel: canonicalizeThinkingLevel(editedThinkingLevel),
+                thinkingLevel: effectiveThinkingLevel(
+                    canonicalizeGeminiModel(editedModel),
+                    canonicalizeThinkingLevel(editedThinkingLevel),
+                ),
             });
             // 保存後にstateを更新して表示モードに遷移
             setTitle(editedTitle);
             setContent(editedContent);
             setSelectedModel(editedModel);
-            setSelectedThinkingLevel(canonicalizeThinkingLevel(editedThinkingLevel));
+            setSelectedThinkingLevel(effectiveThinkingLevel(
+                canonicalizeGeminiModel(editedModel),
+                canonicalizeThinkingLevel(editedThinkingLevel),
+            ));
             setIsViewMode(true);
             onClose();
         } catch {
@@ -230,57 +244,73 @@ export default function DefaultPromptEditModal({
     );
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50 backdrop-blur-sm"
-            onClick={handleClose}
+        <Dialog
+            isOpen={isOpen}
+            onClose={handleClose}
+            initialFocusRef={titleInputRef}
+            dismissible={!saving}
+            aria-labelledby={titleId}
+            aria-busy={saving || undefined}
+            className="w-[calc(100%-2rem)] max-w-4xl max-h-[90dvh] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl open:flex open:flex-col"
         >
-            <div
-                className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-gray-200"
-                onClick={(e) => e.stopPropagation()}
-            >
+            <div className="flex max-h-[90dvh] min-h-0 flex-col">
                 {/* ヘッダー */}
-                <div className="flex items-center justify-between p-6 border-b bg-gradient-to-r from-purple-50 to-pink-50">
-                    {isEditingTitle ? (
-                        <div className="flex items-center flex-1 mr-4 space-x-2">
-                            <input
-                                type="text"
-                                value={editedTitle}
-                                onChange={(e) => setEditedTitle(e.target.value)}
-                                className="flex-1 px-3 py-2 border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
-                                placeholder="プロンプト名を入力"
-                                autoFocus
-                                disabled={saving}
-                            />
-                        </div>
-                    ) : (
-                        <div className="flex items-center flex-1 mr-4 space-x-2">
-                            <h2 className="text-xl font-bold text-gray-900 truncate">
-                                {title || (mode === 'create' ? 'デフォルトプロンプトを追加' : 'デフォルトプロンプトを編集')}
+                <div className="flex shrink-0 items-center justify-between p-6 border-b bg-gradient-to-r from-purple-50 to-pink-50">
+                    <div className="flex items-center flex-1 mr-4 min-w-0">
+                        <div className="min-w-0 flex-1">
+                            {/* The heading always exists so aria-labelledby never dangles;
+                                in edit mode the input renders it and the heading goes
+                                screen-reader only. */}
+                            <h2
+                                id={titleId}
+                                tabIndex={-1}
+                                data-dialog-initial-focus
+                                className={isEditingTitle
+                                    ? 'sr-only'
+                                    : 'truncate rounded-sm text-xl font-bold text-gray-900 outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2'}
+                            >
+                                {isEditingTitle ? `${headingText}（編集中）` : headingText}
                             </h2>
+                            {isEditingTitle && (
+                                <input
+                                    ref={titleInputRef}
+                                    type="text"
+                                    value={editedTitle}
+                                    onChange={(e) => setEditedTitle(e.target.value)}
+                                    className="min-h-11 w-full min-w-0 rounded-lg border border-purple-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    placeholder="プロンプト名を入力"
+                                    aria-label="プロンプト名"
+                                    disabled={saving}
+                                />
+                            )}
                         </div>
-                    )}
+                    </div>
                     <div className="flex items-center space-x-3">
                         {/* モード切り替えボタン */}
                         <div className="flex items-center space-x-2 bg-gray-100 rounded-lg p-1">
                             <button
+                                type="button"
                                 onClick={handleViewModeSwitch}
-                                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${
+                                className={`flex min-h-11 items-center space-x-2 rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 ${
                                     isViewMode
                                         ? 'bg-white text-purple-600 shadow-sm'
-                                        : 'text-gray-600 hover:text-gray-900'
+                                        : 'text-gray-700 hover:text-gray-900'
                                 }`}
+                                aria-pressed={isViewMode}
                                 disabled={saving}
                             >
                                 <Eye className="w-4 h-4" />
                                 <span>表示</span>
                             </button>
                             <button
+                                type="button"
                                 onClick={() => setIsViewMode(false)}
-                                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${
+                                className={`flex min-h-11 items-center space-x-2 rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 ${
                                     !isViewMode
                                         ? 'bg-white text-purple-600 shadow-sm'
-                                        : 'text-gray-600 hover:text-gray-900'
+                                        : 'text-gray-700 hover:text-gray-900'
                                 }`}
+                                aria-pressed={!isViewMode}
                                 disabled={saving}
                             >
                                 <FileText className="w-4 h-4" />
@@ -288,22 +318,25 @@ export default function DefaultPromptEditModal({
                             </button>
                         </div>
                         <button
+                            type="button"
                             onClick={handleClose}
-                            className="p-2 hover:bg-white rounded-lg transition-colors shadow-sm"
+                            disabled={saving}
+                            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg shadow-sm transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-label="閉じる"
                             title="閉じる"
                         >
-                            <X className="w-5 h-5 text-gray-600" />
+                            <X className="w-5 h-5 text-gray-700" />
                         </button>
                     </div>
                 </div>
 
                 {/* コンテンツ */}
-                <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+                <div className="min-h-0 flex-1 overflow-y-auto p-6 bg-gray-50">
                     {/* コンテンツ */}
                     <div>
-                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                        <span className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
                             プロンプト内容
-                        </label>
+                        </span>
                         {isViewMode ? (
                             /* 表示モード: Markdownレンダリング */
                             <div className="prose prose-sm max-w-none text-gray-800">
@@ -319,6 +352,7 @@ export default function DefaultPromptEditModal({
                                 rows={20}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-sm resize-none"
                                 placeholder="プロンプト内容を入力"
+                                aria-label="プロンプト内容"
                                 disabled={saving}
                             />
                         )}
@@ -327,9 +361,9 @@ export default function DefaultPromptEditModal({
                     <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
                         {/* Geminiモデル選択 */}
                         <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            <span className="block text-sm font-semibold text-gray-700 mb-2">
                                 使用するGeminiモデル
-                            </label>
+                            </span>
                             <ModelComboboxSelect
                                 value={isViewMode ? selectedModel : editedModel}
                                 onChange={setEditedModel}
@@ -347,12 +381,17 @@ export default function DefaultPromptEditModal({
                             </label>
                             <select
                                 id="default-prompt-thinking-level"
-                                value={isViewMode ? selectedThinkingLevel : editedThinkingLevel}
+                                value={isViewMode
+                                    ? effectiveThinkingLevel(selectedModel, selectedThinkingLevel)
+                                    : effectiveThinkingLevel(editedModel, editedThinkingLevel)}
                                 onChange={(e) =>
                                     setEditedThinkingLevel(canonicalizeThinkingLevel(e.target.value))
                                 }
-                                disabled={isViewMode || saving}
-                                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100 disabled:text-gray-600"
+                                disabled={isViewMode || saving || !thinkingLevelSupported}
+                                aria-describedby={!thinkingLevelSupported
+                                    ? thinkingLevelDescriptionId
+                                    : undefined}
+                                className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 focus:border-transparent focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100 disabled:text-gray-600"
                             >
                                 {THINKING_LEVELS.map(level => (
                                     <option key={level.id} value={level.id}>
@@ -362,6 +401,14 @@ export default function DefaultPromptEditModal({
                                     </option>
                                 ))}
                             </select>
+                            {!thinkingLevelSupported && (
+                                <p
+                                    id={thinkingLevelDescriptionId}
+                                    className="mt-2 text-xs leading-relaxed text-gray-600"
+                                >
+                                    このモデルでは思考レベルを指定できません。
+                                </p>
+                            )}
                         </div>
                     </div>
 
@@ -374,14 +421,15 @@ export default function DefaultPromptEditModal({
                 </div>
 
                 {/* フッター */}
-                <div className="flex items-center justify-between p-4 border-t bg-white">
+                <div className="flex shrink-0 items-center justify-between p-4 border-t bg-white">
                     {isViewMode ? (
                         /* 表示モード: 左詰めで削除（削除可能な場合のみ）、右詰めで閉じる */
                         <>
                             {onDelete && mode === 'edit' ? (
                                 <button
+                                    type="button"
                                     onClick={handleDelete}
-                                    className="px-6 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2 shadow-sm font-medium"
+                                    className="inline-flex min-h-11 items-center space-x-2 rounded-lg bg-red-600 px-6 py-2.5 font-medium text-white shadow-sm transition-colors hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2"
                                 >
                                     <Trash2 className="w-4 h-4" />
                                     <span>削除</span>
@@ -391,8 +439,9 @@ export default function DefaultPromptEditModal({
                             )}
                             <div className="flex items-center space-x-3">
                                 <button
+                                    type="button"
                                     onClick={handleClose}
-                                    className="px-6 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                                    className="min-h-11 rounded-lg border border-gray-400 px-6 py-2.5 font-medium text-gray-800 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-600 focus-visible:ring-offset-2"
                                 >
                                     閉じる
                                 </button>
@@ -404,16 +453,18 @@ export default function DefaultPromptEditModal({
                             <div></div>
                             <div className="flex items-center space-x-3">
                                 <button
+                                    type="button"
                                     onClick={handleCancelEdit}
                                     disabled={saving}
-                                    className="px-6 py-2.5 bg-gray-400 text-white rounded-lg hover:bg-gray-500 transition-colors shadow-sm font-medium disabled:opacity-50"
+                                    className="min-h-11 rounded-lg border border-gray-400 bg-white px-6 py-2.5 font-medium text-gray-800 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     キャンセル
                                 </button>
                                 <button
+                                    type="button"
                                     onClick={handleSave}
                                     disabled={saving}
-                                    className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm font-medium flex items-center space-x-2 disabled:opacity-50"
+                                    className="inline-flex min-h-11 items-center space-x-2 rounded-lg bg-green-700 px-6 py-2.5 font-medium text-white shadow-sm transition-colors hover:bg-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     {saving ? (
                                         <>
@@ -432,6 +483,6 @@ export default function DefaultPromptEditModal({
                     )}
                 </div>
             </div>
-        </div>
+        </Dialog>
     );
 }
