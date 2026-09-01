@@ -306,7 +306,7 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                                                 <button
                                                     onClick={(e) => downloadDocument(transcription, e)}
                                                     className="p-2 hover:bg-purple-50 rounded-lg transition-colors"
-                                                    title="ダウンロード"
+                                                    title="TXTをダウンロード"
                                                 >
                                                     <Download className="w-4 h-4 text-blue-600" />
                                                 </button>
