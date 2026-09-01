@@ -30,8 +30,8 @@
     sans-serif;
   font-size: 10.2pt;
   font-weight: 400;
-  line-height: 1.76;
-  letter-spacing: 0.012em;
+  line-height: 1.8;
+  letter-spacing: 0.006em;
   font-kerning: normal;
 }
 
@@ -143,14 +143,15 @@
 :where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
   .pdf-markdown h1 {
   margin: 10.5mm 0 4.8mm;
-  padding: 3.1mm 4.2mm 3.2mm;
+  padding: 3.7mm 5.2mm 3.9mm;
   border-left: 1.25mm solid var(--pdf-navy-steel);
   border-bottom: 0.65mm solid #091e30;
   background: var(--pdf-navy-deep);
   color: var(--pdf-navy-paper);
-  font-size: 20.5pt;
-  line-height: 1.35;
-  letter-spacing: 0.018em;
+  font-size: 18.8pt;
+  line-height: 1.4;
+  letter-spacing: 0.022em;
+  text-wrap: balance;
 }
 
 :where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
@@ -164,6 +165,58 @@
   font-size: 15pt;
   line-height: 1.42;
   letter-spacing: 0.024em;
+}
+
+/* Summary and technical notes support the report; keep the filled band for chapters. */
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown
+  h2:is(:has(+ p + table), :has(+ pre)) {
+  margin: 6.8mm 0 3.2mm;
+  padding: 1.45mm 2.8mm 1.55mm;
+  border-left-width: 0.65mm;
+  border-bottom-width: 0.22mm;
+  background: var(--pdf-navy-wash);
+  color: var(--pdf-navy-ink-soft);
+  font-size: 11.6pt;
+  line-height: 1.5;
+  letter-spacing: 0.045em;
+}
+
+/* Repeated report chapters receive a measured rhythm that carries into page two. */
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote) {
+  margin: 11.5mm 0 3.8mm;
+  padding-block: 2.35mm 2.45mm;
+  font-size: 14.6pt;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown
+  > :nth-child(2 of h2:has(+ p + :is(ul, ol) + blockquote)) {
+  margin-top: 30mm;
+}
+
+/* The closing decision remains a major chapter and finishes as a formal summary. */
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown
+  h2:has(+ p:last-child) {
+  margin-top: 13.5mm;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown
+  h2:has(+ p:last-child)
+  + p:last-child {
+  margin-bottom: 0;
+  padding: 4.2mm 4.6mm;
+  border: 0.25mm solid var(--pdf-navy-rule-strong);
+  border-left: 1mm solid var(--pdf-navy-steel);
+  background: var(--pdf-navy-wash);
+  color: var(--pdf-navy-deep);
+  font-size: 10.6pt;
+  font-weight: 600;
+  line-height: 1.82;
 }
 
 :where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
@@ -212,6 +265,13 @@
   .pdf-markdown p {
   margin: 0 0 3.7mm;
   color: var(--pdf-navy-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown
+  :is(p, li, blockquote, td) {
+  word-break: auto-phrase;
+  text-wrap: pretty;
 }
 
 :where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
@@ -326,8 +386,8 @@
   table-layout: auto;
   background: var(--pdf-navy-paper);
   color: var(--pdf-navy-ink);
-  font-size: 8.55pt;
-  line-height: 1.52;
+  font-size: 9.2pt;
+  line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
 
@@ -338,13 +398,13 @@
 
 :where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
   .pdf-markdown tr {
-  border-bottom: 0.2mm solid var(--pdf-navy-rule);
+  border-bottom: 0.24mm solid var(--pdf-navy-rule);
 }
 
 :where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
   .pdf-markdown :is(th, td) {
-  padding: 2.05mm 2.4mm;
-  border-right: 0.2mm solid var(--pdf-navy-rule-soft);
+  padding: 2.45mm 2.55mm;
+  border-right: 0.22mm solid var(--pdf-navy-rule);
   vertical-align: top;
   text-align: left;
   overflow-wrap: anywhere;
@@ -360,7 +420,7 @@
   border-right-color: var(--pdf-navy-rule);
   background: var(--pdf-navy-deep);
   color: var(--pdf-navy-paper);
-  font-size: 8.1pt;
+  font-size: 8.8pt;
   font-weight: 700;
   line-height: 1.45;
   letter-spacing: 0.035em;
@@ -369,6 +429,28 @@
 :where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
   .pdf-markdown td {
   color: var(--pdf-navy-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown
+  :is(th, td):nth-child(3) {
+  min-width: 24mm;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown
+  :is(th, td):last-child {
+  min-width: 20mm;
+  text-align: right;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+:where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
+  .pdf-markdown
+  td:is(:nth-child(3), :last-child) {
+  color: var(--pdf-navy-deep);
+  font-weight: 600;
 }
 
 :where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
@@ -394,8 +476,8 @@
 
 :where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
   .pdf-markdown pre {
-  margin: 5.6mm 0;
-  padding: 3.6mm 4mm;
+  margin: 5mm 0;
+  padding: 3.2mm 4.5mm;
   border: 0.22mm solid var(--pdf-navy-rule);
   border-top: 0.45mm solid var(--pdf-navy-steel);
   border-left: 1mm solid var(--pdf-navy-deep);
@@ -407,8 +489,8 @@
     "Yu Gothic",
     Meiryo,
     monospace;
-  font-size: 8.15pt;
-  line-height: 1.62;
+  font-size: 8.8pt;
+  line-height: 1.7;
   letter-spacing: 0;
   white-space: pre-wrap;
   overflow: visible;
@@ -432,14 +514,15 @@
 :where(.pdf-print-root.pdf-theme-navy, .pdf-preview.pdf-theme-navy)
   .pdf-markdown :not(pre) > code {
   display: inline;
-  padding: 0.24mm 0.9mm;
+  padding: 0.12mm 0.85mm 0.2mm;
   border: 0.2mm solid var(--pdf-navy-rule);
   border-bottom: 0.35mm solid var(--pdf-navy-steel);
   border-radius: 0;
   background: var(--pdf-navy-wash);
   color: var(--pdf-navy-deep);
-  font-size: 0.88em;
+  font-size: 0.93em;
   line-height: 1;
+  vertical-align: -0.05em;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
