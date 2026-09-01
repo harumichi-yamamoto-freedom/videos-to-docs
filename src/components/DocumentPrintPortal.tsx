@@ -3,31 +3,24 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import type { Transcription } from '@/lib/firestore';
-import { formatPdfDateTime } from '@/lib/pdfExport';
 import { MarkdownDocument } from '@/components/MarkdownDocument';
-import { getGeminiModelLabel } from '../constants/geminiModels';
-import { THINKING_LEVELS } from '../constants/geminiThinking';
+import { PdfDocumentHeader } from './PdfDocumentHeader';
+import {
+    normalizePdfFontId,
+    resolvePdfFontId,
+    type PdfFontId,
+} from '../constants/pdfFonts';
 import {
     normalizePdfThemeId,
     type PdfThemeId,
 } from '../constants/pdfThemes';
-
-function getThinkingLevelLabel(level: string): string {
-    const normalizedLevel = level.trim().toLowerCase();
-    if (normalizedLevel === 'unspecified') {
-        return '未指定';
-    }
-
-    return (
-        THINKING_LEVELS.find(option => option.id === normalizedLevel)?.label ?? level
-    );
-}
 
 export type DocumentPrintPortalProps = {
     document: Transcription;
     active: boolean;
     includeMetadata: boolean;
     theme?: PdfThemeId;
+    font?: PdfFontId;
 };
 
 export function DocumentPrintPortal({
@@ -35,39 +28,22 @@ export function DocumentPrintPortal({
     active,
     includeMetadata,
     theme,
+    font,
 }: DocumentPrintPortalProps): React.ReactPortal | null {
     if (!active) {
         return null;
     }
 
     const resolvedTheme = normalizePdfThemeId(theme);
+    const resolvedFont = resolvePdfFontId(normalizePdfFontId(font), resolvedTheme);
 
     return createPortal(
-        <div className={`pdf-print-root pdf-theme-${resolvedTheme}`}>
+        <div
+            className={`pdf-print-root pdf-theme-${resolvedTheme} pdf-font-${resolvedFont}`}
+        >
             <article className="pdf-document">
                 {includeMetadata && (
-                    <header className="pdf-document__header">
-                        <h1 className="pdf-document__title">{document.title}</h1>
-                        <dl className="pdf-document__meta">
-                            <dt>生成日時</dt>
-                            <dd>{formatPdfDateTime(document.createdAt)}</dd>
-                            <dt>元ファイル</dt>
-                            <dd>{document.fileName}</dd>
-                            <dt>プロンプト</dt>
-                            <dd>{document.promptName}</dd>
-                            {document.generatedByModel && (
-                                <>
-                                    <dt>使用モデル</dt>
-                                    <dd>
-                                        {getGeminiModelLabel(document.generatedByModel)}
-                                        {document.modelSelection === 'default' && '（デフォルト選択）'}
-                                        {document.generatedByThinkingLevel &&
-                                            `・思考: ${getThinkingLevelLabel(document.generatedByThinkingLevel)}`}
-                                    </dd>
-                                </>
-                            )}
-                        </dl>
-                    </header>
+                    <PdfDocumentHeader document={document} />
                 )}
                 <MarkdownDocument
                     className="pdf-markdown"

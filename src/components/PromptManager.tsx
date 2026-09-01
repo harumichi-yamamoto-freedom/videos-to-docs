@@ -11,6 +11,7 @@ import {
 } from '@/constants/geminiThinking';
 import { ModelComboboxSelect } from './ModelComboboxSelect';
 import { createLogger } from '@/lib/logger';
+import { getCurrentUserId, getOwnerType } from '@/lib/auth';
 
 const promptManagerLogger = createLogger('PromptManager');
 
@@ -62,7 +63,9 @@ export const PromptManager: React.FC = () => {
     const loadPrompts = async () => {
         try {
             setLoading(true);
-            await initializeDefaultPrompts(); // デフォルトプロンプトを初期化
+            const ownerType = getOwnerType();
+            const ownerId = getCurrentUserId();
+            await initializeDefaultPrompts(ownerType, ownerId); // デフォルトプロンプトを初期化
             const data = await getPrompts();
             setPrompts(data);
         } catch (error) {

@@ -1,0 +1,550 @@
+/*
+ * Architect / 設計士
+ * Construction-document precision in ink, paper white, and one drafting-blue datum.
+ * The optional header is a title block; the body remains complete without it.
+ */
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document {
+  --architect-ink: #171b1e;
+  --architect-graphite: #384148;
+  --architect-muted: #68737a;
+  --architect-rule-strong: #8d979d;
+  --architect-rule: #b7bec2;
+  --architect-hairline: #d9dee0;
+  --architect-grid: #e9edee;
+  --architect-wash: #f5f7f7;
+  --architect-wash-strong: #eceff0;
+  --architect-blue: #1e6089;
+  --architect-paper: #ffffff;
+  --architect-sans:
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  --architect-mono:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+
+  color: var(--architect-ink);
+  background: var(--architect-paper);
+  font-family: var(--architect-sans);
+  font-size: 10pt;
+  font-weight: 400;
+  line-height: 1.68;
+  letter-spacing: 0;
+  font-kerning: normal;
+  font-optical-sizing: auto;
+  text-autospace: ideograph-alpha ideograph-numeric;
+}
+
+/* Optional drawing-title block. */
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64mm;
+  align-items: stretch;
+  margin: 0 0 9.5mm;
+  border: 0.28mm solid var(--architect-ink);
+  border-top-width: 0.72mm;
+  background: var(--architect-paper);
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document__title {
+  display: flex;
+  min-width: 0;
+  min-height: 31mm;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 5mm;
+  margin: 0;
+  padding: 3.2mm 5mm 4.2mm;
+  border-right: 0.28mm solid var(--architect-ink);
+  color: var(--architect-ink);
+  font-size: 21.5pt;
+  font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: 0.025em;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document__title::before {
+  content: "PROJECT RECORD / TITLE";
+  display: block;
+  color: var(--architect-graphite);
+  font-family: var(--architect-mono);
+  font-size: 7pt;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.19em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document__meta {
+  display: grid;
+  grid-template-columns: 17mm minmax(0, 1fr);
+  align-content: stretch;
+  gap: 0;
+  min-width: 0;
+  margin: 0;
+  color: var(--architect-graphite);
+  font-size: 7.9pt;
+  line-height: 1.42;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document__meta dt,
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document__meta dd {
+  min-width: 0;
+  padding: 1.45mm 1.8mm;
+  border-bottom: 0.2mm solid var(--architect-hairline);
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document__meta dt {
+  border-right: 0.2mm solid var(--architect-rule);
+  background: var(--architect-wash-strong);
+  color: var(--architect-ink);
+  font-family: var(--architect-mono);
+  font-size: 6.9pt;
+  font-weight: 700;
+  letter-spacing: 0.075em;
+  white-space: nowrap;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document__meta dd {
+  margin: 0;
+  background: var(--architect-paper);
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document__meta dt:last-of-type,
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-document__meta dd:last-of-type {
+  border-bottom: 0;
+}
+
+/* The body owns its top datum, so a document without metadata still feels finished. */
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown {
+  position: relative;
+  counter-reset: architect-section;
+  padding-top: 4.8mm;
+  border-top: 0.48mm solid var(--architect-ink);
+  color: var(--architect-ink);
+}
+
+/* The only chromatic drafting mark: a short axis at the 18 mm grid line. */
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown::before {
+  content: "";
+  position: absolute;
+  top: -0.48mm;
+  left: 18mm;
+  height: 5.25mm;
+  border-left: 0.38mm solid var(--architect-blue);
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--architect-ink);
+  font-weight: 700;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown h1 {
+  margin: 10.5mm 0 4.8mm;
+  padding: 2.6mm 0 3.1mm;
+  border-top: 0.62mm solid var(--architect-ink);
+  border-bottom: 0.2mm solid var(--architect-rule-strong);
+  font-size: 20pt;
+  line-height: 1.32;
+  letter-spacing: 0.032em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown h1::before {
+  content: "DRAWING TITLE";
+  display: block;
+  margin-bottom: 2.1mm;
+  color: var(--architect-muted);
+  font-family: var(--architect-mono);
+  font-size: 6.8pt;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.2em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown h2 {
+  counter-increment: architect-section;
+  display: grid;
+  grid-template-columns: 18mm minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 4mm;
+  margin: 8.2mm 0 3.6mm;
+  padding: 2.3mm 0 2.5mm;
+  border-top: 0.28mm solid var(--architect-ink);
+  border-bottom: 0.2mm solid var(--architect-rule);
+  font-size: 14pt;
+  line-height: 1.42;
+  letter-spacing: 0.026em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown h2::before {
+  content: "S-" counter(architect-section, decimal-leading-zero);
+  align-self: stretch;
+  padding: 0.22em 3mm 0 0;
+  border-right: 0.2mm solid var(--architect-rule-strong);
+  color: var(--architect-graphite);
+  font-family: var(--architect-mono);
+  font-size: 7.2pt;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.12em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown h3 {
+  margin: 6.5mm 0 2.8mm;
+  padding: 0.4mm 0 0.5mm 3.6mm;
+  border-left: 0.55mm solid var(--architect-ink);
+  font-size: 11.7pt;
+  line-height: 1.48;
+  letter-spacing: 0.035em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown h4 {
+  margin: 5.4mm 0 2.2mm;
+  padding-bottom: 1.1mm;
+  border-bottom: 0.2mm solid var(--architect-hairline);
+  font-size: 10.4pt;
+  line-height: 1.52;
+  letter-spacing: 0.055em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown h5 {
+  margin: 4.7mm 0 1.9mm;
+  color: var(--architect-graphite);
+  font-size: 9.4pt;
+  line-height: 1.56;
+  letter-spacing: 0.1em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown h6 {
+  display: inline-block;
+  margin: 4.2mm 0 1.7mm;
+  padding: 0.5mm 1.6mm;
+  border: 0.2mm solid var(--architect-rule-strong);
+  color: var(--architect-graphite);
+  font-family: var(--architect-mono);
+  font-size: 8.1pt;
+  line-height: 1.42;
+  letter-spacing: 0.11em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown p {
+  margin: 0 0 3.5mm;
+  line-height: 1.78;
+  line-break: strict;
+  word-break: auto-phrase;
+  overflow-wrap: normal;
+  text-align: justify;
+  text-justify: inter-character;
+  text-wrap: pretty;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown
+  :is(li, th, td, blockquote)
+  p {
+  text-align: left;
+  text-justify: auto;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown
+  :is(ul, ol) {
+  margin: 0 0 3.8mm;
+  padding-left: 2.4em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown ul {
+  list-style: square outside;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown ol {
+  list-style: decimal-leading-zero outside;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown li {
+  margin: 0;
+  padding-left: 0.25em;
+  line-height: 1.7;
+  line-break: strict;
+  word-break: auto-phrase;
+  text-wrap: pretty;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown li::marker {
+  color: var(--architect-graphite);
+  font-family: var(--architect-mono);
+  font-size: 0.84em;
+  font-weight: 600;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown li + li {
+  margin-top: 0.9mm;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown
+  li
+  > :is(ul, ol) {
+  margin-top: 1mm;
+  margin-bottom: 0.5mm;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown a {
+  color: var(--architect-ink);
+  text-decoration-line: underline;
+  text-decoration-color: var(--architect-graphite);
+  text-decoration-thickness: 0.16mm;
+  text-underline-offset: 0.18em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown strong {
+  color: var(--architect-ink);
+  font-weight: 700;
+  letter-spacing: 0.018em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown hr {
+  width: 22mm;
+  height: 1.8mm;
+  margin: 8.5mm 0;
+  border: 0;
+  border-top: 0.62mm solid var(--architect-ink);
+  border-bottom: 0.2mm solid var(--architect-rule);
+}
+
+/* Component schedule: square cells, explicit axes, and tabular figures. */
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown table {
+  margin: 4.8mm 0 5.5mm;
+  border: 0.28mm solid var(--architect-ink);
+  border-top-width: 0.72mm;
+  border-collapse: collapse;
+  background: var(--architect-paper);
+  color: var(--architect-ink);
+  font-size: 9pt;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown thead {
+  background: var(--architect-wash-strong);
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown tr {
+  border-bottom: 0.2mm solid var(--architect-rule);
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown :is(th, td) {
+  padding: 2.15mm 2.25mm;
+  border: 0;
+  border-right: 0.2mm solid var(--architect-hairline);
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown th {
+  border-right-color: var(--architect-rule);
+  border-bottom: 0.32mm solid var(--architect-ink);
+  background: var(--architect-wash-strong);
+  color: var(--architect-ink);
+  font-size: 7.9pt;
+  font-weight: 700;
+  line-height: 1.42;
+  letter-spacing: 0.075em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown td {
+  background: var(--architect-paper);
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown tr:nth-child(even) td {
+  background: var(--architect-wash);
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown :is(th, td):last-child {
+  border-right: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown
+  :is(th, td)
+  > :last-child {
+  margin-bottom: 0;
+}
+
+/* Specification field. */
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown code {
+  font-family: var(--architect-mono);
+  font-variant-ligatures: none;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown pre {
+  position: relative;
+  margin: 4.8mm 0 5.4mm;
+  padding: 7.2mm 4mm 3.6mm;
+  border: 0.25mm solid var(--architect-rule-strong);
+  border-top: 0.68mm solid var(--architect-ink);
+  border-radius: 0;
+  background: var(--architect-wash);
+  color: var(--architect-ink);
+  font-family: var(--architect-mono);
+  font-size: 8.3pt;
+  line-height: 1.62;
+  letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown pre::before {
+  content: "SPECIFICATION / CODE";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  padding: 1.25mm 3.9mm 1.05mm;
+  border-bottom: 0.2mm solid var(--architect-rule);
+  background: var(--architect-wash-strong);
+  color: var(--architect-graphite);
+  font-family: var(--architect-mono);
+  font-size: 6.1pt;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.16em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown pre > code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: inherit;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown
+  :not(pre)
+  > code {
+  padding: 0.18mm 0.75mm;
+  border: 0.2mm solid var(--architect-rule);
+  border-radius: 0;
+  background: var(--architect-wash-strong);
+  color: var(--architect-ink);
+  font-family: var(--architect-mono);
+  font-size: 0.88em;
+  line-height: 1.25;
+  letter-spacing: 0;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Revision-note field, legible as a box even when reproduced without color. */
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown blockquote {
+  position: relative;
+  margin: 4.6mm 0 5mm;
+  padding: 2.8mm 3.5mm 2.8mm 16mm;
+  border: 0.22mm solid var(--architect-rule-strong);
+  border-left: 0.72mm solid var(--architect-ink);
+  border-radius: 0;
+  background: var(--architect-wash);
+  color: var(--architect-graphite);
+  font-size: 9.4pt;
+  line-height: 1.65;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown blockquote::before {
+  content: "NOTE";
+  position: absolute;
+  top: 3.25mm;
+  left: 3mm;
+  width: 9.5mm;
+  padding-bottom: 1mm;
+  border-bottom: 0.2mm solid var(--architect-rule-strong);
+  color: var(--architect-ink);
+  font-family: var(--architect-mono);
+  font-size: 6.2pt;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.16em;
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown blockquote strong {
+  color: var(--architect-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-architect, .pdf-preview.pdf-theme-architect)
+  .pdf-markdown blockquote > :last-child {
+  margin-bottom: 0;
+}

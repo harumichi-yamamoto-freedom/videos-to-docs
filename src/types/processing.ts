@@ -8,19 +8,53 @@ export interface SegmentStatus {
     error?: string;
 }
 
+export type ProcessingPhase =
+    | 'waiting'
+    | 'video_analysis'
+    | 'audio_conversion'
+    | 'audio_concat'
+    // 🎬 動画を直接送信する試験的機能用
+    | 'direct_video_send'
+    | 'uploading'
+    | 'text_generation'
+    | 'saving'
+    | 'completed'
+    | 'canceled';
+
+export type ProcessingFailedPhase =
+    | 'engine_init'
+    | 'audio_conversion'
+    | 'upload'
+    | 'text_generation'
+    | 'saving';
+
+/** プロンプト単位の進行状態。生成と保存を分けて持つことで保存のみの再試行を可能にする */
+export type PromptJobState =
+    | 'pending'
+    | 'generating'
+    | 'saving'
+    | 'saved'
+    | 'failed'
+    | 'canceled';
+
 export interface FileProcessingStatus {
+    /** ファイルの同一性を表す不変ID。配列インデックスは追加・削除でずれるため参照に使わない */
+    fileId: string;
     fileName: string;
-    status: 'waiting' | 'converting' | 'transcribing' | 'completed' | 'error';
-    // 🎬 'direct_video_send' を追加（動画を直接送信する試験的機能用）
-    phase: 'waiting' | 'video_analysis' | 'audio_conversion' | 'audio_concat' | 'text_generation' | 'completed' | 'direct_video_send';
+    status: 'waiting' | 'converting' | 'transcribing' | 'completed' | 'error' | 'canceled';
+    phase: ProcessingPhase;
     audioConversionProgress: number; // 音声変換の進捗（0-100）
-    transcriptionCount: number; // 生成された文書数
+    transcriptionCount: number; // 保存が完了した文書数
     totalTranscriptions: number; // 生成予定の文書数
     error?: string;
     convertedAudioBlob?: Blob; // 変換済み音声データ（再開用）
-    completedPromptIds: string[]; // 完了したプロンプトID（再開用）
-    failedPhase?: 'audio_conversion' | 'text_generation'; // 失敗したフェーズ
+    completedPromptIds: string[]; // 保存まで完了したプロンプトID（再開用）
+    promptStates: Record<string, PromptJobState>; // プロンプト単位の状態
+    savePendingPromptIds?: string[]; // 生成済みで保存だけが残っているプロンプトID
+    failedPhase?: ProcessingFailedPhase; // 失敗したフェーズ
     isResuming?: boolean; // 再開処理中かどうか
+    /** ジョブ開始時に固定した所有者UID。保存直前にこの値と現在のUIDを照合する */
+    ownerUid?: string;
 
     // 区間管理用
     totalDuration?: number; // 動画の総時間（秒）
@@ -40,5 +74,3 @@ export interface DebugErrorMode {
     errorAtFileIndex: number;
     errorAtSegmentIndex: number;
 }
-
-

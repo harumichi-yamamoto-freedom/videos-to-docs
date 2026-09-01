@@ -1,0 +1,662 @@
+/*
+ * Amber theme — warm earth and timber tones for calm, client-facing notes.
+ * Structural rules and tonal contrast keep the hierarchy legible in grayscale.
+ */
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber) .pdf-document {
+  --pdf-amber-ink: #2f2925;
+  --pdf-amber-ink-soft: #51443b;
+  --pdf-amber-muted: #706158;
+  --pdf-amber-wood: #4a342a;
+  --pdf-amber-deep: #633717;
+  --pdf-amber-terracotta-deep: #793823;
+  --pdf-amber-terracotta: #a34f31;
+  --pdf-amber-gold: #b66c1e;
+  --pdf-amber-paper: #fffaf3;
+  --pdf-amber-sand: #f8ead7;
+  --pdf-amber-clay: #eac7a2;
+  --pdf-amber-rule: #c18f6c;
+  --pdf-amber-rule-soft: #e3c8ab;
+  --pdf-amber-rule-strong: var(--pdf-amber-deep);
+  --pdf-amber-component-bg: var(--pdf-amber-sand);
+  --pdf-amber-component-rule: var(--pdf-amber-rule-soft);
+  --pdf-amber-component-accent: var(--pdf-amber-terracotta-deep);
+  --pdf-amber-component-rail: 0.7mm;
+  --pdf-amber-component-radius: 0.8mm;
+
+  color: var(--pdf-amber-ink);
+  background: var(--pdf-amber-paper);
+  font-family:
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 10pt;
+  font-weight: 400;
+  line-height: 1.82;
+  letter-spacing: 0.018em;
+  font-kerning: normal;
+  line-break: strict;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+  text-autospace: normal;
+  text-spacing-trim: trim-start;
+}
+
+/* The title is a complete frame; no split top ornament competes with its box. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-document__header {
+  margin: 0 0 10.5mm;
+  padding: 2.5mm 0 0;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-document__header::before {
+  content: none;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-document__title {
+  margin: 0 0 4.6mm;
+  padding: 3.2mm 4mm 3.4mm;
+  border: 0.3mm solid var(--pdf-amber-terracotta-deep);
+  border-radius: 0.8mm;
+  background: var(--pdf-amber-sand);
+  color: var(--pdf-amber-ink);
+  font-family:
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 25pt;
+  font-weight: 700;
+  line-height: 1.29;
+  letter-spacing: 0.008em;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-document__meta {
+  display: grid;
+  grid-template-columns: 18mm minmax(0, 1fr);
+  gap: 1mm 4mm;
+  margin: 0;
+  padding: 3.2mm 4mm;
+  border: 0.2mm solid var(--pdf-amber-rule);
+  border-left: 0.9mm solid var(--pdf-amber-terracotta-deep);
+  border-radius: 0 0.8mm 0.8mm 0;
+  background: var(--pdf-amber-sand);
+  color: var(--pdf-amber-ink-soft);
+  font-size: 8.2pt;
+  line-height: 1.55;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-document__meta dt {
+  color: var(--pdf-amber-terracotta-deep);
+  font-size: 7.7pt;
+  font-weight: 700;
+  letter-spacing: 0.075em;
+  white-space: nowrap;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-document__meta dt::before {
+  content: "";
+  display: inline-block;
+  width: 1.2mm;
+  height: 1.2mm;
+  margin-right: 1.3mm;
+  border: 0.18mm solid var(--pdf-amber-wood);
+  background: var(--pdf-amber-gold);
+  vertical-align: 0.02em;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-document__meta dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--pdf-amber-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* Metadata-free documents open directly with the same closed h1 treatment. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber) .pdf-markdown {
+  padding-top: 0;
+  color: var(--pdf-amber-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown::before {
+  content: none;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-document__header
+  + .pdf-markdown {
+  padding-top: 0;
+  border-top: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-document__header
+  + .pdf-markdown::before {
+  content: none;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  > :first-child {
+  margin-top: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--pdf-amber-ink);
+  font-family:
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-weight: 700;
+  font-feature-settings: "palt" 1;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown h1 {
+  position: relative;
+  margin: 10.5mm 0 4.8mm;
+  padding: 3mm 3.8mm 2.8mm 4.5mm;
+  border: 0.3mm solid var(--pdf-amber-terracotta-deep);
+  border-radius: 0.8mm;
+  background: var(--pdf-amber-sand);
+  font-size: 21pt;
+  line-height: 1.33;
+  letter-spacing: 0.012em;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown h1::after {
+  content: "";
+  display: block;
+  width: 24mm;
+  margin-top: 2.2mm;
+  border-top: 0.65mm solid var(--pdf-amber-terracotta);
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown h2 {
+  margin: 9.3mm 0 3.8mm;
+  padding: 0.9mm 0 1.1mm 3.2mm;
+  border-left: 0.65mm solid var(--pdf-amber-terracotta);
+  border-bottom: 0.25mm solid var(--pdf-amber-rule);
+  background: transparent;
+  color: var(--pdf-amber-terracotta-deep);
+  font-size: 15.2pt;
+  line-height: 1.42;
+  letter-spacing: 0.02em;
+}
+
+/* The summary and conclusion anchor the document more strongly than body sections. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:is(:first-of-type, :last-of-type) {
+  padding: 1.15mm 2.8mm 1.3mm 3.6mm;
+  border-left: 0.85mm solid var(--pdf-amber-terracotta-deep);
+  border-bottom-color: var(--pdf-amber-terracotta-deep);
+  background: var(--pdf-amber-clay);
+}
+
+/* Code-led notes are auxiliary; a short, quiet rule separates them from sections. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:has(+ pre) {
+  width: fit-content;
+  min-width: 42mm;
+  max-width: 100%;
+  margin: 7.6mm 0 3.1mm;
+  padding: 0.45mm 0.8mm 0.65mm 2.5mm;
+  border-left-width: 0.35mm;
+  border-bottom: 0.2mm solid var(--pdf-amber-rule);
+  background: transparent;
+  color: var(--pdf-amber-ink-soft);
+  font-size: 10.9pt;
+  line-height: 1.5;
+  letter-spacing: 0.055em;
+}
+
+/* Repeated meeting sections breathe evenly and distribute the two-page flow. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote) {
+  margin: 11.7mm 0 4.4mm;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote)
+  + p {
+  margin-bottom: 4.8mm;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote)
+  + p
+  + :is(ul, ol) {
+  margin-bottom: 5.2mm;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote)
+  + p
+  + :is(ul, ol)
+  + blockquote {
+  margin: 7mm 0;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown h3 {
+  position: relative;
+  margin: 6.7mm 0 2.8mm;
+  padding: 0 0 1.35mm;
+  border-bottom: 0.25mm solid var(--pdf-amber-rule);
+  font-size: 12.3pt;
+  line-height: 1.49;
+  letter-spacing: 0.03em;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown h3::after {
+  content: none;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown h4 {
+  margin: 5.4mm 0 2.3mm;
+  padding: 0.4mm 0 0.4mm 3mm;
+  border-left: 0.5mm solid var(--pdf-amber-gold);
+  font-size: 10.8pt;
+  line-height: 1.56;
+  letter-spacing: 0.035em;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown h5 {
+  margin: 4.7mm 0 2mm;
+  padding: 0 0 0.8mm;
+  border-bottom: 0.2mm dashed var(--pdf-amber-rule-strong);
+  color: var(--pdf-amber-terracotta-deep);
+  font-size: 9.8pt;
+  line-height: 1.58;
+  letter-spacing: 0.065em;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown h6 {
+  position: relative;
+  margin: 4.3mm 0 1.8mm;
+  padding-left: 3.2mm;
+  color: var(--pdf-amber-muted);
+  font-size: 9.2pt;
+  line-height: 1.6;
+  letter-spacing: 0.075em;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown h6::before {
+  content: "";
+  position: absolute;
+  top: 0.52em;
+  left: 0.15mm;
+  width: 1.25mm;
+  height: 1.25mm;
+  border: 0.2mm solid var(--pdf-amber-terracotta-deep);
+  background: var(--pdf-amber-clay);
+  transform: rotate(45deg);
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown p {
+  margin: 0 0 4mm;
+  color: var(--pdf-amber-ink);
+  font-size: 10pt;
+  line-height: 1.86;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  > p:first-child {
+  color: var(--pdf-amber-ink-soft);
+  font-size: 10.75pt;
+  line-height: 1.84;
+}
+
+/* List shape and numbering preserve meaning when the warm palette becomes gray. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  :is(ul, ol) {
+  margin: 0 0 4.3mm;
+  padding-left: 1.9em;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown ul {
+  list-style: disc outside;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown ol {
+  list-style: decimal outside;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown ul ul {
+  list-style-type: circle;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown ul ul ul {
+  list-style-type: square;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown li {
+  margin: 0;
+  color: var(--pdf-amber-ink);
+  line-height: 1.8;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown li + li {
+  margin-top: 1.1mm;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  li
+  > :is(ul, ol) {
+  margin: 1.2mm 0 0.7mm;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown ul > li::marker {
+  color: var(--pdf-amber-terracotta);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown ol > li::marker {
+  color: var(--pdf-amber-terracotta-deep);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown a {
+  color: var(--pdf-amber-terracotta-deep);
+  font-weight: 700;
+  text-decoration-line: underline;
+  text-decoration-color: var(--pdf-amber-terracotta);
+  text-decoration-thickness: 0.2mm;
+  text-underline-offset: 0.16em;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown a:is(:hover, :focus-visible) {
+  color: var(--pdf-amber-terracotta-deep);
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown strong {
+  color: var(--pdf-amber-wood);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown hr {
+  width: 32mm;
+  height: 0.8mm;
+  margin: 9mm 0;
+  border: 0;
+  border-top: 0.2mm solid var(--pdf-amber-wood);
+  background: var(--pdf-amber-terracotta);
+}
+
+/* Pale cells and decisive rules keep tables readable without reversed type. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown table {
+  width: 100%;
+  max-width: 100%;
+  margin: 5.8mm 0;
+  border: 0.2mm solid var(--pdf-amber-component-rule);
+  border-top: 0.65mm solid var(--pdf-amber-component-accent);
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--pdf-amber-component-radius);
+  background: var(--pdf-amber-paper);
+  color: var(--pdf-amber-ink);
+  font-size: 9.2pt;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  :is(th, td) {
+  padding: 2.6mm 2.5mm;
+  border: 0;
+  border-bottom: 0.2mm solid var(--pdf-amber-rule-soft);
+  color: var(--pdf-amber-ink);
+  vertical-align: top;
+  text-align: left;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown th {
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown thead tr {
+  background: var(--pdf-amber-clay);
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown thead th {
+  border-bottom: 0.45mm solid var(--pdf-amber-component-accent);
+  background: var(--pdf-amber-clay);
+  color: var(--pdf-amber-wood);
+  font-size: 8.9pt;
+  line-height: 1.5;
+}
+
+/* Four-column action tables reserve calm, predictable tracks for owner and date. */
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  table:has(tr > :nth-child(4):last-child)
+  :is(th, td):nth-child(3) {
+  width: 19%;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  table:has(tr > :nth-child(4):last-child)
+  :is(th, td):nth-child(4) {
+  width: 15%;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown th + th {
+  border-left: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown td + td {
+  border-left: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown tr:nth-child(even) td {
+  background: var(--pdf-amber-sand);
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown tr:last-child td {
+  border-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  :is(th, td)
+  > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown code {
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-variant-ligatures: none;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown pre {
+  margin: 5.7mm 0;
+  padding: 3.7mm 4mm;
+  border: 0.2mm solid var(--pdf-amber-component-rule);
+  border-left: var(--pdf-amber-component-rail) solid
+    var(--pdf-amber-component-accent);
+  border-radius: var(--pdf-amber-component-radius);
+  background: var(--pdf-amber-component-bg);
+  color: var(--pdf-amber-ink);
+  font-family:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-size: 8.2pt;
+  line-height: 1.62;
+  letter-spacing: 0;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  tab-size: 4;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown pre > code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  overflow: visible;
+  white-space: inherit;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown
+  :not(pre)
+  > code {
+  padding: 0.25mm 0.9mm;
+  border: 0.2mm solid var(--pdf-amber-rule);
+  border-bottom: 0.45mm solid var(--pdf-amber-terracotta);
+  border-radius: 0.6mm;
+  background: var(--pdf-amber-clay);
+  color: var(--pdf-amber-terracotta-deep);
+  font-size: 0.88em;
+  line-height: 1;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown blockquote {
+  position: relative;
+  margin: 6.1mm 0;
+  padding: 3.5mm 4.2mm 3.3mm 9.5mm;
+  border: 0.2mm solid var(--pdf-amber-component-rule);
+  border-left: var(--pdf-amber-component-rail) solid
+    var(--pdf-amber-component-accent);
+  border-radius: var(--pdf-amber-component-radius);
+  background: var(--pdf-amber-component-bg);
+  color: var(--pdf-amber-ink-soft);
+  font-size: 10.1pt;
+  font-style: normal;
+  line-height: 1.76;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown blockquote p {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown blockquote::before {
+  content: "";
+  position: absolute;
+  top: 3.1mm;
+  left: 3mm;
+  width: 2.4mm;
+  height: 2.4mm;
+  border-top: 0.75mm solid var(--pdf-amber-terracotta-deep);
+  border-left: 0.75mm solid var(--pdf-amber-terracotta-deep);
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-amber, .pdf-preview.pdf-theme-amber)
+  .pdf-markdown blockquote strong {
+  color: var(--pdf-amber-terracotta-deep);
+}

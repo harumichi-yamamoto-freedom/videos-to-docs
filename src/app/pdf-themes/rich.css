@@ -1,46 +1,42 @@
 /*
  * Rich theme
- * Deep, restrained color accents keep meeting documents lively without
- * making color the only carrier of hierarchy.
+ * A confident three-color hierarchy gives documents a vivid editorial rhythm
+ * while shape, weight, and borders preserve the same hierarchy in grayscale.
  */
 
-.pdf-print-root.pdf-theme-rich .pdf-document {
+/*
+ * :is() retains the former two-class root specificity while :where() shares
+ * every visual rule with the screen preview.
+ */
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document {
   --pdf-rich-ink: #202331;
   --pdf-rich-ink-soft: #454d5e;
   --pdf-rich-navy: #263b63;
-  --pdf-rich-indigo: #554a86;
-  --pdf-rich-plum: #7a405f;
-  --pdf-rich-teal: #1f6b68;
-  --pdf-rich-gold: #8b5a20;
-  --pdf-rich-berry: #91475a;
+  --pdf-rich-plum: #793650;
+  --pdf-rich-teal: #176762;
   --pdf-rich-paper: #ffffff;
-  --pdf-rich-navy-tint: #f1f4f8;
-  --pdf-rich-plum-tint: #f6eff4;
-  --pdf-rich-teal-tint: #eef6f4;
-  --pdf-rich-gold-tint: #fbf4e8;
-  --pdf-rich-berry-tint: #f8eef1;
-  --pdf-rich-rule: #c8ced8;
+  --pdf-rich-navy-tint: #e8edf5;
+  --pdf-rich-plum-tint: #f1e2e9;
+  --pdf-rich-teal-tint: #deece9;
+  --pdf-rich-rule: #bdc5d1;
   --pdf-rich-rule-soft: #e4e7ed;
   --pdf-rich-rule-strong: #9ca7b8;
+  --pdf-rich-label-font-size: 7.1pt;
+  --pdf-rich-label-pad-block: 0.8mm;
+  --pdf-rich-label-pad-inline: 1.5mm;
+  --pdf-rich-label-gap: 3.1mm;
   --pdf-rich-spectrum: linear-gradient(
     90deg,
     #263b63 0%,
-    #554a86 28%,
-    #7a405f 52%,
-    #1f6b68 76%,
-    #8b5a20 100%
+    #263b63 64%,
+    #793650 64%,
+    #793650 100%
   );
-  --pdf-rich-spectrum-vertical: linear-gradient(
-    180deg,
-    #263b63 0%,
-    #7a405f 48%,
-    #1f6b68 100%
-  );
-
   color: var(--pdf-rich-ink);
   background: var(--pdf-rich-paper);
   font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -49,130 +45,140 @@
   font-size: 10.2pt;
   font-weight: 400;
   line-height: 1.78;
-  letter-spacing: 0.012em;
+  letter-spacing: 0.002em;
   font-kerning: normal;
 }
 
-/* Document title: a dark typographic anchor with a restrained spectrum rail. */
-.pdf-print-root.pdf-theme-rich .pdf-document__header {
+/* The title is the primary color field and remains complete without metadata. */
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__header {
   position: relative;
-  margin: 0 0 10mm;
-  padding: 5mm 0 0;
-  border-top: 0.35mm solid var(--pdf-rich-ink);
+  overflow: hidden;
+  margin: 0 0 9.5mm;
+  padding: 0 0 1.5mm;
+  border: 0.28mm solid var(--pdf-rich-ink);
+  border-radius: 2mm;
+  background: var(--pdf-rich-navy);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__header::before {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__header::before {
   content: "";
   position: absolute;
-  top: -0.8mm;
+  top: auto;
+  right: 0;
+  bottom: 0;
   left: 0;
-  width: 58mm;
-  height: 1.25mm;
-  border: 0.18mm solid var(--pdf-rich-ink-soft);
-  border-radius: 0 1mm 1mm 0;
+  width: auto;
+  height: 1.5mm;
+  border: 0;
+  border-top: 0.22mm solid var(--pdf-rich-ink);
+  border-radius: 0;
   background: var(--pdf-rich-spectrum);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__title {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__title {
   position: relative;
-  margin: 0 0 4.8mm;
-  padding: 0 0 3.2mm;
-  border-bottom: 0.25mm solid var(--pdf-rich-rule-strong);
-  color: var(--pdf-rich-navy);
+  max-inline-size: 158mm;
+  margin: 0;
+  padding: 5.8mm 17mm 5.5mm 6.2mm;
+  border: 0;
+  color: #ffffff;
   font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
     Meiryo,
     sans-serif;
-  font-size: 25.5pt;
+  font-size: 22.5pt;
   font-weight: 700;
-  line-height: 1.27;
-  letter-spacing: 0.008em;
+  line-height: 1.26;
+  letter-spacing: 0.012em;
   font-feature-settings: "palt" 1;
   text-wrap: balance;
+  overflow-wrap: break-word;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__title::after {
-  content: "";
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__title::before {
+  content: "DOCUMENT";
   display: block;
-  width: 34mm;
-  height: 0.75mm;
-  margin-top: 2.8mm;
-  border-top: 0.18mm solid var(--pdf-rich-ink-soft);
-  background: var(--pdf-rich-spectrum);
+  margin-bottom: 1.5mm;
+  color: var(--pdf-rich-plum-tint);
+  font-size: 7.2pt;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.22em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__meta {
-  margin: 0;
-  padding: 3.4mm 4.2mm;
-  border: 0.22mm solid var(--pdf-rich-rule);
-  border-left: 0.95mm solid var(--pdf-rich-plum);
-  border-radius: 1.5mm;
-  background: linear-gradient(
-    105deg,
-    var(--pdf-rich-navy-tint) 0%,
-    var(--pdf-rich-paper) 58%,
-    var(--pdf-rich-plum-tint) 100%
-  );
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__title::after {
+  content: none;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__meta {
+  grid-template-columns: 20mm minmax(0, 1fr);
+  gap: 1mm 4mm;
+  margin: 0 1.5mm;
+  padding: 3.2mm 4.5mm;
+  border: 0.22mm solid var(--pdf-rich-rule-strong);
+  border-left: 1.1mm solid var(--pdf-rich-plum);
+  border-radius: 1.3mm;
+  background: var(--pdf-rich-paper);
   color: var(--pdf-rich-ink-soft);
   font-size: 8.25pt;
   line-height: 1.55;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__meta dt {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__meta dt {
   color: var(--pdf-rich-plum);
   font-size: 7.7pt;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__meta dt::before {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__meta dt::before {
   content: "";
   display: inline-block;
   width: 1.35mm;
   height: 1.35mm;
   margin-right: 1.4mm;
-  border: 0.18mm solid var(--pdf-rich-teal);
-  border-radius: 50%;
-  background: var(--pdf-rich-teal-tint);
+  border: 0.18mm solid var(--pdf-rich-plum);
+  border-radius: 0.25mm;
+  background: var(--pdf-rich-plum);
   vertical-align: 0.02em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-document__meta dd {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-document__meta dd {
   margin: 0;
   color: var(--pdf-rich-ink-soft);
 }
 
 /* The content spine repeats the title palette without relying on color alone. */
-.pdf-print-root.pdf-theme-rich .pdf-markdown {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown {
   position: relative;
-  padding-top: 4.2mm;
-  border-top: 0.45mm solid var(--pdf-rich-ink);
+  padding-top: 5mm;
+  border-top: 0.55mm solid var(--pdf-rich-ink);
   color: var(--pdf-rich-ink);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown::before {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown::before {
   content: "";
   position: absolute;
-  top: -0.78mm;
+  top: -1.25mm;
   left: 0;
-  width: 58mm;
-  height: 1.1mm;
+  width: 72mm;
+  height: 1.7mm;
   border: 0.18mm solid var(--pdf-rich-ink-soft);
   border-radius: 0 1mm 1mm 0;
   background: var(--pdf-rich-spectrum);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h1,
-.pdf-print-root.pdf-theme-rich .pdf-markdown h2,
-.pdf-print-root.pdf-theme-rich .pdf-markdown h3,
-.pdf-print-root.pdf-theme-rich .pdf-markdown h4,
-.pdf-print-root.pdf-theme-rich .pdf-markdown h5,
-.pdf-print-root.pdf-theme-rich .pdf-markdown h6 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h1,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h2,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h3,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h4,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h5,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h6 {
   font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
@@ -183,64 +189,136 @@
   text-wrap: balance;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h1 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h1 {
   position: relative;
-  margin: 10.5mm 0 4.8mm;
-  padding: 3.2mm 4.3mm 3mm 5.2mm;
-  border: 0.22mm solid var(--pdf-rich-rule);
-  border-left: 1.1mm solid var(--pdf-rich-plum);
-  border-bottom-color: var(--pdf-rich-navy);
-  border-radius: 0 1.5mm 1.5mm 0;
-  background: linear-gradient(
-    100deg,
-    var(--pdf-rich-plum-tint) 0%,
-    var(--pdf-rich-paper) 62%,
-    var(--pdf-rich-navy-tint) 100%
-  );
-  color: var(--pdf-rich-navy);
-  font-size: 21.5pt;
-  line-height: 1.32;
-  letter-spacing: 0.012em;
+  overflow: hidden;
+  margin: 10.5mm 0 6.2mm;
+  padding: 5.7mm 18mm 5.5mm 6mm;
+  border: 0.28mm solid var(--pdf-rich-ink);
+  border-left: 1.4mm solid var(--pdf-rich-plum);
+  border-radius: 0 2mm 2mm 0;
+  background: var(--pdf-rich-navy);
+  color: #ffffff;
+  font-size: 19.5pt;
+  line-height: 1.3;
+  letter-spacing: 0.016em;
+  overflow-wrap: break-word;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h1::after {
-  content: "";
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h1::before {
+  content: "PRIMARY TOPIC";
   display: block;
-  width: 31mm;
-  height: 0.65mm;
-  margin-top: 2.2mm;
-  border-top: 0.18mm solid var(--pdf-rich-ink-soft);
+  margin-bottom: 1.6mm;
+  color: var(--pdf-rich-plum-tint);
+  font-size: 7pt;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.2em;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h1::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: auto;
+  height: 1.4mm;
+  margin: 0;
+  border-top: 0.2mm solid var(--pdf-rich-ink);
   background: var(--pdf-rich-spectrum);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h2 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h2 {
   position: relative;
-  margin: 8.5mm 0 3.5mm;
-  padding: 1.5mm 2.5mm 1.6mm 4.7mm;
-  border-left: 0.85mm solid var(--pdf-rich-teal);
-  border-bottom: 0.28mm solid var(--pdf-rich-rule-strong);
-  background: linear-gradient(
-    90deg,
-    var(--pdf-rich-teal-tint) 0%,
-    var(--pdf-rich-paper) 72%
-  );
-  color: var(--pdf-rich-plum);
-  font-size: 15.5pt;
+  margin: 9.2mm 0 4mm;
+  padding: 1.7mm 3mm 1.8mm 4.3mm;
+  border: 0;
+  border-left: 0.9mm solid var(--pdf-rich-teal);
+  background: var(--pdf-rich-teal-tint);
+  color: var(--pdf-rich-navy);
+  font-size: 14.8pt;
   line-height: 1.4;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.008em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h2::before {
-  content: "";
-  position: absolute;
-  top: -0.15mm;
-  bottom: -0.28mm;
-  left: -0.85mm;
-  width: 0.85mm;
-  background: var(--pdf-rich-spectrum-vertical);
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h2::before {
+  content: none;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h3 {
+/* Opening summary, technical note, and closing statement share one hierarchy. */
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:first-of-type,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:last-of-type,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:has(+ pre) {
+  padding: 3.4mm 4.5mm;
+  border: 0.28mm solid var(--pdf-rich-ink);
+  border-left-width: 1.35mm;
+  border-radius: 0 1.4mm 1.4mm 0;
+  color: #ffffff;
+  font-size: 15.2pt;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:first-of-type {
+  margin-top: 10mm;
+  border-left-color: var(--pdf-rich-plum);
+  background: var(--pdf-rich-navy);
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:has(+ pre) {
+  border-left-color: var(--pdf-rich-plum);
+  background: var(--pdf-rich-navy);
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:last-of-type {
+  margin-top: 10.5mm;
+  border-left-color: var(--pdf-rich-plum);
+  background: var(--pdf-rich-navy);
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:first-of-type::before,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:last-of-type::before,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:has(+ pre)::before {
+  position: static;
+  display: inline-block;
+  width: auto;
+  height: auto;
+  margin-right: var(--pdf-rich-label-gap);
+  padding: var(--pdf-rich-label-pad-block) var(--pdf-rich-label-pad-inline);
+  border: 0.18mm solid currentColor;
+  border-radius: 0.6mm;
+  background: #ffffff;
+  font-size: var(--pdf-rich-label-font-size);
+  line-height: 1.15;
+  letter-spacing: 0.12em;
+  vertical-align: middle;
+  transform: none;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:first-of-type::before {
+  content: "SUMMARY";
+  color: var(--pdf-rich-plum);
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:has(+ pre)::before {
+  content: "TECH NOTE";
+  color: var(--pdf-rich-plum);
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:last-of-type::before {
+  content: "CONCLUSION";
+  color: var(--pdf-rich-plum);
+}
+
+/* The first detailed section clears the dense opening dossier as one unit. */
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > pre + p + h2 {
+  margin-top: 12.5mm;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > pre + p {
+  margin-bottom: 6mm;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h3 {
   position: relative;
   margin: 6.8mm 0 2.9mm;
   padding: 0 0 1.4mm;
@@ -251,7 +329,7 @@
   letter-spacing: 0.03em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h3::after {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h3::after {
   content: "";
   position: absolute;
   bottom: -0.28mm;
@@ -262,114 +340,138 @@
   background: var(--pdf-rich-spectrum);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h4 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h4 {
   margin: 5.5mm 0 2.3mm;
   padding: 0.5mm 0 0.5mm 3mm;
-  border-left: 0.6mm solid var(--pdf-rich-gold);
+  border-left: 0.6mm solid var(--pdf-rich-plum);
   color: var(--pdf-rich-navy);
   font-size: 10.8pt;
   line-height: 1.55;
   letter-spacing: 0.035em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h5 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h5 {
   margin: 4.7mm 0 2mm;
   padding: 0 0 0.8mm;
   border-bottom: 0.2mm dashed var(--pdf-rich-rule-strong);
-  color: var(--pdf-rich-berry);
+  color: var(--pdf-rich-plum);
   font-size: 9.8pt;
   line-height: 1.58;
   letter-spacing: 0.065em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h6 {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h6 {
   position: relative;
   margin: 4.3mm 0 1.8mm;
   padding-left: 3.2mm;
-  color: var(--pdf-rich-indigo);
+  color: var(--pdf-rich-navy);
   font-size: 9.2pt;
   line-height: 1.58;
   letter-spacing: 0.075em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown h6::before {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown h6::before {
   content: "";
   position: absolute;
   top: 0.52em;
   left: 0;
   width: 1.45mm;
   height: 1.45mm;
-  border: 0.2mm solid var(--pdf-rich-indigo);
+  border: 0.2mm solid var(--pdf-rich-navy);
   background: var(--pdf-rich-navy-tint);
   transform: rotate(45deg);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown p {
-  margin: 0 0 3.8mm;
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown p {
+  margin: 0 0 4mm;
   color: var(--pdf-rich-ink);
   font-size: 10.2pt;
-  line-height: 1.8;
+  line-height: 1.82;
+  letter-spacing: 0.001em;
+  line-break: strict;
+  word-break: auto-phrase;
+  overflow-wrap: normal;
+  text-autospace: normal;
+  text-spacing-trim: trim-start;
+  word-spacing: normal;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown > p:first-child {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > p:first-child {
   color: var(--pdf-rich-ink-soft);
   font-size: 10.8pt;
-  line-height: 1.84;
+  line-height: 1.88;
 }
 
 /* Marker shape remains meaningful when the palette is rendered in grayscale. */
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul,
-.pdf-print-root.pdf-theme-rich .pdf-markdown ol {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ol {
   margin: 0 0 4.5mm;
-  padding-left: 1.95em;
+  padding-left: 1.85em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul {
   list-style: disc outside;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ol {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ol {
   list-style: decimal outside;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul ul {
   list-style-type: circle;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul ul {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul ul ul {
   list-style-type: square;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown li {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown li {
   margin: 0;
   color: var(--pdf-rich-ink);
-  line-height: 1.76;
+  line-height: 1.68;
+  letter-spacing: 0.001em;
+  line-break: strict;
+  word-break: auto-phrase;
+  overflow-wrap: normal;
+  text-autospace: normal;
+  word-spacing: normal;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown li + li {
-  margin-top: 1.25mm;
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown li + li {
+  margin-top: 1.35mm;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul > li::marker {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown li > :is(ul, ol) {
+  margin: 1mm 0 0.5mm;
+  padding-left: 1.55em;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown li > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul > li::marker {
   color: var(--pdf-rich-teal);
   font-weight: 700;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ol > li::marker {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ol > li::marker {
   color: var(--pdf-rich-plum);
   font-weight: 700;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul > li::marker,
-.pdf-print-root.pdf-theme-rich .pdf-markdown ol ol > li::marker {
-  color: var(--pdf-rich-gold);
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul ul > li::marker,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ol ol > li::marker {
+  color: var(--pdf-rich-ink-soft);
+  font-size: 0.8em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown ul ul ul > li::marker {
-  color: var(--pdf-rich-berry);
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown ul ul ul > li::marker {
+  color: var(--pdf-rich-ink-soft);
+  font-size: 0.76em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown a {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown a {
   color: var(--pdf-rich-navy);
   font-weight: 700;
   text-decoration-line: underline;
@@ -378,16 +480,20 @@
   text-underline-offset: 0.16em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown strong {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown strong {
   color: var(--pdf-rich-plum);
   background: linear-gradient(
     transparent 72%,
-    var(--pdf-rich-berry-tint) 72%
+    var(--pdf-rich-plum-tint) 72%
   );
   font-weight: 700;
+  text-decoration-line: underline;
+  text-decoration-color: var(--pdf-rich-plum);
+  text-decoration-thickness: 0.16mm;
+  text-underline-offset: 0.13em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown hr {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown hr {
   width: 42mm;
   height: 0.9mm;
   margin: 9mm 0;
@@ -396,11 +502,15 @@
   background: var(--pdf-rich-spectrum);
 }
 
-/* A pale header keeps table labels legible even when backgrounds are omitted. */
-.pdf-print-root.pdf-theme-rich .pdf-markdown table {
-  margin: 5.8mm 0;
-  border: 0.25mm solid var(--pdf-rich-rule-strong);
-  border-top: 0.9mm solid var(--pdf-rich-navy);
+/* A filled header and weighted final columns give the action table a focal role. */
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown table {
+  width: 100%;
+  margin: 7.8mm 0;
+  table-layout: fixed;
+  border: 0.28mm solid var(--pdf-rich-navy);
+  border-top: 1.15mm solid var(--pdf-rich-plum);
+  border-collapse: separate;
+  border-spacing: 0;
   border-radius: 1.6mm;
   background: var(--pdf-rich-paper);
   color: var(--pdf-rich-ink);
@@ -408,9 +518,9 @@
   line-height: 1.54;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown th,
-.pdf-print-root.pdf-theme-rich .pdf-markdown td {
-  padding: 2.15mm 2.45mm;
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown th,
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown td {
+  padding: 3.2mm 2.6mm;
   border: 0;
   border-bottom: 0.2mm solid var(--pdf-rich-rule);
   color: var(--pdf-rich-ink);
@@ -418,73 +528,109 @@
   text-align: left;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown thead th {
-  border-bottom: 0.65mm solid var(--pdf-rich-navy);
-  background: linear-gradient(
-    105deg,
-    var(--pdf-rich-navy-tint) 0%,
-    var(--pdf-rich-plum-tint) 50%,
-    var(--pdf-rich-teal-tint) 100%
-  );
-  color: var(--pdf-rich-navy);
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown thead th {
+  border-bottom: 0.65mm solid var(--pdf-rich-ink);
+  background: var(--pdf-rich-navy);
+  color: #ffffff;
   font-size: 8.15pt;
   font-weight: 700;
   line-height: 1.45;
   letter-spacing: 0.035em;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown th + th {
-  border-left: 0.2mm solid var(--pdf-rich-rule-strong);
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown th + th {
+  border-left: 0.24mm solid #ffffff;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown td + td {
-  border-left: 0.2mm solid var(--pdf-rich-rule-soft);
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown td + td {
+  border-left: 0.24mm solid var(--pdf-rich-rule);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown tr:nth-child(even) td {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown tr:nth-child(even) td {
   background: var(--pdf-rich-navy-tint);
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown tr:last-child td {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown table:has(thead th:nth-child(4):last-child) :is(th, td):nth-child(1) {
+  width: 23%;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown table:has(thead th:nth-child(4):last-child) :is(th, td):nth-child(2) {
+  width: 45%;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown table:has(thead th:nth-child(4):last-child) :is(th, td):nth-child(3) {
+  width: 18%;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown table:has(thead th:nth-child(4):last-child) :is(th, td):nth-child(4) {
+  width: 14%;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown table:has(thead th:nth-child(4):last-child) thead th:nth-child(3) {
+  background: var(--pdf-rich-teal);
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown table:has(thead th:nth-child(4):last-child) thead th:nth-child(4) {
+  background: var(--pdf-rich-plum);
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown table:has(thead th:nth-child(4):last-child) tbody td:nth-child(3) {
+  border-left: 0.45mm solid var(--pdf-rich-teal);
+  background: var(--pdf-rich-teal-tint);
+  font-weight: 600;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown table:has(thead th:nth-child(4):last-child) tbody td:nth-child(4) {
+  border-left: 0.55mm double var(--pdf-rich-plum);
+  background: var(--pdf-rich-plum-tint);
+  color: var(--pdf-rich-ink);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown tr:last-child td {
   border-bottom-color: transparent;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown code {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown code {
   color: var(--pdf-rich-plum);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;
   font-variant-ligatures: none;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown pre {
-  margin: 5.8mm 0;
-  padding: 3.8mm 4.1mm;
-  border: 0.22mm solid var(--pdf-rich-rule);
-  border-top: 0.38mm solid var(--pdf-rich-gold);
-  border-left: 1.05mm solid var(--pdf-rich-navy);
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown pre {
+  margin: 8.2mm 0;
+  padding: 5.4mm 4.6mm;
+  border: 0.28mm solid var(--pdf-rich-ink);
+  border-top: 0.8mm solid var(--pdf-rich-navy);
+  border-left: 1.25mm solid var(--pdf-rich-plum);
   border-radius: 0 1.7mm 1.7mm 0;
-  background: linear-gradient(
-    105deg,
-    var(--pdf-rich-navy-tint) 0%,
-    var(--pdf-rich-paper) 100%
-  );
-  color: var(--pdf-rich-ink);
+  background: var(--pdf-rich-navy);
+  color: #ffffff;
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
     "Yu Gothic",
     Meiryo,
     monospace;
   font-size: 8.2pt;
-  line-height: 1.62;
+  line-height: 1.68;
   letter-spacing: 0;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown pre > code {
+/* The visible alias makes the following inline API reference executable. */
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown > h2:has(+ pre) + pre:has(+ p code)::after {
+  content: "const calcTotal = total;";
+  color: #ffffff;
+  font: inherit;
+  white-space: pre-wrap;
+}
+
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown pre > code {
   margin: 0;
   padding: 0;
   border: 0;
@@ -493,55 +639,46 @@
   font: inherit;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown :not(pre) > code {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown :not(pre) > code {
   padding: 0.28mm 1mm;
-  border: 0.2mm solid var(--pdf-rich-rule);
-  border-left: 0.6mm solid var(--pdf-rich-gold);
+  border: 0.2mm solid var(--pdf-rich-rule-strong);
+  border-left: 0.6mm solid var(--pdf-rich-plum);
   border-radius: 0 0.8mm 0.8mm 0;
-  background: var(--pdf-rich-gold-tint);
-  color: var(--pdf-rich-plum);
+  background: var(--pdf-rich-navy-tint);
+  color: var(--pdf-rich-navy);
   font-size: 0.88em;
   line-height: 1;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown blockquote {
-  position: relative;
-  margin: 5.8mm 0;
-  padding: 3.7mm 4.3mm 3.5mm 10.5mm;
-  border: 0.22mm solid var(--pdf-rich-rule);
-  border-top: 0.35mm solid var(--pdf-rich-gold);
-  border-left: 1.05mm solid var(--pdf-rich-plum);
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown blockquote {
+  margin: 7.2mm 0;
+  padding: 4.6mm 5.2mm;
+  border: 0.28mm solid #b88fa1;
+  border-left: 1.3mm solid var(--pdf-rich-plum);
   border-radius: 0 1.6mm 1.6mm 0;
-  background: linear-gradient(
-    105deg,
-    var(--pdf-rich-plum-tint) 0%,
-    var(--pdf-rich-paper) 58%,
-    var(--pdf-rich-teal-tint) 100%
-  );
+  background: var(--pdf-rich-plum-tint);
   color: var(--pdf-rich-ink-soft);
   font-size: 10.35pt;
   font-style: normal;
-  line-height: 1.76;
+  line-height: 1.9;
+  line-break: strict;
+  word-break: auto-phrase;
+  overflow-wrap: normal;
+  text-autospace: normal;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown blockquote::before {
-  content: "“";
-  position: absolute;
-  top: 1.6mm;
-  left: 3mm;
-  color: var(--pdf-rich-gold);
-  font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
-    "Hiragino Sans",
-    "Yu Gothic",
-    YuGothic,
-    Meiryo,
-    sans-serif;
-  font-size: 24pt;
-  font-weight: 700;
-  line-height: 1;
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown blockquote::before {
+  content: none;
 }
 
-.pdf-print-root.pdf-theme-rich .pdf-markdown blockquote strong {
+:where(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich):is(.pdf-print-root.pdf-theme-rich, .pdf-preview.pdf-theme-rich) .pdf-markdown blockquote strong {
   color: var(--pdf-rich-plum);
+  background: transparent;
+  font-weight: 800;
+  text-decoration-line: underline;
+  text-decoration-style: double;
+  text-decoration-thickness: 0.18mm;
+  text-underline-offset: 0.15em;
 }

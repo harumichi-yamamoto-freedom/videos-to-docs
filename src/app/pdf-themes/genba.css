@@ -1,0 +1,689 @@
+/*
+ * Genba / 現場
+ * Dense meeting records shaped for rapid retrieval on paper.
+ */
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document {
+  --genba-ink-strong: #0b0d0f;
+  --genba-ink: #171a1d;
+  --genba-ink-soft: #3f454a;
+  --genba-muted: #62686d;
+  --genba-rule-strong: #7d8489;
+  --genba-rule: #afb5b9;
+  --genba-hairline: #d9dde0;
+  --genba-wash: #f1f3f4;
+  --genba-wash-soft: #f8f9f9;
+  --genba-paper: #ffffff;
+  --genba-safety: #e8a000;
+
+  color: var(--genba-ink);
+  background: var(--genba-paper);
+  font-family:
+    var(--pdf-font-body, var(--font-noto-sans-jp, "Noto Sans JP")),
+    "Hiragino Sans",
+    "Yu Gothic",
+    YuGothic,
+    Meiryo,
+    sans-serif;
+  font-size: 10.25pt;
+  font-weight: 400;
+  line-height: 1.72;
+  letter-spacing: 0;
+  word-spacing: normal;
+  font-kerning: normal;
+  font-optical-sizing: auto;
+  text-autospace: ideograph-alpha ideograph-numeric;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document__header {
+  margin: 0 0 8.5mm;
+  border: 0.35mm solid var(--genba-ink);
+  border-top-width: 0.9mm;
+  background: var(--genba-paper);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document__title {
+  margin: 0;
+  padding: 4.2mm 5.2mm 4.5mm;
+  border-left: 2.2mm solid var(--genba-safety);
+  background: var(--genba-ink-strong);
+  color: var(--genba-paper);
+  font-size: 21pt;
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: 0.012em;
+  font-feature-settings: "palt" 1, "kern" 1;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document__meta {
+  grid-template-columns: 21mm minmax(0, 1fr) 21mm minmax(0, 1fr);
+  gap: 0;
+  margin: 0;
+  color: var(--genba-ink-soft);
+  font-size: 8.7pt;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document__meta dt,
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document__meta dd {
+  min-width: 0;
+  padding: 1.75mm 2.2mm;
+  border-top: 0.2mm solid var(--genba-hairline);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document__meta dt {
+  margin: 0;
+  border-right: 0.2mm solid var(--genba-rule);
+  background: var(--genba-wash);
+  color: var(--genba-ink-strong);
+  font-size: 8.7pt;
+  font-weight: 800;
+  letter-spacing: 0.018em;
+  white-space: nowrap;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document__meta dt:nth-of-type(even) {
+  border-left: 0.3mm solid var(--genba-rule-strong);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document__meta dd {
+  margin: 0;
+  background: var(--genba-paper);
+  color: var(--genba-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown {
+  position: relative;
+  padding-top: 4.6mm;
+  border-top: 0.75mm solid var(--genba-ink-strong);
+  color: var(--genba-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown::before {
+  content: "";
+  position: absolute;
+  top: -0.75mm;
+  left: 0;
+  width: 28mm;
+  border-top: 0.75mm solid var(--genba-safety);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  > :first-child {
+  margin-top: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--genba-ink-strong);
+  font-feature-settings: "palt" 1, "kern" 1;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  h1 {
+  position: relative;
+  margin: 10mm 0 4.6mm;
+  padding: 2.2mm 0 2.7mm 4.8mm;
+  border-left: 1.2mm solid var(--genba-ink-strong);
+  border-bottom: 0.5mm solid var(--genba-ink-strong);
+  font-size: 19pt;
+  font-weight: 800;
+  line-height: 1.36;
+  letter-spacing: 0.018em;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  h1::after {
+  content: "";
+  position: absolute;
+  bottom: -0.5mm;
+  left: 0;
+  width: 24mm;
+  border-bottom: 0.5mm solid var(--genba-safety);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  h2 {
+  margin: 8.2mm 0 3.6mm;
+  padding: 2.35mm 4mm 2.55mm 5.2mm;
+  border-left: 1.8mm solid var(--genba-safety);
+  background: var(--genba-ink-strong);
+  color: var(--genba-paper);
+  font-size: 14.2pt;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: 0.014em;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  h3 {
+  margin: 6.4mm 0 2.8mm;
+  padding: 0.75mm 0 0.9mm 3.8mm;
+  border-left: 0.9mm solid var(--genba-ink-strong);
+  border-bottom: 0.2mm solid var(--genba-rule);
+  font-size: 11.8pt;
+  font-weight: 800;
+  line-height: 1.48;
+  letter-spacing: 0.018em;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  h4 {
+  margin: 5.3mm 0 2.2mm;
+  padding: 0.45mm 0 0.55mm 2.8mm;
+  border-left: 0.35mm solid var(--genba-rule-strong);
+  font-size: 10.8pt;
+  font-weight: 800;
+  line-height: 1.52;
+  letter-spacing: 0.02em;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  h5 {
+  margin: 4.6mm 0 1.9mm;
+  padding-bottom: 0.7mm;
+  border-bottom: 0.2mm solid var(--genba-hairline);
+  color: var(--genba-ink);
+  font-size: 10pt;
+  font-weight: 800;
+  line-height: 1.56;
+  letter-spacing: 0.025em;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  h6 {
+  margin: 4.1mm 0 1.7mm;
+  color: var(--genba-muted);
+  font-size: 9.3pt;
+  font-weight: 800;
+  line-height: 1.58;
+  letter-spacing: 0.04em;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  p {
+  margin: 0 0 3.5mm;
+  line-height: 1.74;
+  letter-spacing: 0;
+  word-spacing: normal;
+  text-align: left;
+  text-wrap: pretty;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  ul {
+  margin: 0 0 4mm;
+  padding-left: 1.65em;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  ul:not(.contains-task-list) {
+  list-style: square outside;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  ol {
+  margin: 0 0 4mm;
+  padding-left: 1.9em;
+  list-style: decimal outside;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  :is(ul ul, ul ol, ol ul, ol ol) {
+  margin-top: 0.8mm;
+  margin-bottom: 0.4mm;
+  padding-left: 1.65em;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  :is(ul, ol)
+  > ul:not(.contains-task-list) {
+  list-style: circle outside;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  :is(ul ol, ol ol) {
+  list-style: decimal outside;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  :is(ul, ol)
+  :is(ul, ol)
+  > ul:not(.contains-task-list) {
+  list-style: disc outside;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  li {
+  margin: 0;
+  padding-left: 0.24em;
+  line-height: 1.68;
+  letter-spacing: 0;
+  text-wrap: pretty;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  li
+  + li {
+  margin-top: 0.9mm;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  ul
+  > li::marker {
+  color: var(--genba-ink-soft);
+  font-size: 0.88em;
+  font-weight: 800;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  ol
+  > li::marker {
+  color: var(--genba-ink-strong);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  > ul:not(.contains-task-list)
+  > li::marker {
+  color: var(--genba-safety);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  li
+  > p {
+  margin-bottom: 1.4mm;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  ul.contains-task-list {
+  margin: 3.5mm 0 4.2mm;
+  padding: 1.35mm 3mm;
+  border: 0.25mm solid var(--genba-rule-strong);
+  border-left: 1.2mm solid var(--genba-ink-strong);
+  background: var(--genba-wash-soft);
+  list-style: none;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  li.task-list-item {
+  position: relative;
+  min-height: 6.5mm;
+  margin: 0;
+  padding: 1.35mm 1mm 1.35mm 7mm;
+  border-bottom: 0.2mm solid var(--genba-hairline);
+  color: var(--genba-ink-soft);
+  line-height: 1.58;
+  list-style: none;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  li.task-list-item:last-child {
+  border-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  li.task-list-item:has(> input[type="checkbox"]:not(:checked)) {
+  background: var(--genba-paper);
+  color: var(--genba-ink-strong);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  .task-list-item
+  > input[type="checkbox"] {
+  position: absolute;
+  top: 1.65mm;
+  left: 1.15mm;
+  width: 3.8mm;
+  height: 3.8mm;
+  margin: 0;
+  outline: 0.3mm solid var(--genba-ink-strong);
+  outline-offset: 0.15mm;
+  accent-color: var(--genba-safety);
+  opacity: 1;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  .task-list-item
+  > ul.contains-task-list {
+  margin: 1.2mm 0 0 1mm;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  table {
+  margin: 5.2mm 0 6mm;
+  border: 0.35mm solid var(--genba-ink-strong);
+  border-collapse: collapse;
+  background: var(--genba-paper);
+  color: var(--genba-ink);
+  font-size: 9.4pt;
+  line-height: 1.52;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  thead {
+  background: var(--genba-ink-strong);
+  color: var(--genba-paper);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  tr {
+  border-bottom: 0.2mm solid var(--genba-rule);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  thead
+  tr {
+  border-bottom: 0.65mm solid var(--genba-safety);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  th,
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  td {
+  padding: 2.45mm 2.6mm;
+  border-right: 0.2mm solid var(--genba-hairline);
+  font-size: 9.4pt;
+  line-height: 1.52;
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  th {
+  background: var(--genba-ink-strong);
+  color: var(--genba-paper);
+  font-weight: 800;
+  line-height: 1.44;
+  letter-spacing: 0.012em;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  td {
+  background: var(--genba-paper);
+  color: var(--genba-ink);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  tbody
+  tr:nth-child(even)
+  td {
+  background: var(--genba-wash);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  tbody
+  td:first-child {
+  color: var(--genba-ink-strong);
+  font-weight: 700;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  :is(th, td):last-child {
+  border-right: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  tbody
+  tr:last-child {
+  border-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  :is(th, td)
+  > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  blockquote {
+  margin: 5mm 0 5.5mm;
+  padding: 3.2mm 4mm;
+  border: 0.25mm solid var(--genba-rule);
+  border-left: 1.2mm solid var(--genba-ink-strong);
+  background: var(--genba-wash-soft);
+  color: var(--genba-ink-soft);
+  font-size: 10pt;
+  line-height: 1.7;
+  letter-spacing: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  blockquote
+  > :last-child {
+  margin-bottom: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  pre {
+  margin: 5.2mm 0 5.8mm;
+  padding: 3.4mm 4mm;
+  border: 0.25mm solid var(--genba-rule);
+  border-left: 1.2mm solid var(--genba-ink-strong);
+  background: var(--genba-wash);
+  color: var(--genba-ink);
+  font-family:
+    var(--font-geist-mono, "Geist Mono"),
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    "Hiragino Sans",
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  font-size: 8.9pt;
+  font-weight: 500;
+  line-height: 1.6;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  code {
+  font-family:
+    var(--font-geist-mono, "Geist Mono"),
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    "Hiragino Sans",
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  letter-spacing: 0;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  pre
+  > code {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  :not(pre)
+  > code {
+  padding: 0.2mm 0.75mm;
+  border: 0.2mm solid var(--genba-rule);
+  border-bottom: 0.4mm solid var(--genba-ink-soft);
+  background: var(--genba-wash);
+  color: var(--genba-ink-strong);
+  font-size: 9pt;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  a {
+  color: var(--genba-ink-strong);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--genba-rule-strong);
+  text-decoration-thickness: 0.22mm;
+  text-underline-offset: 0.18em;
+  overflow-wrap: anywhere;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  strong {
+  color: var(--genba-ink-strong);
+  font-weight: 800;
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  hr {
+  height: 0;
+  margin: 8mm 0;
+  border: 0;
+  border-top: 0.55mm solid var(--genba-ink-strong);
+}
+
+:where(.pdf-print-root.pdf-theme-genba, .pdf-preview.pdf-theme-genba)
+  .pdf-document
+  .pdf-markdown
+  img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 5mm auto;
+  padding: 1.2mm;
+  border: 0.25mm solid var(--genba-rule-strong);
+  background: var(--genba-paper);
+  object-fit: contain;
+}

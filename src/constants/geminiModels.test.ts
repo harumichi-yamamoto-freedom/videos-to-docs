@@ -13,19 +13,37 @@ vi.mock('@/constants/geminiModels', async () => import('./geminiModels'));
 vi.mock('@/constants/geminiThinking', async () => import('./geminiThinking'));
 
 vi.mock('@/lib/prompts', () => ({
+    createPrompt: vi.fn(),
     updatePrompt: vi.fn(),
     deletePrompt: vi.fn(),
+}));
+
+vi.mock('@/lib/logger', () => ({
+    createLogger: () => ({ error: vi.fn() }),
 }));
 
 vi.mock('../components/ContentEditModal', () => ({
     ContentEditModal: () => null,
 }));
 
-import { getModelComboboxKeyTransition } from '../components/ModelComboboxSelect';
 import {
-    PromptModelEditSessionState,
-    hasPromptModelChanges,
-    reducePromptModelEditSession,
+    effectiveThinkingLevel,
+    getModelComboboxKeyTransition,
+    getThinkingLevelOptionLabel,
+    supportsThinkingLevel,
+} from '../components/ModelComboboxSelect';
+import {
+    type PromptCreateDraft,
+    hasPromptCreateDraft,
+    reducePromptCreateDraft,
+} from '../components/PromptCreateModal';
+import {
+    type PromptEditSessionState,
+    type PromptEditValues,
+    createPromptEditValues,
+    createPromptEditSession,
+    hasPromptEditChanges,
+    reducePromptEditSession,
 } from '../components/PromptEditModal';
 
 describe('geminiModels', () => {
@@ -179,123 +197,256 @@ describe('getModelComboboxKeyTransition', () => {
     });
 });
 
-const FIXED_MODEL = 'gemini-2.5-pro';
-const FIXED_THINKING_LEVEL = 'high';
+describe('思考レベルのモデル対応', () => {
+    it('現在の既定モデルと3.7系だけを対応として扱う', () => {
+        expect(supportsThinkingLevel(GEMINI_DEFAULT_MODEL_SENTINEL)).toBe(true);
+        expect(supportsThinkingLevel('gemini-3.7-flash')).toBe(true);
+        expect(supportsThinkingLevel('gemini-3.5-flash')).toBe(false);
+        expect(supportsThinkingLevel('gemini-2.5-pro')).toBe(false);
+    });
 
-function createPromptModelSession(): PromptModelEditSessionState {
+    it('defaultを実際の挙動に合わせて標準（推奨）と表示する', () => {
+        expect(getThinkingLevelOptionLabel({
+            id: 'default',
+            label: '自動',
+            description: '標準・推奨',
+        })).toBe('標準（推奨）');
+    });
+});
+
+function createEmptyPromptDraft(): PromptCreateDraft {
     return {
-        selectedModel: GEMINI_DEFAULT_MODEL_SENTINEL,
-        savedModel: GEMINI_DEFAULT_MODEL_SENTINEL,
-        selectedThinkingLevel: 'default',
-        savedThinkingLevel: 'default',
-        isViewMode: true,
+        name: '',
+        content: '',
+        model: GEMINI_DEFAULT_MODEL_SENTINEL,
+        thinkingLevel: 'default',
     };
 }
 
-describe('reducePromptModelEditSession', () => {
-    it('モデル選択をdirtyとして扱う', () => {
-        const state = reducePromptModelEditSession(createPromptModelSession(), {
-            type: 'select',
-            model: FIXED_MODEL,
-        });
-
-        expect(state.selectedModel).toBe(FIXED_MODEL);
-        expect(hasPromptModelChanges(state)).toBe(true);
+describe('reducePromptCreateDraft', () => {
+    it.each([
+        ['名前', { type: 'nameChanged', name: '議事録' } as const],
+        ['内容', { type: 'contentChanged', content: '要約してください。' } as const],
+        ['モデル', { type: 'modelChanged', model: 'gemini-3.7-flash' } as const],
+        ['思考レベル', { type: 'thinkingLevelChanged', thinkingLevel: 'high' } as const],
+    ])('%sの変更をドラフトとして扱う', (_name, action) => {
+        const state = reducePromptCreateDraft(createEmptyPromptDraft(), action);
+        expect(hasPromptCreateDraft(state)).toBe(true);
     });
 
-    it('思考レベル選択をdirtyとして扱う', () => {
-        const state = reducePromptModelEditSession(createPromptModelSession(), {
-            type: 'selectThinkingLevel',
-            thinkingLevel: FIXED_THINKING_LEVEL,
+    it('非対応モデル選択中は実効の思考レベルをdefaultへ落とす', () => {
+        const high = reducePromptCreateDraft(createEmptyPromptDraft(), {
+            type: 'thinkingLevelChanged',
+            thinkingLevel: 'high',
+        });
+        const unsupported = reducePromptCreateDraft(high, {
+            type: 'modelChanged',
+            model: 'gemini-2.5-pro',
         });
 
-        expect(state.selectedThinkingLevel).toBe(FIXED_THINKING_LEVEL);
-        expect(hasPromptModelChanges(state)).toBe(true);
+        expect(
+            effectiveThinkingLevel(unsupported.model, unsupported.thinkingLevel),
+        ).toBe('default');
+
+        const attemptedChange = reducePromptCreateDraft(unsupported, {
+            type: 'thinkingLevelChanged',
+            thinkingLevel: 'low',
+        });
+        expect(
+            effectiveThinkingLevel(attemptedChange.model, attemptedChange.thinkingLevel),
+        ).toBe('default');
     });
 
-    it('未保存の編集から表示へ戻ると保存値へリセットする', () => {
-        const editing = reducePromptModelEditSession(createPromptModelSession(), {
-            type: 'viewModeChanged',
-            isViewMode: false,
+    it('非対応モデルを経由して戻ると選択済みの思考レベルを復元する', () => {
+        const high = reducePromptCreateDraft(createEmptyPromptDraft(), {
+            type: 'thinkingLevelChanged',
+            thinkingLevel: 'high',
         });
-        const changed = reducePromptModelEditSession(editing, {
-            type: 'select',
-            model: FIXED_MODEL,
+        const unsupported = reducePromptCreateDraft(high, {
+            type: 'modelChanged',
+            model: 'gemini-2.5-pro',
         });
-        const thinkingChanged = reducePromptModelEditSession(changed, {
-            type: 'selectThinkingLevel',
-            thinkingLevel: FIXED_THINKING_LEVEL,
-        });
-
-        const returnedToView = reducePromptModelEditSession(thinkingChanged, {
-            type: 'viewModeChanged',
-            isViewMode: true,
+        const backToSupported = reducePromptCreateDraft(unsupported, {
+            type: 'modelChanged',
+            model: high.model,
         });
 
-        expect(returnedToView.selectedModel).toBe(GEMINI_DEFAULT_MODEL_SENTINEL);
-        expect(returnedToView.selectedThinkingLevel).toBe('default');
-        expect(hasPromptModelChanges(returnedToView)).toBe(false);
+        expect(backToSupported.thinkingLevel).toBe('high');
+        expect(
+            effectiveThinkingLevel(backToSupported.model, backToSupported.thinkingLevel),
+        ).toBe('high');
+        expect(backToSupported).toEqual(high);
+    });
+});
+
+const SAVED_VALUES: PromptEditValues = {
+    title: '保存済みタイトル',
+    content: '保存済み内容',
+    model: GEMINI_DEFAULT_MODEL_SENTINEL,
+    thinkingLevel: 'default',
+};
+
+function createEditSession(): PromptEditSessionState {
+    return createPromptEditSession(SAVED_VALUES);
+}
+
+describe('reducePromptEditSession', () => {
+    it('非対応モデルの保存済み思考レベルを初期化時にdefaultへ正規化する', () => {
+        const values = createPromptEditValues({
+            id: 'prompt-id',
+            name: SAVED_VALUES.title,
+            content: SAVED_VALUES.content,
+            model: 'gemini-2.5-pro',
+            thinkingLevel: 'high',
+            isDefault: false,
+            ownerType: 'user',
+            ownerId: 'owner-id',
+            createdBy: 'owner-id',
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+        });
+
+        expect(values.thinkingLevel).toBe('default');
     });
 
-    it('保存成功後の編集から表示への遷移は新しい保存値を維持する', () => {
-        const editing = reducePromptModelEditSession(createPromptModelSession(), {
-            type: 'viewModeChanged',
-            isViewMode: false,
-        });
-        const changed = reducePromptModelEditSession(editing, {
-            type: 'select',
-            model: FIXED_MODEL,
-        });
-        const thinkingChanged = reducePromptModelEditSession(changed, {
-            type: 'selectThinkingLevel',
-            thinkingLevel: FIXED_THINKING_LEVEL,
-        });
-        const saved = reducePromptModelEditSession(thinkingChanged, {
-            type: 'saveSucceeded',
-        });
+    it.each([
+        [
+            'タイトル',
+            { type: 'textChanged', title: '変更後', content: SAVED_VALUES.content } as const,
+        ],
+        [
+            '本文',
+            { type: 'textChanged', title: SAVED_VALUES.title, content: '変更後' } as const,
+        ],
+        [
+            'モデル',
+            { type: 'modelChanged', model: 'gemini-3.7-flash' } as const,
+        ],
+        [
+            '思考レベル',
+            { type: 'thinkingLevelChanged', thinkingLevel: 'high' } as const,
+        ],
+    ])('%sを単一セッションのdirty判定へ含める', (_name, action) => {
+        const state = reducePromptEditSession(createEditSession(), action);
 
-        const returnedToView = reducePromptModelEditSession(saved, {
-            type: 'viewModeChanged',
-            isViewMode: true,
-        });
-
-        expect(returnedToView.selectedModel).toBe(FIXED_MODEL);
-        expect(returnedToView.savedModel).toBe(FIXED_MODEL);
-        expect(returnedToView.selectedThinkingLevel).toBe(FIXED_THINKING_LEVEL);
-        expect(returnedToView.savedThinkingLevel).toBe(FIXED_THINKING_LEVEL);
-        expect(hasPromptModelChanges(returnedToView)).toBe(false);
+        expect(hasPromptEditChanges(state)).toBe(true);
     });
 
-    it('表示から編集への遷移と同一モード通知では選択値を変えない', () => {
-        const state: PromptModelEditSessionState = {
-            selectedModel: FIXED_MODEL,
-            savedModel: GEMINI_DEFAULT_MODEL_SENTINEL,
-            selectedThinkingLevel: FIXED_THINKING_LEVEL,
-            savedThinkingLevel: 'default',
-            isViewMode: true,
+    it('破棄確定時に全フィールドを保存値へ一度に戻す', () => {
+        const textChanged = reducePromptEditSession(createEditSession(), {
+            type: 'textChanged',
+            title: '変更後タイトル',
+            content: '変更後本文',
+        });
+        const modelChanged = reducePromptEditSession(textChanged, {
+            type: 'modelChanged',
+            model: 'gemini-3.7-flash',
+        });
+        const thinkingChanged = reducePromptEditSession(modelChanged, {
+            type: 'thinkingLevelChanged',
+            thinkingLevel: 'high',
+        });
+        const discarded = reducePromptEditSession(thinkingChanged, {
+            type: 'discardChanges',
+        });
+
+        expect(discarded.draft).toEqual(SAVED_VALUES);
+        expect(hasPromptEditChanges(discarded)).toBe(false);
+    });
+
+    it('保存成功時に全フィールドをsavedとdraftへ確定する', () => {
+        const values: PromptEditValues = {
+            title: '変更後タイトル',
+            content: '変更後本文',
+            model: 'gemini-3.7-flash',
+            thinkingLevel: 'high',
         };
-
-        const editing = reducePromptModelEditSession(state, {
-            type: 'viewModeChanged',
-            isViewMode: false,
-        });
-        const duplicate = reducePromptModelEditSession(editing, {
-            type: 'viewModeChanged',
-            isViewMode: false,
+        const saved = reducePromptEditSession(createEditSession(), {
+            type: 'saveSucceeded',
+            values,
         });
 
-        expect(editing.selectedModel).toBe(FIXED_MODEL);
-        expect(editing.selectedThinkingLevel).toBe(FIXED_THINKING_LEVEL);
-        expect(duplicate).toBe(editing);
+        expect(saved).toEqual({ saved: values, draft: values });
+        expect(hasPromptEditChanges(saved)).toBe(false);
     });
 
-    it('resetはモデルと思考レベルのdefault相当値をcanonical値へ揃える', () => {
-        const state = reducePromptModelEditSession(createPromptModelSession(), {
-            type: 'reset',
-            savedModel: ' default ',
-            savedThinkingLevel: ' unknown ',
+    it('非対応モデル選択中は実効の思考レベルをdefaultへ落とす', () => {
+        const high = reducePromptEditSession(createEditSession(), {
+            type: 'thinkingLevelChanged',
+            thinkingLevel: 'high',
+        });
+        const unsupported = reducePromptEditSession(high, {
+            type: 'modelChanged',
+            model: 'gemini-2.5-pro',
         });
 
-        expect(state).toEqual(createPromptModelSession());
+        expect(
+            effectiveThinkingLevel(
+                unsupported.draft.model,
+                unsupported.draft.thinkingLevel,
+            ),
+        ).toBe('default');
+        expect(hasPromptEditChanges(unsupported)).toBe(true);
+
+        const attemptedChange = reducePromptEditSession(unsupported, {
+            type: 'thinkingLevelChanged',
+            thinkingLevel: 'low',
+        });
+        expect(
+            effectiveThinkingLevel(
+                attemptedChange.draft.model,
+                attemptedChange.draft.thinkingLevel,
+            ),
+        ).toBe('default');
+    });
+
+    it('非対応モデルの保存値へ戻ると画面に出ない思考レベルの差でdirtyにしない', () => {
+        // Saved on a model which cannot use a level at all.
+        const savedUnsupported = createPromptEditSession({
+            ...SAVED_VALUES,
+            model: 'gemini-2.5-pro',
+            thinkingLevel: 'default',
+        });
+        const onSupportedModel = reducePromptEditSession(savedUnsupported, {
+            type: 'modelChanged',
+            model: 'gemini-3.7-flash',
+        });
+        const picked = reducePromptEditSession(onSupportedModel, {
+            type: 'thinkingLevelChanged',
+            thinkingLevel: 'high',
+        });
+        const backToSaved = reducePromptEditSession(picked, {
+            type: 'modelChanged',
+            model: 'gemini-2.5-pro',
+        });
+
+        // The retained 'high' is not shown and would not be saved, so the
+        // screen is identical to the saved prompt.
+        expect(backToSaved.draft.thinkingLevel).toBe('high');
+        expect(
+            effectiveThinkingLevel(backToSaved.draft.model, backToSaved.draft.thinkingLevel),
+        ).toBe('default');
+        expect(hasPromptEditChanges(backToSaved)).toBe(false);
+    });
+
+    it('非対応モデルを経由して戻すと保存済みの思考レベルへ戻りdirtyも解消する', () => {
+        const savedHigh = createPromptEditSession({
+            ...SAVED_VALUES,
+            model: 'gemini-3.7-flash',
+            thinkingLevel: 'high',
+        });
+        const unsupported = reducePromptEditSession(savedHigh, {
+            type: 'modelChanged',
+            model: 'gemini-2.5-pro',
+        });
+        expect(hasPromptEditChanges(unsupported)).toBe(true);
+
+        const backToSupported = reducePromptEditSession(unsupported, {
+            type: 'modelChanged',
+            model: 'gemini-3.7-flash',
+        });
+
+        expect(backToSupported.draft.thinkingLevel).toBe('high');
+        expect(hasPromptEditChanges(backToSupported)).toBe(false);
     });
 });

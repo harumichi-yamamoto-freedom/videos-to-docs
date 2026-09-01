@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { FileText, RefreshCw, Plus, Trash2, Lock } from 'lucide-react';
 import { Prompt, getPrompts, deletePrompt, initializeDefaultPrompts, addDefaultPrompts } from '@/lib/prompts';
 import { useAuth } from '@/hooks/useAuth';
@@ -10,6 +10,14 @@ import { AddDefaultPromptsModal } from './AddDefaultPromptsModal';
 import { getDefaultPrompts, DefaultPromptTemplate } from '@/lib/adminSettings';
 
 const promptListLogger = createLogger('PromptListSidebar');
+type PromptLoadStatus = 'loading' | 'success' | 'error';
+
+interface PromptCollectionState {
+    ownerKey: string | null;
+    status: PromptLoadStatus;
+    prompts: Prompt[];
+    refreshWarning?: string;
+}
 
 /**
  * プロンプト一覧サイドバーのProps
@@ -27,81 +35,186 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
     onPromptDeleted,
     updateTrigger,
 }) => {
-    const { user } = useAuth();
-    const [prompts, setPrompts] = useState<Prompt[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { user, loading: authLoading } = useAuth();
+    const ownerType = user ? 'user' : 'guest';
+    const ownerId = user?.uid ?? 'GUEST';
+    // ownerType も含め、uid が "GUEST" のユーザーとゲストを別世代として扱う。
+    const ownerKey = authLoading ? null : JSON.stringify([ownerType, ownerId]);
+    const [collectionState, setCollectionState] = useState<PromptCollectionState>({
+        ownerKey: null,
+        status: 'loading',
+        prompts: [],
+    });
     const [isInitializing, setIsInitializing] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [defaultTemplates, setDefaultTemplates] = useState<DefaultPromptTemplate[]>([]);
     const menuRef = useRef<HTMLDivElement>(null);
+    const ownerGenerationRef = useRef(0);
+    const requestIdRef = useRef(0);
+    const ownerKeyRef = useRef(ownerKey);
+    const successfulOwnerKeyRef = useRef<string | null>(null);
+    const successfulPromptsRef = useRef<Prompt[]>([]);
+    const initializationRef = useRef<{
+        ownerKey: string;
+        promise: Promise<void>;
+    } | null>(null);
+
+    ownerKeyRef.current = ownerKey;
+
+    const invalidatePendingRequests = useCallback(() => {
+        ownerGenerationRef.current += 1;
+        requestIdRef.current += 1;
+    }, []);
+
+    const visibleState: PromptCollectionState = collectionState.ownerKey === ownerKey
+        ? collectionState
+        : {
+            ownerKey,
+            status: 'loading',
+            prompts: [],
+        };
+    const prompts = visibleState.prompts;
+    const loadStatus = visibleState.status;
+
+    const loadPromptsForOwner = useCallback(async (
+        requestedOwnerKey: string,
+        generation: number,
+        showLoading: boolean,
+    ) => {
+        const requestId = ++requestIdRef.current;
+        const isCurrentRequest = () => (
+            ownerGenerationRef.current === generation
+            && requestIdRef.current === requestId
+            && ownerKeyRef.current === requestedOwnerKey
+        );
+
+        if (showLoading && isCurrentRequest()) {
+            setCollectionState(previous => ({
+                ownerKey: requestedOwnerKey,
+                status: 'loading',
+                prompts: previous.ownerKey === requestedOwnerKey ? previous.prompts : [],
+            }));
+        }
+
+        try {
+            let data = await getPrompts();
+            if (!isCurrentRequest()) return;
+
+            // プロンプトが0件の場合、デフォルトプロンプトを自動生成
+            if (data.length === 0) {
+                let initialization = initializationRef.current;
+                if (!initialization || initialization.ownerKey !== requestedOwnerKey) {
+                    initialization = {
+                        ownerKey: requestedOwnerKey,
+                        promise: initializeDefaultPrompts(ownerType, ownerId),
+                    };
+                    initializationRef.current = initialization;
+                    setIsInitializing(true);
+                    promptListLogger.info('プロンプトが0件のためデフォルトプロンプトを生成', {
+                        ownerKey: requestedOwnerKey,
+                    });
+                }
+
+                try {
+                    await initialization.promise;
+                } finally {
+                    if (initializationRef.current === initialization) {
+                        initializationRef.current = null;
+                        if (ownerKeyRef.current === requestedOwnerKey) {
+                            setIsInitializing(false);
+                        }
+                    }
+                }
+                if (!isCurrentRequest()) return;
+
+                data = await getPrompts();
+                if (!isCurrentRequest()) return;
+            }
+
+            if (showLoading) {
+                // 手動更新では急な点滅を避けるため、従来どおり最低0.5秒表示する。
+                await new Promise(resolve => setTimeout(resolve, 500));
+                if (!isCurrentRequest()) return;
+            }
+
+            successfulOwnerKeyRef.current = requestedOwnerKey;
+            successfulPromptsRef.current = data;
+            setCollectionState({
+                ownerKey: requestedOwnerKey,
+                status: 'success',
+                prompts: data,
+            });
+        } catch (error) {
+            if (!isCurrentRequest()) return;
+
+            promptListLogger.error(
+                showLoading
+                    ? 'プロンプト一覧の取得に失敗'
+                    : '静かな更新でのプロンプト取得に失敗',
+                error,
+                { ownerKey: requestedOwnerKey },
+            );
+            if (showLoading || successfulOwnerKeyRef.current !== requestedOwnerKey) {
+                setCollectionState(previous => ({
+                    ownerKey: requestedOwnerKey,
+                    status: 'error',
+                    prompts: previous.ownerKey === requestedOwnerKey ? previous.prompts : [],
+                }));
+                return;
+            }
+
+            // quiet更新が手動更新中のloadingを追い越して失敗しても、最後の成功結果へ戻す。
+            // 一時的な表示状態ではなく成功スナップショットの有無で非遮断かを決める。
+            setCollectionState(previous => {
+                if (previous.ownerKey !== requestedOwnerKey) return previous;
+                return {
+                    ...previous,
+                    status: 'success',
+                    prompts: successfulPromptsRef.current,
+                    refreshWarning: '最新化失敗：現在のプロンプト一覧を表示しています。',
+                };
+            });
+        }
+    }, [ownerId, ownerType]);
 
     // 静かに更新（ローディング表示なし）
-    const loadPromptsQuietly = async () => {
-        try {
-            const data = await getPrompts();
-
-            // プロンプトが0件の場合、デフォルトプロンプトを自動生成
-            if (data.length === 0 && !isInitializing) {
-                setIsInitializing(true);
-                promptListLogger.info('プロンプトが0件のためデフォルトプロンプトを生成', {
-                    userId: user?.uid,
-                });
-                await initializeDefaultPrompts();
-                const newData = await getPrompts();
-                setPrompts(newData);
-                setIsInitializing(false);
-            } else {
-                setPrompts(data);
-            }
-        } catch (error) {
-            promptListLogger.error('静的更新でのプロンプト取得に失敗', error, { userId: user?.uid });
-            setIsInitializing(false);
-        }
-    };
+    const loadPromptsQuietly = () => ownerKey === null
+        ? Promise.resolve()
+        : loadPromptsForOwner(ownerKey, ownerGenerationRef.current, false);
 
     // 手動更新（ローディング表示あり）
-    const loadPrompts = async () => {
-        try {
-            setLoading(true);
-            const data = await getPrompts();
-
-            // プロンプトが0件の場合、デフォルトプロンプトを自動生成
-            if (data.length === 0 && !isInitializing) {
-                setIsInitializing(true);
-                promptListLogger.info('プロンプトが0件のためデフォルトプロンプトを生成', {
-                    userId: user?.uid,
-                });
-                await initializeDefaultPrompts();
-                const newData = await getPrompts();
-                setPrompts(newData);
-                setIsInitializing(false);
-            } else {
-                setPrompts(data);
-            }
-
-            // 最低0.5秒はローディング表示
-            await new Promise(resolve => setTimeout(resolve, 500));
-        } catch (error) {
-            promptListLogger.error('プロンプト一覧の取得に失敗', error, { userId: user?.uid });
-            setIsInitializing(false);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const loadPrompts = () => ownerKey === null
+        ? Promise.resolve()
+        : loadPromptsForOwner(ownerKey, ownerGenerationRef.current, true);
 
     useEffect(() => {
-        loadPrompts();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+        const generation = ++ownerGenerationRef.current;
+        ++requestIdRef.current;
+        successfulOwnerKeyRef.current = null;
+        successfulPromptsRef.current = [];
+        setCollectionState({
+            ownerKey,
+            status: 'loading',
+            prompts: [],
+        });
+        setIsInitializing(false);
+
+        if (ownerKey === null) return;
+
+        void loadPromptsForOwner(ownerKey, generation, true);
+        return () => {
+            invalidatePendingRequests();
+        };
+    }, [invalidatePendingRequests, loadPromptsForOwner, ownerKey]);
 
     // 外部からの更新トリガーを監視
     useEffect(() => {
         if (updateTrigger !== undefined && updateTrigger > 0) {
-            loadPromptsQuietly();
+            void loadPromptsQuietly();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [updateTrigger]);
+    }, [ownerKey, updateTrigger]);
 
     // メニュー外クリックで閉じる
     useEffect(() => {
@@ -200,7 +313,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
         <div className="h-full flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
             {/* ヘッダー */}
             <div className="p-6 bg-white border-b border-purple-100">
-                <div className="flex items-center justify-between mb-2">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center space-x-2">
                         <FileText className="w-6 h-6 text-blue-600" />
                         <h2 className="text-xl font-bold text-gray-900">
@@ -211,10 +324,13 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                         <div className="relative" ref={menuRef}>
                             <button
                                 onClick={handlePlusButtonClick}
-                                className="p-2 hover:bg-blue-50 rounded-lg transition-colors"
-                                title={user ? "プロンプト作成メニュー" : "新規作成"}
+                                className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                                title={user ? "プロンプト作成メニュー" : "新規プロンプト"}
+                                aria-haspopup={user ? 'menu' : undefined}
+                                aria-expanded={user ? isMenuOpen : undefined}
                             >
                                 <Plus className="w-5 h-5 text-blue-600" />
+                                <span>新規プロンプト</span>
                             </button>
 
                             {/* ログインユーザー用ドロップダウンメニュー */}
@@ -241,25 +357,58 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                         </div>
                         <button
                             onClick={loadPrompts}
-                            disabled={loading}
-                            className="p-2 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={loadStatus === 'loading'}
+                            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg transition-colors hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
                             title="更新"
+                            aria-label="プロンプト一覧を更新"
                         >
-                            <RefreshCw className={`w-5 h-5 text-blue-600 ${loading ? 'animate-spin' : ''}`} />
+                            <RefreshCw className={`w-5 h-5 text-blue-600 ${loadStatus === 'loading' ? 'animate-spin' : ''}`} />
                         </button>
                     </div>
                 </div>
-                <p className="text-xs text-gray-600">
-                    {prompts.length}件のプロンプト
-                </p>
+                {loadStatus === 'loading' ? (
+                    <div
+                        className="h-3 w-24 animate-pulse rounded bg-gray-200"
+                        role="status"
+                        aria-label="プロンプト件数を読み込み中"
+                    />
+                ) : loadStatus === 'success' ? (
+                    <p className="text-xs text-gray-600">
+                        {prompts.length}件のプロンプト
+                    </p>
+                ) : (
+                    <p className="text-xs text-red-600">プロンプト件数を取得できませんでした</p>
+                )}
+                {visibleState.refreshWarning && (
+                    <p
+                        role="status"
+                        aria-live="polite"
+                        className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                    >
+                        {visibleState.refreshWarning}
+                    </p>
+                )}
             </div>
 
             {/* コンテンツ */}
             <div className="flex-1 overflow-y-auto p-4">
                 {/* プロンプトリスト */}
-                {loading ? (
+                {loadStatus === 'loading' ? (
                     <div className="flex items-center justify-center h-32">
                         <div className="text-sm text-gray-500">読み込み中...</div>
+                    </div>
+                ) : loadStatus === 'error' ? (
+                    <div role="alert" className="rounded-xl border border-red-100 bg-white p-8 text-center shadow-sm">
+                        <FileText className="mx-auto mb-3 h-12 w-12 text-red-300" />
+                        <p className="text-sm font-medium text-gray-900">プロンプト一覧を取得できませんでした</p>
+                        <p className="mt-1 text-xs text-gray-600">通信状況をご確認のうえ、再度お試しください。</p>
+                        <button
+                            type="button"
+                            onClick={loadPrompts}
+                            className="mt-4 min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                        >
+                            再読み込み
+                        </button>
                     </div>
                 ) : prompts.length === 0 ? (
                     <div className="bg-white rounded-xl p-8 shadow-sm">
@@ -274,11 +423,10 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                         {prompts.map((prompt) => (
                             <div
                                 key={prompt.id}
-                                onClick={() => onPromptClick(prompt)}
-                                className="bg-white rounded-xl p-4 shadow-sm hover:shadow-md cursor-pointer transition-all group border border-gray-100 hover:border-blue-200"
+                                className="group relative rounded-xl border border-gray-100 bg-white shadow-sm transition-all hover:border-blue-200 hover:shadow-md"
                             >
-                                <div className="flex items-start justify-between">
-                                    <div className="flex-1 min-w-0 mr-2">
+                                <div className={`p-4 ${canDeletePrompt(prompt) ? 'pr-14' : ''}`}>
+                                    <div className="min-w-0">
                                         <div className="flex items-center space-x-2">
                                             <h3 className="text-sm font-semibold text-gray-900 truncate group-hover:text-blue-700 transition-colors">
                                                 {prompt.name}
@@ -297,16 +445,23 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                                             Geminiモデル: {getGeminiModelLabel(prompt.model)}
                                         </p>
                                     </div>
-                                    {canDeletePrompt(prompt) && (
-                                        <button
-                                            onClick={(e) => handleDelete(prompt, e)}
-                                            className="p-2 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                                            title="削除"
-                                        >
-                                            <Trash2 className="w-4 h-4 text-red-600" />
-                                        </button>
-                                    )}
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={() => onPromptClick(prompt)}
+                                    aria-label={`「${prompt.name}」を開く`}
+                                    className="absolute inset-0 z-10 cursor-pointer rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+                                />
+                                {canDeletePrompt(prompt) && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => handleDelete(prompt, e)}
+                                        className="absolute right-4 top-4 z-20 flex min-h-11 min-w-11 items-center justify-center rounded-lg opacity-0 transition-colors hover:bg-red-50 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
+                                        title="削除"
+                                    >
+                                        <Trash2 className="w-4 h-4 text-red-600" />
+                                    </button>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -323,4 +478,3 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
         </div>
     );
 };
-
