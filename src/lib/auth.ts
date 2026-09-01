@@ -138,59 +138,6 @@ export function getOwnerType(): 'user' | 'guest' {
 }
 
 /**
- * アカウントを削除（ユーザー本人のみ）
- * 重要: Firestoreデータを先に削除してから、Authenticationアカウントを削除
- * （順序を逆にすると、認証が切れてFirestoreデータを削除できなくなる）
- */
-export async function deleteAccount(): Promise<void> {
-    // 最新のユーザーオブジェクトを取得（再認証後の状態を確実に反映）
-    const user = auth.currentUser;
-    if (!user) {
-        throw new Error('ログインしていません');
-    }
-
-    const uid = user.uid;
-    const email = user.email || undefined;
-
-    try {
-        authLogger.info('アカウント削除を開始', { uid });
-
-        // 最新の認証トークンを取得
-        await user.getIdToken(true);
-
-        // ステップ1: Firestoreの関連データを削除（認証が有効なうちに）
-        authLogger.info('関連Firestoreデータの削除を開始', { uid });
-        const { deleteUserData } = await import('./accountDeletion');
-        await deleteUserData(uid, email);
-        authLogger.info('関連Firestoreデータの削除が完了', { uid });
-
-        // ステップ2: Firebase Authentication のアカウントを削除
-        // （Firestoreデータを削除した後なので、認証が切れても問題ない）
-        authLogger.info('Authenticationアカウントの削除を実行', { uid });
-
-        // auth.currentUser を再取得（最新の認証状態を確実に使用）
-        const currentUser = auth.currentUser;
-        if (!currentUser) {
-            throw new Error('ユーザーが見つかりません');
-        }
-
-        await currentUser.delete();
-
-        authLogger.info('アカウント削除が完了', { uid });
-    } catch (error) {
-        const firebaseError = error as { code?: string; message?: string };
-        authLogger.error('アカウント削除でエラーが発生', error, { uid });
-
-        // Firestoreデータは削除済みだが、Authenticationの削除に失敗した場合
-        if (firebaseError.code === 'auth/requires-recent-login') {
-            authLogger.warn('再認証が必要なためAuthenticationの削除に失敗', { uid });
-        }
-
-        throw error;
-    }
-}
-
-/**
  * 表示名を更新
  */
 export async function updateUserDisplayName(newDisplayName: string): Promise<void> {

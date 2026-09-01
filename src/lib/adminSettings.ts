@@ -3,7 +3,14 @@
  */
 
 import { db } from './firebase';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import {
+    doc,
+    getDoc,
+    runTransaction,
+    setDoc,
+    serverTimestamp,
+    type Timestamp,
+} from 'firebase/firestore';
 import {
     canonicalizeGeminiModel,
     GEMINI_DEFAULT_MODEL_SENTINEL,
@@ -31,8 +38,19 @@ export interface AdminSettings {
         documentsPerHour: number;
     };
     defaultPrompts?: DefaultPromptTemplate[];
+    lastGuestSyncStatus?: GuestPromptsSyncStatus;
+    lastGuestSyncAt?: Date | Timestamp;
+    lastGuestSyncBy?: string;
+    lastGuestSyncOperationId?: string;
     updatedAt?: Date;
     updatedBy?: string;
+}
+
+export type GuestPromptsSyncStatus = 'not-requested' | 'pending' | 'succeeded' | 'failed';
+
+export interface AdminSettingsUpdateResult {
+    settingsUpdated: true;
+    guestPromptsSync: GuestPromptsSyncStatus;
 }
 
 /**
@@ -184,6 +202,21 @@ const DEFAULT_SETTINGS: AdminSettings = {
     defaultPrompts: INITIAL_DEFAULT_PROMPTS,
 };
 
+// prompts.ts の同期処理は getDefaultPrompts() を最初に同期呼び出しする。
+// 保存済みの正確なsnapshotをその1回だけ受け渡し、実行時APIのfail-open fallbackを
+// 管理者同期へ持ち込まない。値は getDefaultPrompts() の関数冒頭で即座に消費される。
+let guestSyncDefaultPromptsOverride: DefaultPromptTemplate[] | null = null;
+
+function getDefaultSettings(): AdminSettings {
+    return withCanonicalDefaultPrompts(
+        {
+            ...DEFAULT_SETTINGS,
+            rateLimit: { ...DEFAULT_SETTINGS.rateLimit },
+        },
+        DEFAULT_SETTINGS.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
+    );
+}
+
 function canonicalizeDefaultPrompts(
     prompts: DefaultPromptTemplate[],
 ): DefaultPromptTemplate[] {
@@ -204,9 +237,50 @@ function withCanonicalDefaultPrompts(
     };
 }
 
+function withRuntimeDefaults(settings: Partial<AdminSettings>): AdminSettings {
+    const defaults = getDefaultSettings();
+
+    return withCanonicalDefaultPrompts(
+        {
+            ...defaults,
+            ...settings,
+            maxPromptSize: settings.maxPromptSize ?? defaults.maxPromptSize,
+            maxDocumentSize: settings.maxDocumentSize ?? defaults.maxDocumentSize,
+            rateLimit: {
+                ...defaults.rateLimit,
+                ...settings.rateLimit,
+            },
+        },
+        settings.defaultPrompts ?? defaults.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
+    );
+}
+
 /**
- * 管理者設定を取得
- * 設定が存在しない場合、デフォルト設定を自動的に保存する（初回マイグレーション）
+ * 一般実行向けの設定を読み取り専用で取得する。
+ * 未認証・一般ユーザーの権限不足や未作成documentは安全な既定値へフォールバックし、
+ * この経路から adminSettings への書き込みは行わない。
+ */
+async function getRuntimeSettings(): Promise<AdminSettings> {
+    try {
+        const docRef = doc(db, 'adminSettings', 'config');
+        const docSnap = await getDoc(docRef);
+
+        if (!docSnap.exists()) {
+            return getDefaultSettings();
+        }
+
+        return withRuntimeDefaults(docSnap.data() as Partial<AdminSettings>);
+    } catch (error) {
+        adminSettingsLogger.error('実行時管理者設定の取得に失敗したため既定値を使用', error);
+        return getDefaultSettings();
+    }
+}
+
+/**
+ * 管理画面編集用の管理者設定を取得する。
+ * 権限のある管理者経路として、設定が存在しない場合は初期設定を保存し、
+ * defaultPrompts が未作成の場合は初回マイグレーションを行う。
+ * 読み取り・初期化に失敗した場合は既定値で隠さず、編集を止めるため例外を伝播する。
  */
 export async function getAdminSettings(): Promise<AdminSettings> {
     try {
@@ -244,16 +318,174 @@ export async function getAdminSettings(): Promise<AdminSettings> {
             updatedAt: serverTimestamp(),
         });
 
-        return withCanonicalDefaultPrompts(
-            DEFAULT_SETTINGS,
-            DEFAULT_SETTINGS.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
-        );
+        return getDefaultSettings();
     } catch (error) {
         adminSettingsLogger.error('管理者設定の取得に失敗', error);
-        return withCanonicalDefaultPrompts(
-            DEFAULT_SETTINGS,
-            DEFAULT_SETTINGS.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
+        throw new Error('管理者設定の取得に失敗しました');
+    }
+}
+
+function createGuestSyncOperationId(): string {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+        return globalThis.crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function syncGuestDefaultPrompts(
+    updatedBy: string,
+    defaultPrompts: DefaultPromptTemplate[],
+): Promise<void> {
+    try {
+        const { syncGuestDefaultPrompts: syncPrompts } = await import('./prompts');
+        // dynamic import完了後に設定することで、循環importの初期化中にoverrideを露出させない。
+        guestSyncDefaultPromptsOverride = canonicalizeDefaultPrompts(defaultPrompts);
+        await syncPrompts();
+    } catch (error) {
+        adminSettingsLogger.error('ゲストデフォルトプロンプトの同期に失敗', error, {
+            updatedBy,
+        });
+        throw new Error('ゲストデフォルトプロンプトの同期に失敗しました');
+    } finally {
+        // 現行syncは最初のawaitまでにoverrideを消費する。将来の実装変更や同期throwでも
+        // 一般実行のgetDefaultPromptsへ値を残さないため、防御的に必ず解除する。
+        guestSyncDefaultPromptsOverride = null;
+    }
+}
+
+async function acquireGuestDefaultPromptsRetrySnapshot(
+    updatedBy: string,
+    operationId: string,
+): Promise<DefaultPromptTemplate[]> {
+    const docRef = doc(db, 'adminSettings', 'config');
+
+    return runTransaction(db, async transaction => {
+        const snapshot = await transaction.get(docRef);
+        if (!snapshot.exists()) {
+            throw new Error('管理者設定が存在しません');
+        }
+
+        const currentSettings = snapshot.data() as Partial<AdminSettings>;
+        const defaultPrompts = canonicalizeDefaultPrompts(
+            currentSettings.defaultPrompts ?? INITIAL_DEFAULT_PROMPTS,
         );
+        transaction.set(
+            docRef,
+            {
+                ...(currentSettings.defaultPrompts == null ? { defaultPrompts } : {}),
+                lastGuestSyncStatus: 'pending',
+                lastGuestSyncAt: serverTimestamp(),
+                lastGuestSyncBy: updatedBy,
+                lastGuestSyncOperationId: operationId,
+            },
+            { merge: true },
+        );
+        return defaultPrompts;
+    });
+}
+
+async function finalizeGuestDefaultPromptsSyncStatus(
+    status: Exclude<GuestPromptsSyncStatus, 'not-requested' | 'pending'>,
+    updatedBy: string,
+    operationId: string,
+): Promise<boolean> {
+    const docRef = doc(db, 'adminSettings', 'config');
+
+    return runTransaction(db, async transaction => {
+        const snapshot = await transaction.get(docRef);
+        const currentSettings = snapshot.exists()
+            ? snapshot.data() as Partial<AdminSettings>
+            : null;
+
+        if (currentSettings?.lastGuestSyncOperationId !== operationId) {
+            // 異なるsnapshotの同期が重なった時点で、delete/createが交錯している可能性がある。
+            // 新しい操作がpendingまたは成功済みでもfailedへ戻し、再同期まで警告を残す。
+            if (
+                currentSettings?.lastGuestSyncStatus === 'pending'
+                || currentSettings?.lastGuestSyncStatus === 'succeeded'
+            ) {
+                transaction.set(
+                    docRef,
+                    {
+                        lastGuestSyncStatus: 'failed',
+                        lastGuestSyncAt: serverTimestamp(),
+                    },
+                    { merge: true },
+                );
+            }
+            return false;
+        }
+
+        if (currentSettings.lastGuestSyncStatus !== 'pending') return false;
+
+        transaction.set(
+            docRef,
+            {
+                lastGuestSyncStatus: status,
+                lastGuestSyncAt: serverTimestamp(),
+                lastGuestSyncBy: updatedBy,
+                lastGuestSyncOperationId: operationId,
+            },
+            { merge: true },
+        );
+        return true;
+    });
+}
+
+export async function retryGuestDefaultPromptsSync(updatedBy: string): Promise<void> {
+    const operationId = createGuestSyncOperationId();
+    let defaultPrompts: DefaultPromptTemplate[];
+
+    try {
+        // 現在のconfig snapshot取得とpending遷移を同じtransactionに束ねる。
+        // 競合時はcallbackが再実行され、commitされた最新snapshotだけを同期へ渡す。
+        defaultPrompts = await acquireGuestDefaultPromptsRetrySnapshot(updatedBy, operationId);
+    } catch (error) {
+        adminSettingsLogger.error('ゲスト再同期開始状態の保存に失敗', error, {
+            updatedBy,
+        });
+        throw new Error('ゲストデフォルトプロンプトの同期状態を保存できませんでした');
+    }
+
+    try {
+        await syncGuestDefaultPrompts(updatedBy, defaultPrompts);
+    } catch (error) {
+        try {
+            const failurePersisted = await finalizeGuestDefaultPromptsSyncStatus(
+                'failed',
+                updatedBy,
+                operationId,
+            );
+            if (!failurePersisted) {
+                adminSettingsLogger.info('新しいゲスト同期操作があるため古い失敗状態を保存しません', {
+                    updatedBy,
+                    operationId,
+                });
+            }
+        } catch (statusError) {
+            adminSettingsLogger.error('ゲスト再同期失敗状態の保存に失敗', statusError, {
+                updatedBy,
+            });
+        }
+
+        throw error;
+    }
+
+    try {
+        const successPersisted = await finalizeGuestDefaultPromptsSyncStatus(
+            'succeeded',
+            updatedBy,
+            operationId,
+        );
+        if (!successPersisted) {
+            throw new Error('より新しいゲスト同期操作が開始されています');
+        }
+    } catch (error) {
+        adminSettingsLogger.error('ゲスト再同期成功状態の保存に失敗', error, {
+            updatedBy,
+        });
+        throw new Error('ゲストデフォルトプロンプトの同期状態を保存できませんでした');
     }
 }
 
@@ -263,24 +495,86 @@ export async function getAdminSettings(): Promise<AdminSettings> {
 export async function updateAdminSettings(
     settings: Partial<AdminSettings>,
     updatedBy: string
-): Promise<void> {
+): Promise<AdminSettingsUpdateResult> {
     try {
         const docRef = doc(db, 'adminSettings', 'config');
-        const canonicalSettings = settings.defaultPrompts == null
-            ? settings
-            : {
-                ...settings,
-                defaultPrompts: canonicalizeDefaultPrompts(settings.defaultPrompts),
-            };
+        const canonicalSettings: Partial<AdminSettings> = {};
+
+        if (settings.maxPromptSize !== undefined) {
+            canonicalSettings.maxPromptSize = settings.maxPromptSize;
+        }
+        if (settings.maxDocumentSize !== undefined) {
+            canonicalSettings.maxDocumentSize = settings.maxDocumentSize;
+        }
+        if (settings.rateLimit !== undefined) {
+            canonicalSettings.rateLimit = settings.rateLimit;
+        }
+        if (settings.defaultPrompts !== undefined) {
+            canonicalSettings.defaultPrompts = canonicalizeDefaultPrompts(settings.defaultPrompts);
+        }
+
+        const guestSyncRequested = canonicalSettings.defaultPrompts != null;
+        const guestSyncOperationId = guestSyncRequested
+            ? createGuestSyncOperationId()
+            : null;
+
         await setDoc(
             docRef,
             {
                 ...canonicalSettings,
+                ...(guestSyncRequested
+                    ? {
+                        lastGuestSyncStatus: 'pending',
+                        lastGuestSyncAt: serverTimestamp(),
+                        lastGuestSyncBy: updatedBy,
+                        lastGuestSyncOperationId: guestSyncOperationId,
+                    }
+                    : {}),
                 updatedAt: serverTimestamp(),
                 updatedBy,
             },
             { merge: true }
         );
+
+        if (!guestSyncRequested) {
+            return {
+                settingsUpdated: true,
+                guestPromptsSync: 'not-requested',
+            };
+        }
+
+        let guestPromptsSync: Exclude<GuestPromptsSyncStatus, 'not-requested' | 'pending'>;
+
+        try {
+            await syncGuestDefaultPrompts(
+                updatedBy,
+                canonicalSettings.defaultPrompts ?? [],
+            );
+            guestPromptsSync = 'succeeded';
+        } catch {
+            guestPromptsSync = 'failed';
+        }
+
+        let syncStatusPersisted = true;
+
+        try {
+            syncStatusPersisted = await finalizeGuestDefaultPromptsSyncStatus(
+                guestPromptsSync,
+                updatedBy,
+                guestSyncOperationId as string,
+            );
+        } catch (statusError) {
+            syncStatusPersisted = false;
+            adminSettingsLogger.error('ゲスト同期状態の保存に失敗', statusError, {
+                guestPromptsSync,
+                updatedBy,
+            });
+        }
+
+        return {
+            settingsUpdated: true,
+            guestPromptsSync: syncStatusPersisted ? guestPromptsSync : 'failed',
+        };
     } catch (error) {
         adminSettingsLogger.error('管理者設定の更新に失敗', error, { updatedBy });
         throw new Error('管理者設定の更新に失敗しました');
@@ -292,7 +586,7 @@ export async function updateAdminSettings(
  */
 export async function validatePromptSize(content: string): Promise<{ valid: boolean; size: number; maxSize: number }> {
     const size = new Blob([content]).size;
-    const settings = await getAdminSettings();
+    const settings = await getRuntimeSettings();
 
     return {
         valid: size <= settings.maxPromptSize,
@@ -306,7 +600,7 @@ export async function validatePromptSize(content: string): Promise<{ valid: bool
  */
 export async function validateDocumentSize(content: string): Promise<{ valid: boolean; size: number; maxSize: number }> {
     const size = new Blob([content]).size;
-    const settings = await getAdminSettings();
+    const settings = await getRuntimeSettings();
 
     return {
         valid: size <= settings.maxDocumentSize,
@@ -319,13 +613,14 @@ export async function validateDocumentSize(content: string): Promise<{ valid: bo
  * デフォルトプロンプトテンプレートを取得
  */
 export async function getDefaultPrompts(): Promise<DefaultPromptTemplate[]> {
-    try {
-        const settings = await getAdminSettings();
-        return settings.defaultPrompts ?? canonicalizeDefaultPrompts(INITIAL_DEFAULT_PROMPTS);
-    } catch (error) {
-        adminSettingsLogger.error('デフォルトプロンプトの取得に失敗', error);
-        return canonicalizeDefaultPrompts(INITIAL_DEFAULT_PROMPTS);
+    if (guestSyncDefaultPromptsOverride !== null) {
+        const override = guestSyncDefaultPromptsOverride;
+        guestSyncDefaultPromptsOverride = null;
+        return override.map(prompt => ({ ...prompt }));
     }
+
+    const settings = await getRuntimeSettings();
+    return settings.defaultPrompts ?? canonicalizeDefaultPrompts(INITIAL_DEFAULT_PROMPTS);
 }
 
 /**
@@ -335,29 +630,9 @@ export async function getDefaultPrompts(): Promise<DefaultPromptTemplate[]> {
 export async function updateDefaultPrompts(
     prompts: DefaultPromptTemplate[],
     updatedBy: string
-): Promise<void> {
+): Promise<AdminSettingsUpdateResult> {
     try {
-        const docRef = doc(db, 'adminSettings', 'config');
-        await setDoc(
-            docRef,
-            {
-                defaultPrompts: canonicalizeDefaultPrompts(prompts),
-                updatedAt: serverTimestamp(),
-                updatedBy,
-            },
-            { merge: true }
-        );
-
-        // ゲストユーザーのデフォルトプロンプトを同期更新
-        try {
-            const { syncGuestDefaultPrompts } = await import('./prompts');
-            await syncGuestDefaultPrompts();
-        } catch (syncError) {
-            adminSettingsLogger.error('ゲストデフォルトプロンプトの同期に失敗', syncError, {
-                updatedBy,
-            });
-            // 同期エラーが発生しても管理者設定の更新は成功扱い
-        }
+        return await updateAdminSettings({ defaultPrompts: prompts }, updatedBy);
     } catch (error) {
         adminSettingsLogger.error('デフォルトプロンプトの更新に失敗', error, { updatedBy });
         throw new Error('デフォルトプロンプトの更新に失敗しました');
