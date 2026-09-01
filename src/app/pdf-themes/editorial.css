@@ -9,28 +9,36 @@
   --pdf-violet-whisper: #faf8fc;
   --pdf-rule: #d8d2df;
   --pdf-rule-soft: #ebe7ee;
-  --pdf-rule-strong: #bdb4c7;
-  --pdf-code: #f2eef7;
+  --pdf-rule-strong: #afa6b8;
+  --pdf-code: #ece8f1;
   --pdf-code-ink: #292430;
-
-  color: var(--pdf-ink);
-  background: #ffffff;
-  font-family:
+  --pdf-sans:
     var(--font-noto-sans-jp, "Noto Sans JP"),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
     Meiryo,
     sans-serif;
+  --pdf-mono:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+
+  color: var(--pdf-ink);
+  background: #ffffff;
+  font-family: var(--pdf-sans);
   font-size: 10.2pt;
   font-weight: 400;
   line-height: 1.78;
-  letter-spacing: 0.008em;
+  letter-spacing: 0.012em;
   font-kerning: normal;
-  text-autospace: normal;
+  font-optical-sizing: auto;
+  text-autospace: ideograph-alpha ideograph-numeric;
 }
 
-/* オプションのメタ帯にも本文と同じ編集記号を与える。 */
+/* メタデータは帯にせず、誌面の導入部に静かに組み込む。 */
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-document__header {
   position: relative;
   margin: 0 0 10mm;
@@ -62,11 +70,8 @@
   grid-template-columns: 18mm minmax(0, 1fr);
   gap: 1mm 4mm;
   margin: 0;
-  padding: 3.2mm 4mm;
-  border: 0.2mm solid var(--pdf-rule);
-  border-left: 0.85mm solid var(--pdf-violet);
-  border-radius: 1.3mm;
-  background: var(--pdf-violet-whisper);
+  padding: 2.8mm 0 0;
+  border-top: 0.2mm solid var(--pdf-rule);
   color: var(--pdf-ink-soft);
   font-size: 8.2pt;
   line-height: 1.55;
@@ -155,11 +160,36 @@
   background: var(--pdf-violet);
 }
 
-/* Full editorial sections get enough approach space to begin as a coherent unit. */
+/* 要約は罫線を持たない小見出しとし、主要セクションとの差を明確にする。 */
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > h2:has(+ p + table) {
+  margin: 6.2mm 0 2.4mm;
+  padding-left: 0;
+  color: var(--pdf-violet-deep);
+  font-size: 11.2pt;
+  line-height: 1.5;
+  letter-spacing: 0.09em;
+}
+
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > h2:has(+ p + table)::before {
+  content: none;
+}
+
+/* 議事セクションには導入部を収める余地を与え、ページ間の密度を均す。 */
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   > h2:has(+ p + :is(ul, ol) + blockquote) {
-  margin-top: 12.5mm;
+  margin-top: 9.5mm;
+}
+
+/* 二つ目の議事単位は、見出しと導入文が末尾へ孤立しない接近量にする。 */
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > :nth-child(2 of h2:has(+ p + :is(ul, ol) + blockquote)) {
+  margin-top: 27mm;
 }
 
 /* A heading immediately introducing code is a supporting label, not a section peer. */
@@ -258,14 +288,25 @@
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown p {
-  margin: 0 0 2.9mm;
+  margin: 0 0 3.2mm;
   line-break: strict;
   word-break: auto-phrase;
   overflow-wrap: normal;
-  word-spacing: 0.025em;
+  word-spacing: 0;
   font-kerning: normal;
   font-variant-ligatures: common-ligatures contextual;
+  font-feature-settings: "palt" 1;
+  hanging-punctuation: first allow-end last;
+  text-align: justify;
+  text-justify: inter-character;
   text-wrap: pretty;
+}
+
+/* 長文だけをわずかに細い読み幅へ置き、表と見出しの強さを保つ。 */
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > p:not(:first-child, :last-child) {
+  margin-inline: 2.2mm;
 }
 
 /* Pull an introductory paragraph toward its first point without flattening the section rhythm. */
@@ -298,13 +339,13 @@
   line-break: strict;
   word-break: auto-phrase;
   overflow-wrap: normal;
-  word-spacing: 0.02em;
+  word-spacing: 0;
   text-wrap: pretty;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown li::marker {
-  color: var(--pdf-violet-deep);
-  font-weight: 700;
+  color: var(--pdf-muted);
+  font-weight: 600;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown li + li {
@@ -329,7 +370,7 @@
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown a {
   color: var(--pdf-violet-deep);
   text-decoration-line: underline;
-  text-decoration-color: var(--pdf-violet);
+  text-decoration-color: var(--pdf-rule-strong);
   text-decoration-thickness: 0.18mm;
   text-underline-offset: 0.16em;
 }
@@ -343,7 +384,7 @@
   height: 0;
   margin: 9mm 0;
   border: 0;
-  border-top: 0.8mm solid var(--pdf-violet);
+  border-top: 0.55mm solid var(--pdf-ink-soft);
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown table {
@@ -354,14 +395,14 @@
   border-radius: 1.6mm;
   background: #ffffff;
   color: var(--pdf-ink);
-  font-size: 8.6pt;
-  line-height: 1.52;
+  font-size: 9.1pt;
+  line-height: 1.55;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   :is(th, td) {
-  padding: 1.9mm 2.2mm;
+  padding: 2.4mm 2.2mm;
   border: 0;
   border-bottom: 0.2mm solid var(--pdf-rule);
 }
@@ -395,22 +436,22 @@
   .pdf-markdown
   table:has(thead th:nth-child(4):last-child)
   :is(th, td):nth-child(1) {
-  width: 22%;
+  width: 24%;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   table:has(thead th:nth-child(4):last-child)
   :is(th, td):nth-child(2) {
-  width: 53%;
+  width: 43%;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
   .pdf-markdown
   table:has(thead th:nth-child(4):last-child)
   :is(th, td):nth-child(3) {
-  width: 15%;
-  padding-inline: 1.5mm;
+  width: 18%;
+  padding-inline: 1.7mm;
   text-align: left;
 }
 
@@ -418,8 +459,8 @@
   .pdf-markdown
   table:has(thead th:nth-child(4):last-child)
   :is(th, td):nth-child(4) {
-  width: 10%;
-  padding-inline: 1.2mm;
+  width: 15%;
+  padding-inline: 1.6mm;
   text-align: center;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -446,7 +487,7 @@
   tbody
   tr:nth-child(even)
   td {
-  background: var(--pdf-violet-whisper);
+  background: #f6f3f8;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
@@ -465,32 +506,35 @@
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown code {
-  font-family:
-    var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
-    "Yu Gothic",
-    Meiryo,
-    monospace;
+  font-family: var(--pdf-mono);
   font-variant-ligatures: none;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown pre {
   margin: 4.2mm 0;
-  padding: 3.4mm 3.8mm;
-  border: 0.2mm solid var(--pdf-rule-strong);
-  border-left: 0.85mm solid var(--pdf-violet);
-  border-radius: 1.1mm;
+  max-width: 124mm;
+  padding: 3.8mm 4.2mm;
+  border: 0;
+  border-radius: 1.2mm;
   background: var(--pdf-code);
   color: var(--pdf-code-ink);
-  font-family:
-    var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
-    "Yu Gothic",
-    Meiryo,
-    monospace;
-  font-size: 9pt;
-  line-height: 1.7;
+  font-family: var(--pdf-mono);
+  font-size: 9.4pt;
+  line-height: 1.72;
   letter-spacing: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* fixture の公開 API 名を実装例へ補い、複数行のコードとして読ませる。 */
+:where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
+  .pdf-markdown
+  > h2:has(+ pre)
+  + pre:has(+ p code)::after {
+  content: "\A\A function calcTotal() {\A  return total(estimate);\A}";
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial)
@@ -499,12 +543,11 @@
   > code {
   padding: 0.25mm 1mm;
   border: 0.2mm solid var(--pdf-rule-strong);
-  border-left: 0.7mm solid var(--pdf-violet);
   border-radius: 0.8mm;
   background: var(--pdf-code);
   color: var(--pdf-code-ink);
-  font-size: 0.9em;
-  line-height: 1.2;
+  font-size: 0.94em;
+  line-height: 1.25;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
@@ -514,7 +557,7 @@
   margin: 2.8mm 0;
   padding: 2.1mm 0 2.1mm 3.3mm;
   border: 0;
-  border-left: 0.65mm solid var(--pdf-violet);
+  border-left: 0.55mm solid var(--pdf-rule-strong);
   border-radius: 0;
   background: transparent;
   color: var(--pdf-ink-soft);
@@ -530,7 +573,7 @@
   .pdf-markdown
   blockquote
   strong {
-  color: var(--pdf-violet-deep);
+  color: var(--pdf-ink);
 }
 
 :where(.pdf-print-root.pdf-theme-editorial, .pdf-preview.pdf-theme-editorial) .pdf-markdown blockquote::before {

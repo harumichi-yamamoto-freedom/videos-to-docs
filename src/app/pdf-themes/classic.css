@@ -6,6 +6,9 @@
   --classic-rule: #aaa7ad;
   --classic-hairline: #d5d3d7;
   --classic-wash: #f5f4f6;
+  --classic-code-bg: #f4f3f4;
+  --classic-code-border: #c9c6cb;
+  --classic-code-radius: 0.6mm;
   --classic-rail-width: 0.45mm;
   --classic-rail-inset: 3mm;
   color: var(--classic-ink);
@@ -16,25 +19,27 @@
     "Yu Gothic",
     Meiryo,
     sans-serif;
-  font-size: 10.5pt;
+  font-size: 10.7pt;
   font-weight: 400;
-  line-height: 1.75;
+  line-height: 1.68;
   letter-spacing: 0.01em;
+  text-autospace: normal;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document__header {
-  margin: 0 0 9mm;
-  padding: 0 0 5mm;
+  margin: 0 0 6.5mm;
+  padding: 0 0 4mm;
   border-bottom: 0.4mm solid var(--classic-accent);
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document__title {
-  margin: 0 0 3mm;
+  margin: 0 0 2.5mm;
   color: var(--classic-ink);
-  font-size: 22pt;
-  font-weight: 700;
-  line-height: 1.35;
-  letter-spacing: 0.025em;
+  font-size: 20.5pt;
+  font-weight: 600;
+  line-height: 1.38;
+  letter-spacing: 0.045em;
+  text-wrap: balance;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-document__meta {
@@ -57,39 +62,37 @@
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h1 {
-  margin: 10mm 0 4mm;
-  padding-bottom: 2mm;
+  margin: 7mm 0 3mm;
+  padding-bottom: 1.6mm;
   border-bottom: 0.25mm solid var(--classic-rule);
-  font-size: 18pt;
-  line-height: 1.45;
-  letter-spacing: 0.035em;
+  font-size: 17pt;
+  font-weight: 600;
+  line-height: 1.42;
+  letter-spacing: 0.045em;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h2 {
-  margin: 8mm 0 2.5mm;
-  padding-left: var(--classic-rail-inset);
-  border-left: var(--classic-rail-width) solid var(--classic-accent);
-  font-size: 12.5pt;
-  line-height: 1.5;
-  letter-spacing: 0.02em;
+  margin: 5.5mm 0 2mm;
+  padding: 0 0 1.1mm;
+  border-bottom: 0.2mm solid var(--classic-hairline);
+  font-size: 10.8pt;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: 0.055em;
 }
 
-/* 本文・要点・引用を伴う章は、余白と文字サイズだけで階層を示す。 */
+/* 本文・要点・引用を伴う反復セクションだけを主階層として示す。 */
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
   .pdf-markdown
   h2:has(+ p + :is(ul, ol) + blockquote) {
-  margin-top: 11mm;
-  margin-bottom: 3mm;
-  font-size: 14pt;
-  line-height: 1.45;
+  margin: 6.5mm 0 2.4mm;
+  padding: 0 0 0 var(--classic-rail-inset);
+  border: 0;
+  border-left: 0.65mm solid var(--classic-accent);
+  font-size: 13.6pt;
+  font-weight: 700;
+  line-height: 1.42;
   letter-spacing: 0.025em;
-}
-
-/* 反復する議事セクションの2つ目を次の紙面へ送り、章単位を再配分する。 */
-:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
-  .pdf-markdown
-  > :nth-child(2 of h2:has(+ p + :is(ul, ol) + blockquote)) {
-  margin-top: 40mm;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown h3 {
@@ -112,15 +115,19 @@
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown p {
-  margin: 0 0 3.5mm;
+  max-width: 95%;
+  margin: 0 0 2.6mm;
   text-align: left;
+  text-wrap: pretty;
+  word-break: auto-phrase;
   word-spacing: normal;
   font-kerning: normal;
   font-variant-ligatures: common-ligatures;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :is(ul, ol) {
-  margin: 0 0 3mm;
+  max-width: 95%;
+  margin: 0 0 2.5mm;
   padding-left: 1.8em;
   text-align: left;
   word-spacing: normal;
@@ -128,7 +135,7 @@
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown li {
   margin: 0;
-  line-height: 1.72;
+  line-height: 1.66;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown li + li {
@@ -139,13 +146,13 @@
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
   .pdf-markdown
   p:has(+ :is(ul, ol)) {
-  margin-bottom: 2mm;
+  margin-bottom: 1.5mm;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
   .pdf-markdown
   :is(ul, ol):has(+ blockquote) {
-  margin-bottom: 3.5mm;
+  margin-bottom: 2.5mm;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown a {
@@ -166,43 +173,81 @@
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown table {
-  margin: 5mm 0;
+  margin: 3.8mm 0;
   border-collapse: collapse;
-  border-top: var(--classic-rail-width) solid var(--classic-accent);
-  border-bottom: var(--classic-rail-width) solid var(--classic-accent);
+  border-top: 0.55mm solid var(--classic-accent);
+  border-bottom: 0.35mm solid var(--classic-rule);
   color: var(--classic-ink);
-  font-size: 8.7pt;
-  line-height: 1.55;
+  font-size: 9.3pt;
+  line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :is(th, td) {
-  padding: 1.8mm 2mm;
-  border: 0.25mm solid var(--classic-hairline);
+  padding: 2.2mm 2.3mm;
+  border: 0;
+  border-bottom: 0.2mm solid var(--classic-hairline);
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown th {
-  background: var(--classic-wash);
+  border-bottom: 0.35mm solid var(--classic-rule);
+  background: #eceaed;
   font-weight: 700;
+  letter-spacing: 0.025em;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
   .pdf-markdown
-  tbody
-  tr:nth-child(even)
-  td {
-  background: #fafafa;
+  tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* 4列の実務表は、説明を広く保ちながら担当と期限を安定して走査できる比率にする。 */
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child) {
+  table-layout: fixed;
+}
+
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(1) {
+  width: 22%;
+}
+
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(2) {
+  width: 47%;
+}
+
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(3) {
+  width: 17%;
+}
+
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  table:has(thead th:nth-child(4):last-child)
+  :is(th, td):nth-child(4) {
+  width: 14%;
+  text-align: center;
+  white-space: nowrap;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown pre {
   box-sizing: border-box;
   width: fit-content;
   max-width: 100%;
-  margin: 4mm 0;
-  padding: 2.4mm 3mm;
-  border: 0.25mm solid var(--classic-hairline);
-  border-radius: 1.5mm;
-  background: var(--classic-wash);
+  margin: 3mm 0;
+  padding: 3mm 3.6mm;
+  border: 0.25mm solid var(--classic-code-border);
+  border-radius: var(--classic-code-radius);
+  background: var(--classic-code-bg);
   color: var(--classic-ink);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
@@ -210,8 +255,8 @@
     "Yu Gothic",
     Meiryo,
     monospace;
-  font-size: 8.3pt;
-  line-height: 1.55;
+  font-size: 9.2pt;
+  line-height: 1.62;
   font-variant-ligatures: none;
   unicode-bidi: plaintext;
 }
@@ -221,39 +266,120 @@
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown :not(pre) > code {
-  padding: 0.2mm 1mm;
-  border: 0.2mm solid var(--classic-hairline);
-  border-radius: 0.8mm;
-  background: var(--classic-wash);
-  color: var(--classic-accent);
+  padding: 0.2mm 0.8mm;
+  border: 0.2mm solid var(--classic-code-border);
+  border-radius: var(--classic-code-radius);
+  background: var(--classic-code-bg);
+  color: var(--classic-ink);
   font-family:
     var(--font-geist-mono, "SFMono-Regular"),
     var(--font-noto-sans-jp, "Noto Sans JP"),
     monospace;
-  font-size: 0.88em;
+  font-size: 0.9em;
+  line-height: 1.25;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic) .pdf-markdown blockquote {
-  margin: 0 0 5mm;
-  padding: 2.5mm 3mm 2.5mm var(--classic-rail-inset);
-  border-left: var(--classic-rail-width) solid var(--classic-accent);
-  background: var(--classic-wash);
+  max-width: 95%;
+  margin: 0 0 3mm;
+  padding: 2.3mm 4.2mm 2.5mm 4.5mm;
+  border-left: 0.7mm solid var(--classic-accent);
+  background: #f8f7f8;
   color: #3f3e43;
+  font-size: 10.1pt;
+  line-height: 1.62;
   text-align: left;
   word-spacing: normal;
 }
 
-/* 冒頭要約と末尾の確定情報を、同じ実務的な情報ブロックとして結ぶ。 */
+/* 引用だけに引用ラベル・左罫・字下げを対応させる。 */
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  blockquote::before {
+  content: "引用\A";
+  color: var(--classic-muted);
+  font-size: 7.7pt;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: 0.12em;
+  white-space: pre;
+}
+
+/* 冒頭要約はラベル付きの情報枠として、反復セクションから分離する。 */
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  h2:has(+ p + table) {
+  margin: 5mm 0 0;
+  padding: 1.7mm 3mm 0.9mm;
+  border: 0.25mm solid var(--classic-rule);
+  border-bottom: 0;
+  background: var(--classic-wash);
+  font-size: 10.5pt;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+}
+
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
   .pdf-markdown
   h2:has(+ p + table)
-  + p,
+  + p {
+  max-width: 100%;
+  margin: 0 0 3.4mm;
+  padding: 0.7mm 3mm 2.2mm;
+  border: 0.25mm solid var(--classic-rule);
+  border-top: 0;
+  background: var(--classic-wash);
+}
+
+/* コード直前の見出しは小さな補助ラベルに留める。 */
 :where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
   .pdf-markdown
-  h2:has(+ p:last-child)
+  h2:has(+ pre) {
+  margin: 4.5mm 0 1.8mm;
+  padding: 0 0 1mm;
+  border: 0;
+  border-bottom: 0.2mm solid var(--classic-hairline);
+  color: var(--classic-muted);
+  font-size: 9.6pt;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+}
+
+/* 結論は背景を使わず、確定情報の項目ラベルと二重罫で締める。 */
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  h2:last-of-type:has(+ p:last-child) {
+  margin: 6mm 0 0;
+  padding: 1.7mm 0 1.1mm;
+  border: 0;
+  border-top: 0.6mm double var(--classic-accent);
+  font-size: 12.4pt;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+}
+
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  h2:last-of-type
   + p:last-child {
-  margin-bottom: 4mm;
-  padding: 2.5mm 3mm 2.5mm var(--classic-rail-inset);
-  border-left: var(--classic-rail-width) solid var(--classic-accent);
-  background: var(--classic-wash);
+  max-width: 100%;
+  margin: 0;
+  padding: 0 0 1.8mm;
+  border-bottom: 0.6mm double var(--classic-accent);
+  background: transparent;
+}
+
+:where(.pdf-print-root.pdf-theme-classic, .pdf-preview.pdf-theme-classic)
+  .pdf-markdown
+  h2:last-of-type
+  + p:last-child::before {
+  content: "決定事項・次回予定\A";
+  color: var(--classic-muted);
+  font-size: 8pt;
+  font-weight: 700;
+  line-height: 1.55;
+  letter-spacing: 0.1em;
+  white-space: pre;
 }

@@ -2,29 +2,38 @@
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-document {
   --sumi-ink: #202224;
-  --sumi-ink-soft: #383b3d;
-  --sumi-muted: #626669;
-  --sumi-rule-strong: #8b8e8e;
+  --sumi-ink-deep: #17191a;
+  --sumi-ink-soft: #3e4142;
+  --sumi-muted: #6a6e6f;
+  --sumi-rule-strong: #7d8180;
   --sumi-rule: #c4c5c2;
   --sumi-rule-soft: #dedfdb;
-  --sumi-wash: #f4f3ef;
-  --sumi-wash-soft: #faf9f6;
+  --sumi-wash: #f1f0eb;
+  --sumi-wash-soft: #f8f7f3;
   --sumi-shu: #c55445;
   --sumi-shu-deep: #8e3d33;
-  --sumi-heading-space-before: 10.4mm;
-  --sumi-heading-space-after: 4.2mm;
-  --sumi-heading-inset: 4.2mm;
-  --sumi-heading-rule: 0.55mm;
-
-  color: var(--sumi-ink);
-  background: #ffffff;
-  font-family:
+  --sumi-shu-quiet: #9d4c42;
+  --sumi-sans:
     var(--font-noto-sans-jp, "Noto Sans JP"),
     "Hiragino Sans",
     "Yu Gothic",
     YuGothic,
     Meiryo,
     sans-serif;
+  --sumi-mono:
+    var(--font-geist-mono, "SFMono-Regular"),
+    var(--font-noto-sans-jp, "Noto Sans JP"),
+    "Yu Gothic",
+    Meiryo,
+    monospace;
+  --sumi-heading-space-before: 13.2mm;
+  --sumi-heading-space-after: 4.8mm;
+  --sumi-heading-inset: 4.2mm;
+  --sumi-heading-rule: 0.55mm;
+
+  color: var(--sumi-ink);
+  background: #ffffff;
+  font-family: var(--sumi-sans);
   font-size: 10.35pt;
   font-weight: 400;
   line-height: 1.84;
@@ -56,13 +65,7 @@
   .pdf-document__title {
   margin: 0 0 4.6mm;
   color: var(--sumi-ink-soft);
-  font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
-    "Hiragino Sans",
-    "Yu Gothic",
-    YuGothic,
-    Meiryo,
-    sans-serif;
+  font-family: var(--sumi-sans);
   font-size: 12.8pt;
   font-weight: 500;
   line-height: 1.55;
@@ -78,11 +81,11 @@
   grid-template-columns: 17mm minmax(0, 1fr);
   gap: 0.8mm 3.5mm;
   margin: 0;
-  padding: 2.8mm 3.4mm;
+  padding: 2.8mm 0;
   border-top: 0.18mm solid var(--sumi-rule);
   border-bottom: 0.18mm solid var(--sumi-rule);
-  border-left: 0.65mm solid var(--sumi-ink-soft);
-  background: var(--sumi-wash-soft);
+  border-left: 0;
+  background: transparent;
   color: var(--sumi-ink-soft);
   font-size: 8.2pt;
   line-height: 1.55;
@@ -132,14 +135,8 @@
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown
   :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--sumi-ink);
-  font-family:
-    var(--font-noto-sans-jp, "Noto Sans JP"),
-    "Hiragino Sans",
-    "Yu Gothic",
-    YuGothic,
-    Meiryo,
-    sans-serif;
+  color: var(--sumi-ink-deep);
+  font-family: var(--sumi-sans);
   font-weight: 500;
   font-feature-settings: "palt" 1;
   text-wrap: balance;
@@ -202,26 +199,50 @@
   letter-spacing: 0.065em;
 }
 
+/* 反復する議事セクションには、補助見出しより長く強い筆勢を与える。 */
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote) {
+  position: relative;
+  padding: 0.9mm 0 2mm 5.2mm;
+  border-left-width: 0.78mm;
+  border-left-color: var(--sumi-ink-deep);
+  border-bottom-width: 0.22mm;
+  font-size: 13.8pt;
+  font-weight: 600;
+  letter-spacing: 0.075em;
+}
+
+/* 冒頭の議事セクションだけに深い「間」を置き、見開きの密度を均衡させる。 */
+:where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
+  .pdf-markdown
+  h2:has(+ p + :is(ul, ol) + blockquote):not(
+    h2:has(+ p + :is(ul, ol) + blockquote)
+      ~ h2:has(+ p + :is(ul, ol) + blockquote)
+  ) {
+  margin-top: 18mm;
+}
+
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown
   :is(h2:first-of-type, h2:has(+ pre)) {
-  margin: 7.2mm 0 3.2mm;
-  padding: 0.25mm 0 0.25mm 3.2mm;
-  border-left-width: 0.28mm;
+  margin: 7.8mm 0 3.5mm;
+  padding: 0.35mm 0 0.35mm 3.4mm;
+  border-left-width: 0.24mm;
   border-left-color: var(--sumi-rule-strong);
   border-bottom: 0;
   color: var(--sumi-ink-soft);
-  font-size: 11.2pt;
-  font-weight: 600;
+  font-size: 10.7pt;
+  font-weight: 700;
   line-height: 1.58;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.14em;
 }
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown h2:last-of-type:not(:first-of-type) {
   position: relative;
-  margin: 22mm 0 0;
-  padding: 2.7mm 8mm 1.5mm 4.2mm;
+  margin: 28mm 0 0;
+  padding: 2.7mm 4.2mm 1.7mm;
   border-top: 0.58mm solid var(--sumi-ink);
   border-right: 0;
   border-bottom: 0;
@@ -236,22 +257,17 @@
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown h2:last-of-type:not(:first-of-type)::after {
-  content: "";
-  position: absolute;
-  top: 2.9mm;
-  right: 3.4mm;
-  width: 2.1mm;
-  height: 2.1mm;
-  background: var(--sumi-shu);
+  content: none;
 }
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown h2:last-of-type:not(:first-of-type) + p {
   margin: 0 0 6.5mm;
-  padding: 1.3mm 4.2mm 3.5mm;
-  border-bottom: 0.22mm solid var(--sumi-rule-strong);
+  padding: 1.8mm 4.2mm 5mm;
+  border-bottom: 0;
   border-left: 0.55mm solid var(--sumi-ink-soft);
   background: var(--sumi-wash-soft);
+  color: var(--sumi-ink-deep);
   font-weight: 500;
 }
 
@@ -296,14 +312,17 @@
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown p {
   margin: 0 0 4.5mm;
+  color: var(--sumi-ink-soft);
   text-align: start;
   text-justify: auto;
   letter-spacing: 0.012em;
   word-spacing: normal;
+  text-autospace: normal;
   line-break: strict;
   word-break: auto-phrase;
   overflow-wrap: normal;
   text-wrap: pretty;
+  font-kerning: normal;
 }
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
@@ -448,8 +467,8 @@
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown th {
-  background: #ecebe6;
-  color: var(--sumi-ink);
+  background: var(--sumi-wash);
+  color: var(--sumi-ink-deep);
   font-weight: 700;
   letter-spacing: 0.045em;
 }
@@ -462,27 +481,27 @@
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown table:has(thead th:nth-child(4):last-child)
   tbody td:last-child {
-  color: var(--sumi-shu-deep);
-  font-weight: 600;
+  color: var(--sumi-shu-quiet);
+  font-weight: 500;
 }
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown table:has(thead th:nth-child(4):last-child)
   :is(th, td):first-child {
-  width: 19%;
+  width: 20%;
   padding-left: 1.2mm;
 }
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown table:has(thead th:nth-child(4):last-child)
   :is(th, td):nth-child(2) {
-  width: 49%;
+  width: 45%;
 }
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown table:has(thead th:nth-child(4):last-child)
   :is(th, td):nth-child(3) {
-  width: 18%;
+  width: 21%;
 }
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
@@ -490,16 +509,12 @@
   :is(th, td):last-child {
   width: 14%;
   padding-right: 1.2mm;
+  text-align: center;
 }
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown code {
-  font-family:
-    var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
-    "Yu Gothic",
-    Meiryo,
-    monospace;
+  font-family: var(--sumi-mono);
   font-variant-ligatures: none;
   letter-spacing: 0;
 }
@@ -512,15 +527,11 @@
   border-left: 0.72mm solid var(--sumi-ink-soft);
   border-radius: 0;
   background: #efeee9;
-  color: var(--sumi-ink);
-  font-family:
-    var(--font-geist-mono, "SFMono-Regular"),
-    var(--font-noto-sans-jp, "Noto Sans JP"),
-    "Yu Gothic",
-    Meiryo,
-    monospace;
-  font-size: 8.8pt;
-  line-height: 1.72;
+  color: var(--sumi-ink-deep);
+  font-family: var(--sumi-mono);
+  font-size: 9.15pt;
+  font-weight: 500;
+  line-height: 1.78;
   letter-spacing: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -568,11 +579,16 @@
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown blockquote {
   position: relative;
-  margin: 7.2mm 0;
-  padding: 3.7mm 4.5mm 3.7mm 6.5mm;
+  margin: 8.6mm 0;
+  padding: 4.4mm 4.8mm 4.5mm 5.5mm;
   border: 0;
-  border-left: 0.55mm solid var(--sumi-ink-soft);
-  background: var(--sumi-wash-soft);
+  border-left: 0.48mm solid var(--sumi-rule-strong);
+  background: linear-gradient(
+    90deg,
+    var(--sumi-wash) 0,
+    var(--sumi-wash-soft) 42%,
+    #ffffff 100%
+  );
   color: var(--sumi-ink-soft);
   line-height: 1.76;
   box-decoration-break: clone;
@@ -581,14 +597,13 @@
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
   .pdf-markdown blockquote::before {
-  content: "「";
+  content: "";
   position: absolute;
-  top: 2.7mm;
-  left: 1.8mm;
-  color: var(--sumi-shu-deep);
-  font-size: 10pt;
-  font-weight: 600;
-  line-height: 1;
+  top: 0;
+  left: -0.48mm;
+  width: 0.48mm;
+  height: 7.5mm;
+  background: var(--sumi-shu-deep);
 }
 
 :where(.pdf-print-root.pdf-theme-sumi, .pdf-preview.pdf-theme-sumi)
