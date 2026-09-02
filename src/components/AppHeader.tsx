@@ -254,7 +254,9 @@ export const AppHeader: React.FC = () => {
     return (
         <header className="sticky top-0 z-40 border-b border-elevation-persistent-boundary bg-surface shadow-elevation-persistent">
             <div className="container mx-auto max-w-7xl px-4">
-                <div className="grid h-20 grid-cols-[1fr_auto_1fr] items-center gap-3 py-2">
+                {/* モバイルはナビが非表示で 2 要素だけになるため 2 列にする。3 列のままだと空の右列が
+                    幅の半分を取り、ロゴ列が 390px 幅で不足してワードマークがメニューボタンと重なる。 */}
+                <div className="grid h-20 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-2 lg:grid-cols-[1fr_auto_1fr]">
                     {/* 左側: ロゴとタイトル */}
                     <div className="flex min-w-0 items-center">
                         <Link
@@ -268,7 +270,7 @@ export const AppHeader: React.FC = () => {
                             >
                                 <Music className="h-6 w-6 text-white" />
                             </span>
-                            <span className="whitespace-nowrap text-xl font-bold text-text-primary sm:text-2xl">
+                            <span className="truncate text-xl font-bold text-text-primary sm:text-2xl">
                                 商談くんミニ
                             </span>
                             <span className="hidden shrink-0 rounded-full border border-brand-border bg-brand-subtle px-2 py-0.5 text-xs font-bold text-brand sm:inline">
