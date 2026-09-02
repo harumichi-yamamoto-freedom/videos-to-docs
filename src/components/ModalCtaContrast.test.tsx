@@ -18,12 +18,14 @@ import { PromptEditModal } from './PromptEditModal';
 import { AdminNotificationCreateModal } from './admin/AdminNotificationCreateModal';
 import { AdminNotificationEditModal } from './admin/AdminNotificationEditModal';
 import DefaultPromptEditModal from './admin/DefaultPromptEditModal';
+import SettingsPanel from './admin/SettingsPanel';
 
 vi.mock('@/lib/auth', () => ({
     signIn: vi.fn(),
     signUp: vi.fn(),
     signInWithGoogle: vi.fn(),
     updateUserDisplayName: vi.fn(),
+    getCurrentUserId: vi.fn(() => 'admin-uid'),
 }));
 
 vi.mock('firebase/auth', () => ({
@@ -56,9 +58,21 @@ vi.mock('@/lib/prompts', () => ({
     deletePrompt: vi.fn(),
 }));
 
+// SettingsPanel(インラインの削除確認 Dialog を走査するため実体で描画する)が
+// 設定の読込に成功する最小の応答。テンプレート名はパネルシナリオの marker と対。
 vi.mock('@/lib/adminSettings', () => ({
-    getAdminSettings: vi.fn(),
+    getAdminSettings: vi.fn(async () => ({
+        maxPromptSize: 50 * 1024,
+        maxDocumentSize: 500 * 1024,
+        defaultPrompts: [{
+            name: 'テンプレート',
+            content: 'テンプレート本文',
+            model: 'default',
+            thinkingLevel: 'default',
+        }],
+    })),
     updateAdminSettings: vi.fn(),
+    retryGuestDefaultPromptsSync: vi.fn(),
 }));
 
 vi.mock('@/lib/systemNotifications', () => ({
@@ -285,29 +299,58 @@ function isIconOnly(button: HTMLButtonElement): boolean {
     return !clone.textContent?.trim();
 }
 
+function expectApprovedButtonColours(button: HTMLButtonElement): void {
+    const backgrounds = backgroundTokens(button)
+        .filter(token => !DISABLED_ONLY_BACKGROUNDS.has(token));
+    // A button without its own background sits on the modal's white
+    // surface, so its text colour is judged against that.
+    const surfaces = backgrounds.length > 0 ? backgrounds : ['bg-white'];
+
+    for (const background of surfaces) {
+        const allowedText = APPROVED_BUTTON_SURFACES[background];
+        expect(
+            allowedText,
+            `未検証の背景トークン ${background}: ${describeButton(button)}`,
+        ).toBeDefined();
+
+        for (const colour of textTokens(button)) {
+            expect(
+                allowedText,
+                `${background} に未許可の文字色 ${colour}: ${describeButton(button)}`,
+            ).toContain(colour);
+        }
+    }
+}
+
+function expectTouchTargetHeight(button: HTMLButtonElement): void {
+    const classes = Array.from(button.classList);
+    expect(
+        TALL_ENOUGH.some(token => classes.includes(token)),
+        `高さ44px未満の可能性: ${describeButton(button)}`,
+    ).toBe(true);
+
+    for (const shrinking of SHRINKING_CLASSES) {
+        expect(
+            classes,
+            `縮小クラス ${shrinking} が付いています: ${describeButton(button)}`,
+        ).not.toContain(shrinking);
+    }
+}
+
+function expectIconOnlyWidth(button: HTMLButtonElement): void {
+    if (!isIconOnly(button)) return;
+
+    const classes = Array.from(button.classList);
+    expect(
+        WIDE_ENOUGH.some(token => classes.includes(token)),
+        `幅44px未満の可能性: ${describeButton(button)}`,
+    ).toBe(true);
+}
+
 describe('モーダルCTAのコントラスト許可リスト', () => {
     it.each(MODALS)('%s の全ボタンが検証済みの配色トークンだけを使う', (_name, element) => {
         for (const button of buttonsOf(element)) {
-            const backgrounds = backgroundTokens(button)
-                .filter(token => !DISABLED_ONLY_BACKGROUNDS.has(token));
-            // A button without its own background sits on the modal's white
-            // surface, so its text colour is judged against that.
-            const surfaces = backgrounds.length > 0 ? backgrounds : ['bg-white'];
-
-            for (const background of surfaces) {
-                const allowedText = APPROVED_BUTTON_SURFACES[background];
-                expect(
-                    allowedText,
-                    `未検証の背景トークン ${background}: ${describeButton(button)}`,
-                ).toBeDefined();
-
-                for (const colour of textTokens(button)) {
-                    expect(
-                        allowedText,
-                        `${background} に未許可の文字色 ${colour}: ${describeButton(button)}`,
-                    ).toContain(colour);
-                }
-            }
+            expectApprovedButtonColours(button);
         }
     });
 
@@ -321,30 +364,13 @@ describe('モーダルCTAのコントラスト許可リスト', () => {
 describe('モーダル操作対象の44pxタップ標的', () => {
     it.each(MODALS)('%s の全ボタンが44px以上の高さを保つ', (_name, element) => {
         for (const button of buttonsOf(element)) {
-            const classes = Array.from(button.classList);
-            expect(
-                TALL_ENOUGH.some(token => classes.includes(token)),
-                `高さ44px未満の可能性: ${describeButton(button)}`,
-            ).toBe(true);
-
-            for (const shrinking of SHRINKING_CLASSES) {
-                expect(
-                    classes,
-                    `縮小クラス ${shrinking} が付いています: ${describeButton(button)}`,
-                ).not.toContain(shrinking);
-            }
+            expectTouchTargetHeight(button);
         }
     });
 
     it.each(MODALS)('%s のアイコンだけのボタンが44px以上の幅を保つ', (_name, element) => {
         for (const button of buttonsOf(element)) {
-            if (!isIconOnly(button)) continue;
-
-            const classes = Array.from(button.classList);
-            expect(
-                WIDE_ENOUGH.some(token => classes.includes(token)),
-                `幅44px未満の可能性: ${describeButton(button)}`,
-            ).toBe(true);
+            expectIconOnlyWidth(button);
         }
     });
 });
@@ -472,5 +498,310 @@ describe('モーダルの初期フォーカス', () => {
         ).toBe(true);
 
         outsideButton.remove();
+    });
+});
+
+/* -------------------------------------------------------------------------- */
+
+function setControlValue(
+    control: HTMLInputElement | HTMLTextAreaElement,
+    value: string,
+): void {
+    const prototype = control instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    const valueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+    valueSetter?.call(control, value);
+    control.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function clickVisibleButton(container: HTMLElement, name: string): void {
+    const button = Array.from(container.querySelectorAll('button')).find(
+        candidate => candidate.textContent?.trim() === name
+            && !candidate.closest('[inert]'),
+    );
+    if (!button) throw new Error(`button not found: ${name}`);
+    button.click();
+}
+
+function dispatchDialogCancel(container: HTMLElement): void {
+    const dialog = container.querySelector('dialog');
+    if (!dialog) throw new Error('dialog not found');
+    dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+}
+
+interface PanelScenario {
+    name: string;
+    element: React.ReactElement;
+    /** パネルを開く操作。act の中で呼ばれる同期ステップの列。 */
+    open: (container: HTMLElement) => void[] | void;
+    /** パネルが実際に開いた証拠（見出し文言）。無ければ走査は空振り＝検査失敗。 */
+    marker: string;
+}
+
+/**
+ * 確認パネル状態のボタンは初期描画の走査に載らないため、実際にパネルを
+ * 開いた DOM を同じ許可リスト・44px 錠で走査する。新しいパネルを持つ
+ * モーダルはここへシナリオを足すこと（marker の実在検査が空振りを防ぐ）。
+ * *Modal.tsx 命名でない部品が共有 Dialog をインラインで開く場合
+ * （例: SettingsPanel の行削除確認）も、ファイル名走査には載らないので
+ * 同じくここへ足すこと。
+ */
+const PANEL_SCENARIOS: readonly (Omit<PanelScenario, 'open'> & {
+    steps: ((container: HTMLElement) => void)[];
+})[] = [
+    {
+        name: 'PromptCreateModal の破棄確認',
+        element: <PromptCreateModal isOpen onClose={vi.fn()} onSave={vi.fn()} />,
+        steps: [
+            (container) => {
+                const nameInput = container.querySelector<HTMLInputElement>('input[type="text"]');
+                if (!nameInput) throw new Error('name input not found');
+                setControlValue(nameInput, '下書き');
+            },
+            (container) => dispatchDialogCancel(container),
+        ],
+        marker: '入力内容を破棄しますか？',
+    },
+    {
+        name: 'ContentEditModal の破棄確認',
+        element: (
+            <ContentEditModal
+                isOpen
+                onClose={vi.fn()}
+                title="タイトル"
+                content="本文"
+                onSave={vi.fn()}
+                onDelete={vi.fn()}
+            />
+        ),
+        steps: [
+            (container) => clickVisibleButton(container, '編集'),
+            (container) => {
+                const textarea = container.querySelector('textarea');
+                if (!textarea) throw new Error('textarea not found');
+                setControlValue(textarea, '書き換えた本文');
+            },
+            (container) => dispatchDialogCancel(container),
+        ],
+        marker: '未保存の変更があります',
+    },
+    {
+        name: 'ContentEditModal の削除確認',
+        element: (
+            <ContentEditModal
+                isOpen
+                onClose={vi.fn()}
+                title="タイトル"
+                content="本文"
+                onSave={vi.fn()}
+                onDelete={vi.fn()}
+            />
+        ),
+        steps: [(container) => clickVisibleButton(container, '削除')],
+        marker: '「タイトル」を削除しますか？',
+    },
+    {
+        name: 'AdminNotificationCreateModal の破棄確認',
+        element: <AdminNotificationCreateModal isOpen onClose={vi.fn()} />,
+        steps: [
+            (container) => {
+                const titleInput = container.querySelector<HTMLInputElement>('input[type="text"]');
+                if (!titleInput) throw new Error('title input not found');
+                setControlValue(titleInput, '下書き');
+            },
+            (container) => dispatchDialogCancel(container),
+        ],
+        marker: '入力内容を破棄しますか？',
+    },
+    {
+        name: 'AdminNotificationEditModal の破棄確認',
+        element: (
+            <AdminNotificationEditModal isOpen onClose={vi.fn()} notification={notification} />
+        ),
+        steps: [
+            (container) => clickVisibleButton(container, '編集'),
+            (container) => {
+                const textarea = container.querySelector('textarea');
+                if (!textarea) throw new Error('textarea not found');
+                setControlValue(textarea, '書き換えた本文');
+            },
+            (container) => dispatchDialogCancel(container),
+        ],
+        marker: '未保存の変更があります',
+    },
+    {
+        name: 'AdminNotificationEditModal の削除確認',
+        element: (
+            <AdminNotificationEditModal isOpen onClose={vi.fn()} notification={notification} />
+        ),
+        steps: [(container) => clickVisibleButton(container, '削除')],
+        marker: `「${notification.title}」を削除しますか？`,
+    },
+    {
+        name: 'AdminNotificationEditModal の公開状態確認',
+        element: (
+            <AdminNotificationEditModal isOpen onClose={vi.fn()} notification={notification} />
+        ),
+        steps: [
+            (container) => clickVisibleButton(container, '編集'),
+            (container) => {
+                const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+                if (!checkbox) throw new Error('published checkbox not found');
+                checkbox.click();
+            },
+            (container) => clickVisibleButton(container, '保存'),
+        ],
+        marker: 'このお知らせを非公開（下書き）にしますか？',
+    },
+    {
+        name: 'DefaultPromptEditModal の破棄確認',
+        element: (
+            <DefaultPromptEditModal
+                isOpen
+                onClose={vi.fn()}
+                prompt={defaultPromptTemplate}
+                onSave={vi.fn()}
+                onDelete={vi.fn()}
+                mode="edit"
+            />
+        ),
+        steps: [
+            (container) => clickVisibleButton(container, '編集'),
+            (container) => {
+                const textarea = container.querySelector('textarea');
+                if (!textarea) throw new Error('textarea not found');
+                setControlValue(textarea, '書き換えた本文');
+            },
+            (container) => dispatchDialogCancel(container),
+        ],
+        marker: '未保存の変更があります',
+    },
+    {
+        name: 'DefaultPromptEditModal の削除確認',
+        element: (
+            <DefaultPromptEditModal
+                isOpen
+                onClose={vi.fn()}
+                prompt={defaultPromptTemplate}
+                onSave={vi.fn()}
+                onDelete={vi.fn()}
+                mode="edit"
+            />
+        ),
+        steps: [(container) => clickVisibleButton(container, '削除')],
+        marker: `「${defaultPromptTemplate.name}」を削除しますか？`,
+    },
+    {
+        name: 'SettingsPanel の行削除確認（インラインDialog）',
+        element: <SettingsPanel />,
+        steps: [
+            (container) => {
+                const rowDeleteButton = container.querySelector<HTMLButtonElement>('button[title="削除"]');
+                if (!rowDeleteButton) throw new Error('row delete button not found');
+                rowDeleteButton.click();
+            },
+        ],
+        marker: '「テンプレート」を削除しますか？',
+    },
+];
+
+describe('確認パネル状態のCTA走査', () => {
+    let container: HTMLDivElement;
+    let root: Root;
+
+    const originalShowModal = Object.getOwnPropertyDescriptor(
+        HTMLDialogElement.prototype,
+        'showModal',
+    );
+    const originalClose = Object.getOwnPropertyDescriptor(
+        HTMLDialogElement.prototype,
+        'close',
+    );
+
+    beforeAll(() => {
+        Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+            configurable: true,
+            value(this: HTMLDialogElement) {
+                this.setAttribute('open', '');
+            },
+        });
+        Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+            configurable: true,
+            value(this: HTMLDialogElement) {
+                if (!this.open) return;
+                this.removeAttribute('open');
+                queueMicrotask(() => {
+                    this.dispatchEvent(new Event('close'));
+                });
+            },
+        });
+        (
+            globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+        ).IS_REACT_ACT_ENVIRONMENT = true;
+    });
+
+    afterEach(async () => {
+        await act(async () => {
+            root.unmount();
+        });
+        container.remove();
+    });
+
+    afterAll(() => {
+        if (originalShowModal) {
+            Object.defineProperty(
+                HTMLDialogElement.prototype,
+                'showModal',
+                originalShowModal,
+            );
+        } else {
+            delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal;
+        }
+        if (originalClose) {
+            Object.defineProperty(HTMLDialogElement.prototype, 'close', originalClose);
+        } else {
+            delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).close;
+        }
+        (
+            globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+        ).IS_REACT_ACT_ENVIRONMENT = false;
+    });
+
+    it.each(PANEL_SCENARIOS)('$name のボタンも配色・44px・focus錠を満たす', async ({ element, steps, marker }) => {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+        root = createRoot(container);
+
+        await act(async () => {
+            root.render(element);
+        });
+        for (const step of steps) {
+            await act(async () => {
+                step(container);
+            });
+        }
+
+        // パネルが実際に開いた証拠。開かないままの走査は空振りなので落とす。
+        expect(container.textContent).toContain(marker);
+
+        // 走査対象は「開いている dialog の中の操作可能なボタン」。
+        // ページ埋め込み(SettingsPanel等)では背景の既存ボタンを巻き込まず、
+        // モーダルでは inert で無効化された背後フォームを除外する。
+        const openDialogs = Array.from(container.querySelectorAll('dialog[open]'));
+        expect(openDialogs.length).toBeGreaterThanOrEqual(1);
+        const panelButtons = openDialogs
+            .flatMap(dialog => Array.from(dialog.querySelectorAll('button')))
+            .filter(button => !button.closest('[inert]'));
+        expect(panelButtons.length).toBeGreaterThanOrEqual(2);
+
+        for (const button of panelButtons) {
+            expectApprovedButtonColours(button);
+            expectTouchTargetHeight(button);
+            expectIconOnlyWidth(button);
+        }
+
+        // パネル切替後もフォーカスはダイアログ内に留まる。
+        expect(openDialogs.some(dialog => dialog.contains(document.activeElement))).toBe(true);
     });
 });

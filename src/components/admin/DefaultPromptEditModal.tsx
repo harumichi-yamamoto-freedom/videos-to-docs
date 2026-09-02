@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useId, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
 import { X, Trash2, Eye, FileText, Check } from 'lucide-react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import type { DefaultPromptTemplate } from '@/lib/adminSettings';
@@ -17,6 +17,11 @@ import {
 } from '../ModelComboboxSelect';
 
 type CodeProps = React.HTMLAttributes<HTMLElement> & { inline?: boolean };
+
+type DiscardAction = 'close' | 'view-mode' | 'cancel-edit';
+type Confirmation =
+    | { type: 'discard'; action: DiscardAction }
+    | { type: 'delete' };
 
 interface DefaultPromptEditModalProps {
     isOpen: boolean;
@@ -109,8 +114,17 @@ export default function DefaultPromptEditModal({
     const [editedModel, setEditedModel] = useState(initialModel);
     const [editedThinkingLevel, setEditedThinkingLevel] = useState(initialThinkingLevel);
     const [saving, setSaving] = useState(false);
+    const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+    const [saveError, setSaveError] = useState<string | null>(null);
     const titleId = useId();
+    const confirmationTitleId = useId();
+    const confirmationDescriptionId = useId();
+    const errorId = useId();
     const titleInputRef = useRef<HTMLInputElement>(null);
+    const headingRef = useRef<HTMLHeadingElement>(null);
+    const confirmationCancelRef = useRef<HTMLButtonElement>(null);
+    const confirmationReturnFocusRef = useRef<HTMLElement | null>(null);
+    const pendingFocusRef = useRef<HTMLElement | 'heading' | null>(null);
 
     // The title input is exactly the edit mode's rendering of the heading, so it
     // is derived instead of mirrored into state: a separate state only re-synced
@@ -143,8 +157,25 @@ export default function DefaultPromptEditModal({
             setSelectedThinkingLevel(initialThinkingLevel);
             setEditedThinkingLevel(initialThinkingLevel);
             setIsViewMode(mode === 'create' ? false : true);
+            setConfirmation(null);
+            setSaveError(null);
         }
     }, [isOpen, initialName, initialContent, initialModel, initialThinkingLevel, mode]);
+
+    // 確認パネルが開いたら安全な選択肢へ、畳まれたら元のトリガーへフォーカスを
+    // 運ぶ（window.confirm が担っていたフォーカス管理の代替）。
+    useLayoutEffect(() => {
+        if (!isOpen) return;
+        if (confirmation) {
+            confirmationCancelRef.current?.focus({ preventScroll: true });
+            return;
+        }
+
+        const pendingFocus = pendingFocusRef.current;
+        pendingFocusRef.current = null;
+        const target = pendingFocus === 'heading' ? headingRef.current : pendingFocus;
+        if (target?.isConnected) target.focus({ preventScroll: true });
+    }, [confirmation, isOpen, isViewMode]);
 
     // 変更があるかどうかをチェック
     const hasChanges =
@@ -157,14 +188,76 @@ export default function DefaultPromptEditModal({
     const headingText = title
         || (mode === 'create' ? 'デフォルトプロンプトを追加' : 'デフォルトプロンプトを編集');
 
+    const rememberConfirmationTrigger = () => {
+        const activeElement = document.activeElement;
+        confirmationReturnFocusRef.current = activeElement instanceof HTMLElement
+            ? activeElement
+            : headingRef.current;
+    };
+
+    const dismissConfirmation = () => {
+        const returnTarget = confirmationReturnFocusRef.current;
+        confirmationReturnFocusRef.current = null;
+        pendingFocusRef.current = returnTarget?.isConnected ? returnTarget : 'heading';
+        setConfirmation(null);
+    };
+
+    const resetDraft = () => {
+        setEditedTitle(title);
+        setEditedContent(content);
+        setEditedModel(selectedModel);
+        setEditedThinkingLevel(selectedThinkingLevel);
+    };
+
+    const performDiscardAction = (action: DiscardAction, discarded: boolean) => {
+        if (action === 'close') {
+            setConfirmation(null);
+            setSaveError(null);
+            onClose();
+            return;
+        }
+
+        if (discarded) resetDraft();
+        pendingFocusRef.current = 'heading';
+        setConfirmation(null);
+        setSaveError(null);
+        setIsViewMode(true);
+    };
+
+    const requestDiscardAction = (action: DiscardAction) => {
+        if (saving || confirmation) return;
+        const needsConfirmation = action === 'close'
+            ? !isViewMode && hasChanges
+            : hasChanges;
+        if (!needsConfirmation) {
+            performDiscardAction(action, false);
+            return;
+        }
+
+        rememberConfirmationTrigger();
+        setConfirmation({ type: 'discard', action });
+    };
+
+    const handleDialogDismiss = () => {
+        if (saving) return;
+        if (confirmation) {
+            // 確認中の Esc は確認だけを畳み、元の画面へ戻す。
+            dismissConfirmation();
+            return;
+        }
+        requestDiscardAction('close');
+    };
+
     const handleSave = async () => {
+        if (saving || confirmation) return;
         if (!editedTitle.trim() || !editedContent.trim()) {
-            alert('名前と内容を入力してください');
+            setSaveError('名前と内容を入力してください。');
             return;
         }
 
         try {
             setSaving(true);
+            setSaveError(null);
             onSave({
                 name: editedTitle.trim(),
                 content: editedContent.trim(),
@@ -185,53 +278,44 @@ export default function DefaultPromptEditModal({
             setIsViewMode(true);
             onClose();
         } catch {
-            alert('保存に失敗しました');
+            setSaveError('保存に失敗しました。入力内容は保持されています。もう一度お試しください。');
         } finally {
             setSaving(false);
         }
     };
 
-    const handleCancelEdit = () => {
-        if (hasChanges) {
-            if (!confirm('保存されていない変更があります。変更を破棄しますか？')) {
-                return;
-            }
-        }
-        setEditedTitle(title);
-        setEditedContent(content);
-        setEditedModel(selectedModel);
-        setEditedThinkingLevel(selectedThinkingLevel);
-        setIsViewMode(true);
+    const handleDeleteRequest = () => {
+        if (saving || confirmation) return;
+        rememberConfirmationTrigger();
+        setSaveError(null);
+        setConfirmation({ type: 'delete' });
     };
 
-    const handleClose = () => {
-        if (!isViewMode && hasChanges) {
-            if (!confirm('保存されていない変更があります。変更を破棄して閉じますか？')) {
-                return;
-            }
-        }
-        onClose();
-    };
-
-    const handleViewModeSwitch = () => {
-        if (hasChanges) {
-            if (!confirm('保存されていない変更があります。変更を破棄して表示モードに戻りますか？')) {
-                return;
-            }
-        }
-        setEditedTitle(title);
-        setEditedContent(content);
-        setEditedModel(selectedModel);
-        setEditedThinkingLevel(selectedThinkingLevel);
-        setIsViewMode(true);
-    };
-
-    const handleDelete = () => {
-        if (!confirm(`「${title}」を削除しますか？`)) return;
+    const performDelete = () => {
         if (onDelete) {
+            setConfirmation(null);
             onDelete();
             onClose();
         }
+    };
+
+    const confirmationTitle = confirmation?.type === 'delete'
+        ? `「${headingText}」を削除しますか？`
+        : '未保存の変更があります';
+    const confirmationDescription = confirmation?.type === 'delete'
+        ? '削除したデフォルトプロンプトは元に戻せません。'
+        : confirmation?.action === 'close'
+            ? '閉じると、保存していない変更は失われます。'
+            : '表示モードに戻ると、保存していない変更は失われます。';
+
+    const handleConfirmationConfirm = () => {
+        if (!confirmation || saving) return;
+        if (confirmation.type === 'delete') {
+            performDelete();
+            return;
+        }
+        confirmationReturnFocusRef.current = null;
+        performDiscardAction(confirmation.action, true);
     };
 
     // 警告メッセージ
@@ -246,14 +330,20 @@ export default function DefaultPromptEditModal({
     return (
         <Dialog
             isOpen={isOpen}
-            onClose={handleClose}
+            onClose={handleDialogDismiss}
             initialFocusRef={titleInputRef}
             dismissible={!saving}
-            aria-labelledby={titleId}
+            role={confirmation ? 'alertdialog' : undefined}
+            aria-labelledby={confirmation ? confirmationTitleId : titleId}
+            aria-describedby={confirmation ? confirmationDescriptionId : undefined}
             aria-busy={saving || undefined}
-            className="w-[calc(100%-2rem)] max-w-4xl max-h-[90dvh] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl open:flex open:flex-col"
+            className={`w-[calc(100%-2rem)] ${confirmation ? 'max-w-lg' : 'max-w-4xl'} max-h-[90dvh] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl open:flex open:flex-col`}
         >
-            <div className="flex max-h-[90dvh] min-h-0 flex-col">
+            <div
+                className={`${confirmation ? 'hidden' : 'flex'} max-h-[90dvh] min-h-0 flex-col`}
+                aria-hidden={confirmation ? true : undefined}
+                inert={confirmation ? true : undefined}
+            >
                 {/* ヘッダー */}
                 <div className="flex shrink-0 items-center justify-between p-6 border-b bg-gradient-to-r from-purple-50 to-pink-50">
                     <div className="flex items-center flex-1 mr-4 min-w-0">
@@ -262,6 +352,7 @@ export default function DefaultPromptEditModal({
                                 in edit mode the input renders it and the heading goes
                                 screen-reader only. */}
                             <h2
+                                ref={headingRef}
                                 id={titleId}
                                 tabIndex={-1}
                                 data-dialog-initial-focus
@@ -276,10 +367,15 @@ export default function DefaultPromptEditModal({
                                     ref={titleInputRef}
                                     type="text"
                                     value={editedTitle}
-                                    onChange={(e) => setEditedTitle(e.target.value)}
+                                    onChange={(e) => {
+                                        setEditedTitle(e.target.value);
+                                        setSaveError(null);
+                                    }}
                                     className="min-h-11 w-full min-w-0 rounded-lg border border-purple-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                                     placeholder="プロンプト名を入力"
                                     aria-label="プロンプト名"
+                                    aria-invalid={Boolean(saveError && !editedTitle.trim()) || undefined}
+                                    aria-describedby={saveError ? errorId : undefined}
                                     disabled={saving}
                                 />
                             )}
@@ -290,7 +386,7 @@ export default function DefaultPromptEditModal({
                         <div className="flex items-center space-x-2 bg-gray-100 rounded-lg p-1">
                             <button
                                 type="button"
-                                onClick={handleViewModeSwitch}
+                                onClick={() => requestDiscardAction('view-mode')}
                                 className={`flex min-h-11 items-center space-x-2 rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 ${
                                     isViewMode
                                         ? 'bg-white text-purple-600 shadow-sm'
@@ -304,7 +400,10 @@ export default function DefaultPromptEditModal({
                             </button>
                             <button
                                 type="button"
-                                onClick={() => setIsViewMode(false)}
+                                onClick={() => {
+                                    setSaveError(null);
+                                    setIsViewMode(false);
+                                }}
                                 className={`flex min-h-11 items-center space-x-2 rounded-md px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 ${
                                     !isViewMode
                                         ? 'bg-white text-purple-600 shadow-sm'
@@ -319,7 +418,7 @@ export default function DefaultPromptEditModal({
                         </div>
                         <button
                             type="button"
-                            onClick={handleClose}
+                            onClick={() => requestDiscardAction('close')}
                             disabled={saving}
                             className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg shadow-sm transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             aria-label="閉じる"
@@ -348,11 +447,16 @@ export default function DefaultPromptEditModal({
                             /* 編集モード: テキストエリア */
                             <textarea
                                 value={editedContent}
-                                onChange={(e) => setEditedContent(e.target.value)}
+                                onChange={(e) => {
+                                    setEditedContent(e.target.value);
+                                    setSaveError(null);
+                                }}
                                 rows={20}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-sm resize-none"
                                 placeholder="プロンプト内容を入力"
                                 aria-label="プロンプト内容"
+                                aria-invalid={Boolean(saveError && !editedContent.trim()) || undefined}
+                                aria-describedby={saveError ? errorId : undefined}
                                 disabled={saving}
                             />
                         )}
@@ -412,6 +516,16 @@ export default function DefaultPromptEditModal({
                         </div>
                     </div>
 
+                    {saveError && (
+                        <p
+                            id={errorId}
+                            role="alert"
+                            className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium leading-relaxed text-red-800"
+                        >
+                            {saveError}
+                        </p>
+                    )}
+
                     {/* 警告メッセージ（本文の下） */}
                     {warningMessage && (
                         <div className="mt-4">
@@ -428,7 +542,7 @@ export default function DefaultPromptEditModal({
                             {onDelete && mode === 'edit' ? (
                                 <button
                                     type="button"
-                                    onClick={handleDelete}
+                                    onClick={handleDeleteRequest}
                                     className="inline-flex min-h-11 items-center space-x-2 rounded-lg bg-red-600 px-6 py-2.5 font-medium text-white shadow-sm transition-colors hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2"
                                 >
                                     <Trash2 className="w-4 h-4" />
@@ -440,7 +554,7 @@ export default function DefaultPromptEditModal({
                             <div className="flex items-center space-x-3">
                                 <button
                                     type="button"
-                                    onClick={handleClose}
+                                    onClick={() => requestDiscardAction('close')}
                                     className="min-h-11 rounded-lg border border-gray-400 px-6 py-2.5 font-medium text-gray-800 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-600 focus-visible:ring-offset-2"
                                 >
                                     閉じる
@@ -454,7 +568,7 @@ export default function DefaultPromptEditModal({
                             <div className="flex items-center space-x-3">
                                 <button
                                     type="button"
-                                    onClick={handleCancelEdit}
+                                    onClick={() => requestDiscardAction('cancel-edit')}
                                     disabled={saving}
                                     className="min-h-11 rounded-lg border border-gray-400 bg-white px-6 py-2.5 font-medium text-gray-800 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
@@ -483,6 +597,43 @@ export default function DefaultPromptEditModal({
                     )}
                 </div>
             </div>
+
+            {confirmation && (
+                <div className="flex flex-col rounded-2xl bg-white p-6 sm:p-8">
+                    <div className="space-y-2">
+                        <h2 id={confirmationTitleId} className="text-xl font-bold text-gray-900">
+                            {confirmationTitle}
+                        </h2>
+                        <p
+                            id={confirmationDescriptionId}
+                            className="text-sm leading-relaxed text-gray-600"
+                        >
+                            {confirmationDescription}
+                        </p>
+                    </div>
+                    <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                        <button
+                            ref={confirmationCancelRef}
+                            type="button"
+                            onClick={handleDialogDismiss}
+                            className="min-h-11 rounded-lg bg-gray-700 px-6 py-2.5 font-medium text-white shadow-sm transition-colors hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2"
+                        >
+                            {confirmation.type === 'delete' ? 'キャンセル' : '編集を続ける'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleConfirmationConfirm}
+                            className="min-h-11 rounded-lg bg-red-600 px-6 py-2.5 font-medium text-white shadow-sm transition-colors hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+                        >
+                            {confirmation.type === 'delete'
+                                ? '削除する'
+                                : confirmation.action === 'close'
+                                    ? '変更を破棄して閉じる'
+                                    : '変更を破棄して表示に戻る'}
+                        </button>
+                    </div>
+                </div>
+            )}
         </Dialog>
     );
 }

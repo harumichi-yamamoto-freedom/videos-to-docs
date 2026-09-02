@@ -13,6 +13,7 @@ import AudioFilesPanel from '@/components/admin/AudioFilesPanel';
 import SystemNotificationPanel from '@/components/admin/SystemNotificationPanel';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Button, buttonClassName } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { SIGN_IN_LABEL } from '@/components/ui/labels';
 
 const ADMIN_TABS = [
@@ -24,6 +25,14 @@ const ADMIN_TABS = [
 ] as const;
 
 type Tab = (typeof ADMIN_TABS)[number]['id'];
+
+type PendingNavigation =
+    | { type: 'tab'; tab: Tab }
+    | { type: 'home' };
+
+// このページのダイアログは1個だけなので静的 id で衝突しない。
+const DISCARD_DIALOG_TITLE_ID = 'admin-discard-navigation-title';
+const DISCARD_DIALOG_DESCRIPTION_ID = 'admin-discard-navigation-description';
 
 export interface SettingsPanelRef {
     hasUnsavedChanges: () => boolean;
@@ -65,8 +74,10 @@ export default function AdminPage() {
     const { user, loading: authLoading } = useAuth();
     const { status: adminStatus, isAdmin, loading: adminLoading, retry: retryAdminCheck } = useAdmin();
     const [activeTab, setActiveTab] = useState<Tab>('audit');
+    const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
     const settingsPanelRef = useRef<SettingsPanelRef>(null);
     const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
+    const keepEditingButtonRef = useRef<HTMLButtonElement>(null);
 
     // ページ離脱時の警告
     useEffect(() => {
@@ -83,9 +94,9 @@ export default function AdminPage() {
 
     const handleTabChange = (tab: Tab): boolean => {
         if (activeTab === 'settings' && settingsPanelRef.current?.hasUnsavedChanges()) {
-            if (!confirm('保存されていない変更があります。破棄して移動しますか？')) {
-                return false;
-            }
+            // 破棄の判断はダイアログ内で確認する。移動はまだ実行しない。
+            setPendingNavigation({ type: 'tab', tab });
+            return false;
         }
         setActiveTab(tab);
         return true;
@@ -110,11 +121,33 @@ export default function AdminPage() {
 
     const handleGoHome = () => {
         if (activeTab === 'settings' && settingsPanelRef.current?.hasUnsavedChanges()) {
-            if (!confirm('保存されていない変更があります。破棄してホームに戻りますか？')) {
-                return;
-            }
+            setPendingNavigation({ type: 'home' });
+            return;
         }
         router.push('/home');
+    };
+
+    const cancelPendingNavigation = () => {
+        // Dialog が閉じると、開いたトリガー（タブやホームボタン）へフォーカスを戻す。
+        setPendingNavigation(null);
+    };
+
+    const confirmPendingNavigation = () => {
+        if (!pendingNavigation) return;
+        if (pendingNavigation.type === 'home') {
+            setPendingNavigation(null);
+            router.push('/home');
+            return;
+        }
+
+        const { tab } = pendingNavigation;
+        setPendingNavigation(null);
+        setActiveTab(tab);
+        // roving tabindex の停止点は移動後のタブ。ダイアログのフォーカス返却より
+        // 後に走らせ、キーボード操作の続きを移動先から再開できるようにする。
+        window.requestAnimationFrame(() => {
+            tabRefs.current[tab]?.focus();
+        });
     };
 
     const header = (
@@ -259,6 +292,47 @@ export default function AdminPage() {
                 {activeTab === 'audio' && <AudioFilesPanel />}
                 {activeTab === 'notifications' && <SystemNotificationPanel />}
             </div>
+
+            {/* 未保存の設定を破棄して移動するかの確認。開いている間だけマウントし、
+                閉じたら Dialog がトリガーへフォーカスを返す。 */}
+            {pendingNavigation && (
+                <Dialog
+                    isOpen
+                    onClose={cancelPendingNavigation}
+                    initialFocusRef={keepEditingButtonRef}
+                    role="alertdialog"
+                    aria-labelledby={DISCARD_DIALOG_TITLE_ID}
+                    aria-describedby={DISCARD_DIALOG_DESCRIPTION_ID}
+                    className="w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-2xl border border-border bg-surface shadow-elevation-overlay"
+                >
+                    <div className="flex flex-col bg-surface p-6 sm:p-8">
+                        <div className="space-y-2">
+                            <h2 id={DISCARD_DIALOG_TITLE_ID} className="text-xl font-bold text-text-primary">
+                                保存されていない変更があります
+                            </h2>
+                            <p id={DISCARD_DIALOG_DESCRIPTION_ID} className="text-sm leading-relaxed text-text-secondary">
+                                {pendingNavigation.type === 'home'
+                                    ? '保存せずにホームへ戻ると、変更した設定は失われます。'
+                                    : '保存せずに移動すると、変更した設定は失われます。'}
+                            </p>
+                        </div>
+                        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                            <Button
+                                ref={keepEditingButtonRef}
+                                variant="secondary"
+                                onClick={cancelPendingNavigation}
+                            >
+                                編集を続ける
+                            </Button>
+                            <Button variant="danger" onClick={confirmPendingNavigation}>
+                                {pendingNavigation.type === 'home'
+                                    ? '変更を破棄してホームへ戻る'
+                                    : '変更を破棄して移動する'}
+                            </Button>
+                        </div>
+                    </div>
+                </Dialog>
+            )}
         </>
     );
 }

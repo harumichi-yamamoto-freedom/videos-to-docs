@@ -11,6 +11,7 @@ import { Save, Plus, Trash2 } from 'lucide-react';
 import { getCurrentUserId } from '@/lib/auth';
 import { logAudit } from '@/lib/auditLog';
 import DefaultPromptEditModal from './DefaultPromptEditModal';
+import { Dialog } from '@/components/ui/Dialog';
 import type { SettingsPanelRef } from '@/app/admin/page';
 import { createLogger } from '@/lib/logger';
 import { getGeminiModelLabel } from '@/constants/geminiModels';
@@ -20,6 +21,10 @@ import {
 } from '@/constants/geminiThinking';
 
 const adminSettingsPanelLogger = createLogger('AdminSettingsPanel');
+
+// このパネルは管理者画面に1枚しか置かれないため、静的 id で衝突しない。
+const DELETE_PROMPT_DIALOG_TITLE_ID = 'admin-settings-delete-prompt-title';
+const DELETE_PROMPT_DIALOG_DESCRIPTION_ID = 'admin-settings-delete-prompt-description';
 
 type Feedback = {
     kind: 'success' | 'warning' | 'error';
@@ -47,6 +52,7 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingPromptIndex, setEditingPromptIndex] = useState<number | null>(null);
     const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
+    const [pendingDeletePromptIndex, setPendingDeletePromptIndex] = useState<number | null>(null);
 
     useEffect(() => {
         loadSettings();
@@ -228,9 +234,14 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
 
     const handleDeletePromptDirect = (index: number, e: React.MouseEvent) => {
         e.stopPropagation();
-        const prompt = defaultPrompts[index];
-        if (!confirm(`「${prompt.name}」を削除しますか？`)) return;
-        setDefaultPrompts(defaultPrompts.filter((_, i) => i !== index));
+        // 破棄の判断はダイアログ内で確認する（行クリックの編集モーダルとは別経路）。
+        setPendingDeletePromptIndex(index);
+    };
+
+    const confirmDeletePrompt = () => {
+        if (pendingDeletePromptIndex === null) return;
+        setDefaultPrompts(defaultPrompts.filter((_, i) => i !== pendingDeletePromptIndex));
+        setPendingDeletePromptIndex(null);
     };
 
     if (loading) {
@@ -423,6 +434,47 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                 onDelete={modalMode === 'edit' ? handleDeletePrompt : undefined}
                 mode={modalMode}
             />
+
+            {/* 行の削除ボタンからの確認。開いている間だけマウントし、
+                閉じたら Dialog がトリガー（行の削除ボタン）へフォーカスを返す。 */}
+            {pendingDeletePromptIndex !== null && (
+                <Dialog
+                    isOpen
+                    onClose={() => setPendingDeletePromptIndex(null)}
+                    role="alertdialog"
+                    aria-labelledby={DELETE_PROMPT_DIALOG_TITLE_ID}
+                    aria-describedby={DELETE_PROMPT_DIALOG_DESCRIPTION_ID}
+                    className="w-[calc(100%-2rem)] max-w-lg overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+                >
+                    <div className="flex flex-col bg-white p-6 sm:p-8">
+                        <div className="space-y-2">
+                            <h2 id={DELETE_PROMPT_DIALOG_TITLE_ID} className="text-xl font-bold text-gray-900">
+                                {`「${defaultPrompts[pendingDeletePromptIndex]?.name ?? ''}」を削除しますか？`}
+                            </h2>
+                            <p id={DELETE_PROMPT_DIALOG_DESCRIPTION_ID} className="text-sm leading-relaxed text-gray-600">
+                                一覧から削除します。「設定を保存」を押すまでは確定されません。
+                            </p>
+                        </div>
+                        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                            <button
+                                type="button"
+                                data-dialog-initial-focus
+                                onClick={() => setPendingDeletePromptIndex(null)}
+                                className="min-h-11 rounded-lg bg-gray-700 px-6 py-2.5 font-medium text-white shadow-sm transition-colors hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2"
+                            >
+                                キャンセル
+                            </button>
+                            <button
+                                type="button"
+                                onClick={confirmDeletePrompt}
+                                className="min-h-11 rounded-lg bg-red-600 px-6 py-2.5 font-medium text-white shadow-sm transition-colors hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+                            >
+                                削除する
+                            </button>
+                        </div>
+                    </div>
+                </Dialog>
+            )}
         </div>
     );
 });

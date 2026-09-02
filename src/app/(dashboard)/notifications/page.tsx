@@ -97,10 +97,13 @@ function NotificationsPageContent() {
     const markReadError = markReadErrorUid === currentUid;
 
     const handleMarkAllAsRead = async () => {
-        if (!user?.uid || unreadIds.length === 0) return;
+        if (!user?.uid) return;
+        // 再試行の入口でもあるため、未読が残っていない場合も古いエラーは畳む
+        // （別端末で既読済みになった後にエラーバナーだけ残ると行き止まりになる）。
+        setMarkReadErrorUid(null);
+        if (unreadIds.length === 0) return;
         const mutation: PendingReadMutation = { uid: user.uid, ids: unreadIds, saving: true };
         setPendingReadMutation(mutation);
-        setMarkReadErrorUid(null);
         try {
             await setDoc(
                 doc(db, DISMISSALS_COLLECTION, user.uid),
@@ -121,7 +124,9 @@ function NotificationsPageContent() {
     };
 
     return (
-        <div className="max-w-3xl mx-auto space-y-4">
+        // 他ページと同じく左端の基準線へ揃え、読み幅だけを max-w-3xl で制限する
+        // （mx-auto の中央寄せ狭カラムには戻さない）。
+        <div className="max-w-3xl space-y-4">
             <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                     <Bell className="w-6 h-6 text-blue-600" />
@@ -171,9 +176,20 @@ function NotificationsPageContent() {
             {markReadError && (
                 <div
                     role="alert"
-                    className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg"
+                    className="flex flex-wrap items-center gap-3 p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg"
                 >
-                    全てのお知らせを既読にできませんでした。通信状況を確認して、もう一度お試しください。
+                    <p className="min-w-0 flex-1">
+                        全てのお知らせを既読にできませんでした。通信状況を確認して、もう一度お試しください。
+                    </p>
+                    <button
+                        type="button"
+                        onClick={handleMarkAllAsRead}
+                        disabled={isMarkingAllAsRead}
+                        className="inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-white border border-red-300 rounded-lg hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        もう一度既読にする
+                    </button>
                 </div>
             )}
 

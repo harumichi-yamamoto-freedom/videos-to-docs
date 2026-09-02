@@ -13,8 +13,11 @@ const hookHarness = vi.hoisted(() => {
     interface HarnessState {
         stateCursor: number;
         effectCursor: number;
+        refCursor: number;
+        idCursor: number;
         states: unknown[];
         effects: EffectSlot[];
+        refs: Array<{ current: unknown }>;
         pendingEffects: Array<{
             index: number;
             effect: () => void | (() => void);
@@ -23,6 +26,7 @@ const hookHarness = vi.hoisted(() => {
     }
 
     let activeHarness: HarnessState | null = null;
+    let harnessInstanceCount = 0;
 
     // The helper-level tests below drive the component function directly with
     // these fake hooks. The mount-level tests render it for real in jsdom, and
@@ -30,6 +34,8 @@ const hookHarness = vi.hoisted(() => {
     interface ReactHookFallback {
         useState: <T>(initialValue: T | (() => T)) => [T, (value: T) => void];
         useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => void;
+        useRef: <T>(initialValue: T) => { current: T };
+        useId: () => string;
     }
     let reactFallback: ReactHookFallback | null = null;
     const setReactFallback = (hooks: ReactHookFallback) => {
@@ -88,12 +94,44 @@ const hookHarness = vi.hoisted(() => {
         }
     };
 
+    const useRef = <T,>(initialValue: T) => {
+        if (!activeHarness) {
+            if (!reactFallback) throw new Error('React hook fallback was not installed');
+            return reactFallback.useRef(initialValue);
+        }
+
+        const harness = activeHarness;
+        const index = harness.refCursor;
+        harness.refCursor += 1;
+
+        if (!(index in harness.refs)) {
+            harness.refs[index] = { current: initialValue };
+        }
+
+        return harness.refs[index] as { current: T };
+    };
+
+    const useId = () => {
+        if (!activeHarness) {
+            if (!reactFallback) throw new Error('React hook fallback was not installed');
+            return reactFallback.useId();
+        }
+
+        const index = activeHarness.idCursor;
+        activeHarness.idCursor += 1;
+        return `harness-id-${harnessInstanceCount}-${index}`;
+    };
+
     const create = <Props, Result>(component: (props: Props) => Result) => {
+        harnessInstanceCount += 1;
         const state: HarnessState = {
             stateCursor: 0,
             effectCursor: 0,
+            refCursor: 0,
+            idCursor: 0,
             states: [],
             effects: [],
+            refs: [],
             pendingEffects: [],
         };
         let output: Result;
@@ -102,6 +140,8 @@ const hookHarness = vi.hoisted(() => {
             render(props: Props): Result {
                 state.stateCursor = 0;
                 state.effectCursor = 0;
+                state.refCursor = 0;
+                state.idCursor = 0;
                 state.pendingEffects = [];
                 activeHarness = state;
                 try {
@@ -125,11 +165,12 @@ const hookHarness = vi.hoisted(() => {
                 for (const effect of state.effects) effect?.cleanup?.();
                 state.effects = [];
                 state.states = [];
+                state.refs = [];
             },
         };
     };
 
-    return { create, setReactFallback, useEffect, useState };
+    return { create, setReactFallback, useEffect, useId, useRef, useState };
 });
 
 const mocks = vi.hoisted(() => ({
@@ -146,10 +187,14 @@ vi.mock('react', async () => {
     hookHarness.setReactFallback({
         useState: actual.useState as ReactHookFallbackShape['useState'],
         useEffect: actual.useEffect as ReactHookFallbackShape['useEffect'],
+        useRef: actual.useRef as ReactHookFallbackShape['useRef'],
+        useId: actual.useId as ReactHookFallbackShape['useId'],
     });
     return {
         ...actual,
         useEffect: hookHarness.useEffect,
+        useId: hookHarness.useId,
+        useRef: hookHarness.useRef,
         useState: hookHarness.useState,
     };
 });
@@ -157,6 +202,8 @@ vi.mock('react', async () => {
 interface ReactHookFallbackShape {
     useState: <T>(initialValue: T | (() => T)) => [T, (value: T) => void];
     useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => void;
+    useRef: <T>(initialValue: T) => { current: T };
+    useId: () => string;
 }
 
 vi.mock('firebase/auth', () => ({
@@ -559,5 +606,41 @@ describe('ReauthModal 共通Dialog移行', () => {
         expect(onSuccess).toHaveBeenCalledOnce();
         expect(onClose).toHaveBeenCalledWith('complete');
         expect(passwordInput().value).toBe('');
+    });
+
+    it('同一ツリーに2つマウントしてもidが重複しない（useId採番）', async () => {
+        // パスワード変更とアカウント削除の両方がこのモーダルを持つため、
+        // 同時マウントは実アプリで起きる構成。静的idへ退行すると重複する。
+        await act(async () => {
+            root.render(React.createElement(
+                React.Fragment,
+                null,
+                React.createElement(ReauthModal, { isOpen: true, onClose, onSuccess }),
+                React.createElement(ReauthModal, { isOpen: false, onClose, onSuccess }),
+            ));
+        });
+
+        const dialogs = Array.from(container.querySelectorAll('dialog'));
+        expect(dialogs).toHaveLength(2);
+        const labelIds = dialogs.map(dialog => dialog.getAttribute('aria-labelledby'));
+        expect(labelIds[0]).toBeTruthy();
+        expect(labelIds[1]).toBeTruthy();
+        expect(labelIds[0]).not.toBe(labelIds[1]);
+
+        const allIds = Array.from(container.querySelectorAll('[id]')).map(
+            element => element.id,
+        );
+        expect(new Set(allIds).size).toBe(allIds.length);
+    });
+
+    it('パスワード欄のlabelは採番されたidで入力欄と結ばれている', async () => {
+        await renderModal();
+
+        const input = passwordInput();
+        expect(input.id).not.toBe('');
+        const label = Array.from(container.querySelectorAll('label')).find(
+            candidate => candidate.htmlFor === input.id,
+        );
+        expect(label?.textContent).toContain('現在のパスワードを入力してください');
     });
 });

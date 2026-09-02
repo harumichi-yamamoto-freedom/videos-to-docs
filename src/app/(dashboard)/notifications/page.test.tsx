@@ -270,6 +270,29 @@ describe('NotificationsPage', () => {
         expect(listButton?.props.className).not.toContain('opacity-60');
     });
 
+    it('既読化エラーの警告は再試行CTAを持ち、押すと既読化を再実行してエラーを畳む', async () => {
+        const { tree, setMarkReadErrorUid } = renderContent({ markReadErrorUid: 'user-1' });
+        const retryButton = findButton(tree, 'もう一度既読にする');
+
+        expect(retryButton).not.toBeNull();
+        await retryButton?.props.onClick();
+
+        expect(setMarkReadErrorUid).toHaveBeenCalledWith(null);
+        expect(setDoc).toHaveBeenCalledTimes(1);
+        expect(arrayUnion).toHaveBeenCalledWith('notification-2');
+    });
+
+    it('本体コラムは左揃えの読み幅制限で、中央寄せ（mx-auto）へ戻さない', () => {
+        const { tree } = renderContent();
+        const container = findElement(
+            tree,
+            element => element.type === 'div' && element.props.className?.includes('max-w-3xl') === true,
+        );
+
+        expect(container).not.toBeNull();
+        expect(container?.props.className).not.toContain('mx-auto');
+    });
+
     it('購読失敗時は stale 案内と再試行 UI を表示する', () => {
         vi.mocked(useSystemNotifications).mockReturnValue({
             notifications,

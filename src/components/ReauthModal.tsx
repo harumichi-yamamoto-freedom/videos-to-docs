@@ -1,14 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { reauthenticateWithCredential, EmailAuthProvider, reauthenticateWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { createLogger } from '@/lib/logger';
 import { Dialog } from './ui/Dialog';
 
 const reauthModalLogger = createLogger('ReauthModal');
-
-const REAUTH_TITLE_ID = 'reauth-modal-title';
 
 export type ReauthenticationCloseReason = 'dismiss' | 'complete';
 
@@ -79,6 +77,12 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [attemptGuard] = useState(() => new ReauthenticationAttemptGuard());
+    // このモーダルはパスワード変更とアカウント削除の両方から同時にマウントされ得る。
+    // 静的な id 文字列は DOM 内で重複するため useId で採番する。
+    const titleId = useId();
+    const passwordInputRef = useRef<HTMLInputElement>(null);
+    const googleButtonRef = useRef<HTMLButtonElement>(null);
+    const unknownProviderCloseRef = useRef<HTMLButtonElement>(null);
 
     useEffect(() => {
         if (isOpen) {
@@ -108,6 +112,14 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
     const isGoogleProvider = Boolean(
         user?.providerData.some(p => p.providerId === 'google.com'),
     );
+
+    // 認証方法ごとに描かれる分岐は1つだけなので、初期フォーカス先もその分岐の
+    // 主操作へ切り替える（Dialog は最新の ref を開いた時点で読む）。
+    const initialFocusRef = isEmailProvider
+        ? passwordInputRef
+        : isGoogleProvider
+            ? googleButtonRef
+            : unknownProviderCloseRef;
 
     const handleDismiss = () => {
         if (!canDismissReauthentication(loading)) return;
@@ -198,14 +210,15 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
         <Dialog
             isOpen={isOpen && Boolean(user)}
             onClose={handleDismiss}
+            initialFocusRef={initialFocusRef}
             dismissible={canDismissReauthentication(loading)}
-            aria-labelledby={REAUTH_TITLE_ID}
+            aria-labelledby={titleId}
             aria-busy={loading}
             className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-hidden rounded-lg border-0 bg-white shadow-xl"
         >
             <div className="flex max-h-[calc(100dvh-2rem)] min-h-0 flex-col p-6">
                 <div className="mb-4 flex items-center justify-between">
-                    <h2 id={REAUTH_TITLE_ID} className="text-xl font-bold text-red-600">
+                    <h2 id={titleId} className="text-xl font-bold text-red-600">
                         セキュリティ確認
                     </h2>
                     <button
@@ -234,12 +247,12 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
                 {isEmailProvider ? (
                     <form onSubmit={handleEmailReauth} className="space-y-4">
                         <div>
-                            <label htmlFor="reauth-password" className="mb-1 block text-sm font-medium text-gray-800">
+                            <label htmlFor={`${titleId}-password`} className="mb-1 block text-sm font-medium text-gray-800">
                                 現在のパスワードを入力してください
                             </label>
                             <input
-                                id="reauth-password"
-                                data-dialog-initial-focus
+                                ref={passwordInputRef}
+                                id={`${titleId}-password`}
                                 type="password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
@@ -276,8 +289,8 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
                         </p>
 
                         <button
+                            ref={googleButtonRef}
                             type="button"
-                            data-dialog-initial-focus
                             onClick={handleGoogleReauth}
                             disabled={loading}
                             className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-gray-300 py-2 text-gray-800 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:opacity-60"
@@ -306,8 +319,8 @@ export default function ReauthModal({ isOpen, onClose, onSuccess }: ReauthModalP
                             このアカウントの認証方法が不明です。
                         </p>
                         <button
+                            ref={unknownProviderCloseRef}
                             type="button"
-                            data-dialog-initial-focus
                             onClick={handleDismiss}
                             className="min-h-11 w-full rounded-lg bg-gray-700 px-4 py-2 font-medium text-white transition-colors hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
                         >

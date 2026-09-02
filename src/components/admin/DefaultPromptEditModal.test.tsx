@@ -119,6 +119,10 @@ describe('DefaultPromptEditModal', () => {
             root.unmount();
         });
         container.remove();
+        // 確認も結果表示もダイアログ内で完結する。ネイティブの confirm()/alert()
+        // へ退行したらどのテストでもここで落ちる。
+        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(alertSpy).not.toHaveBeenCalled();
         confirmSpy.mockRestore();
         alertSpy.mockRestore();
     });
@@ -188,9 +192,11 @@ describe('DefaultPromptEditModal', () => {
         return heading;
     }
 
+    // 操作可能なボタンだけを掴む（確認パネル表示中の hidden+inert 側を除外）。
     function findButton(name: string): HTMLButtonElement {
         const button = Array.from(container.querySelectorAll('button')).find(
-            candidate => candidate.textContent?.trim() === name,
+            candidate => candidate.textContent?.trim() === name
+                && !candidate.closest('[inert]'),
         );
         if (!button) throw new Error(`button not found: ${name}`);
         return button;
@@ -241,7 +247,7 @@ describe('DefaultPromptEditModal', () => {
         expect(onClose).toHaveBeenCalledTimes(1);
     });
 
-    it('変更がないときEscでonCloseを1回呼ぶ', async () => {
+    it('変更がないときEscで確認パネルを出さずにonCloseを1回呼ぶ', async () => {
         await renderEditMode();
 
         await act(async () => {
@@ -249,10 +255,10 @@ describe('DefaultPromptEditModal', () => {
         });
 
         expect(onClose).toHaveBeenCalledTimes(1);
-        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(container.textContent).not.toContain('未保存の変更があります');
     });
 
-    it('編集中に未保存の変更があるとEscは破棄確認を通し、拒否すれば閉じない', async () => {
+    it('編集中に未保存の変更があるとEscはダイアログ内の破棄確認を出し、拒否すれば閉じない', async () => {
         await renderEditMode();
         await switchToEditMode();
 
@@ -262,24 +268,114 @@ describe('DefaultPromptEditModal', () => {
             setNativeValue(textarea, '編集中の本文');
         });
 
-        confirmSpy.mockReturnValue(false);
         await act(async () => {
             dialogElement().dispatchEvent(new Event('cancel', { cancelable: true }));
         });
 
-        expect(confirmSpy).toHaveBeenCalledTimes(1);
-        expect(confirmSpy).toHaveBeenCalledWith(
-            '保存されていない変更があります。変更を破棄して閉じますか？',
-        );
+        expect(dialogElement().getAttribute('role')).toBe('alertdialog');
+        expect(container.textContent).toContain('未保存の変更があります');
+        expect(container.textContent).toContain('閉じると、保存していない変更は失われます。');
         expect(onClose).not.toHaveBeenCalled();
         expect(dialogElement().open).toBe(true);
+        // 安全な選択肢へ初期フォーカスが移り、背後のフォームは操作から外れる。
+        expect(document.activeElement).toBe(findButton('編集を続ける'));
+        expect(container.querySelector('[inert]')?.getAttribute('aria-hidden')).toBe('true');
 
-        confirmSpy.mockReturnValue(true);
+        // 「編集を続ける」で編集内容が残ったまま戻る。
+        await act(async () => {
+            findButton('編集を続ける').click();
+        });
+        expect(dialogElement().getAttribute('role')).toBe('dialog');
+        expect(onClose).not.toHaveBeenCalled();
+        expect(container.querySelector('textarea')?.value).toBe('編集中の本文');
+
+        // もう一度 Esc から破棄を選べば閉じる。
         await act(async () => {
             dialogElement().dispatchEvent(new Event('cancel', { cancelable: true }));
+        });
+        await act(async () => {
+            findButton('変更を破棄して閉じる').click();
         });
 
         expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('破棄確認中のEscは確認だけを畳み、編集フォームへ戻す（閉じない）', async () => {
+        await renderEditMode();
+        await switchToEditMode();
+        const textarea = container.querySelector('textarea');
+        if (!textarea) throw new Error('textarea not found');
+        await act(async () => {
+            setNativeValue(textarea, '編集中の本文');
+        });
+        await act(async () => {
+            dialogElement().dispatchEvent(new Event('cancel', { cancelable: true }));
+        });
+        expect(container.textContent).toContain('未保存の変更があります');
+
+        await act(async () => {
+            dialogElement().dispatchEvent(new Event('cancel', { cancelable: true }));
+        });
+
+        expect(container.textContent).not.toContain('未保存の変更があります');
+        expect(onClose).not.toHaveBeenCalled();
+        expect(container.querySelector('textarea')?.value).toBe('編集中の本文');
+    });
+
+    it('削除はダイアログ内で対象名を含む確認を出し、承諾でonDelete→onCloseを呼ぶ', async () => {
+        await renderEditMode();
+
+        await act(async () => {
+            findButton('削除').click();
+        });
+
+        expect(onDelete).not.toHaveBeenCalled();
+        expect(dialogElement().getAttribute('role')).toBe('alertdialog');
+        expect(container.textContent).toContain('「保存済みプロンプト」を削除しますか？');
+        expect(container.textContent).toContain('削除したデフォルトプロンプトは元に戻せません。');
+
+        await act(async () => {
+            findButton('削除する').click();
+        });
+
+        expect(onDelete).toHaveBeenCalledTimes(1);
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('削除確認をキャンセルすると削除せずに表示へ戻る', async () => {
+        await renderEditMode();
+
+        await act(async () => {
+            findButton('削除').click();
+        });
+        await act(async () => {
+            findButton('キャンセル').click();
+        });
+
+        expect(onDelete).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+        expect(dialogElement().getAttribute('role')).toBe('dialog');
+    });
+
+    it('名前や内容が空の保存はダイアログ内のrole=alertで伝え、onSaveを呼ばない', async () => {
+        await renderCreateMode();
+
+        await act(async () => {
+            findButton('追加').click();
+        });
+
+        expect(onSave).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+        const alert = container.querySelector('[role="alert"]');
+        expect(alert?.textContent).toContain('名前と内容を入力してください。');
+        expect(dialogElement().open).toBe(true);
+
+        // 入力すると古いエラーは消える。
+        const titleInput = container.querySelector<HTMLInputElement>('input[type="text"]');
+        await act(async () => {
+            setNativeValue(titleInput!, '名前');
+        });
+        expect(container.querySelector('[role="alert"]')).toBeNull();
     });
 
     it('タイトル編集中もダイアログ名を保つ見出しを置き、タイトル入力へ初期フォーカスする', async () => {

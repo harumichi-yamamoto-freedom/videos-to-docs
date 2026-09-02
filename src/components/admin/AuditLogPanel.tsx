@@ -10,6 +10,7 @@ const auditLogPanelLogger = createLogger('AuditLogPanel');
 export default function AuditLogPanel() {
     const [logs, setLogs] = useState<AuditLog[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [limitCount, setLimitCount] = useState(100);
 
     useEffect(() => {
@@ -20,11 +21,12 @@ export default function AuditLogPanel() {
     const loadLogs = async () => {
         try {
             setLoading(true);
+            setLoadError(null);
             const data = await getAuditLogs(limitCount);
             setLogs(data);
         } catch (error) {
             auditLogPanelLogger.error('監査ログの取得に失敗', error, { limitCount });
-            alert('監査ログの取得に失敗しました');
+            setLoadError('監査ログを取得できませんでした。通信状況を確認して、もう一度お試しください。');
         } finally {
             setLoading(false);
         }
@@ -110,6 +112,23 @@ export default function AuditLogPanel() {
                     </button>
                 </div>
             </div>
+
+            {loadError && (
+                <div
+                    role="alert"
+                    className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+                >
+                    <p className="min-w-0 flex-1">{loadError}</p>
+                    <button
+                        type="button"
+                        onClick={loadLogs}
+                        disabled={loading}
+                        className="shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        再試行
+                    </button>
+                </div>
+            )}
 
             {loading ? (
                 <div className="text-center py-12">
