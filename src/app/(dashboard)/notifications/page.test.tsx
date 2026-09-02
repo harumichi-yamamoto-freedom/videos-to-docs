@@ -282,6 +282,15 @@ describe('NotificationsPage', () => {
         expect(arrayUnion).toHaveBeenCalledWith('notification-2');
     });
 
+    it('未ログインでは既読化エラーの警告を出さない（uid 不在同士の一致を誤検出しない）', () => {
+        vi.mocked(useAuth).mockReturnValue({ user: null, loading: false } as never);
+        const { tree } = renderContent();
+
+        expect(getText(tree)).not.toContain('全てのお知らせを既読にできませんでした');
+        expect(findButton(tree, 'もう一度既読にする')).toBeNull();
+        expect(findButton(tree, '全て既読にする')).toBeNull();
+    });
+
     it('本体コラムは左揃えの読み幅制限で、中央寄せ（mx-auto）へ戻さない', () => {
         const { tree } = renderContent();
         const container = findElement(

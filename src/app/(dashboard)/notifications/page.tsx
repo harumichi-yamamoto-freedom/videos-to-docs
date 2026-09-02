@@ -94,7 +94,9 @@ function NotificationsPageContent() {
         : [];
     const hasUnread = unreadIds.length > 0;
     const isMarkingAllAsRead = Boolean(activeReadMutation?.saving);
-    const markReadError = markReadErrorUid === currentUid;
+    // 未ログインは currentUid が null。エラー未発生(null)との一致を「エラー」と誤検出しないよう
+    // エラーが記録済みであることを先に確かめる（ゲストで開くだけで赤帯が出ていた）。
+    const markReadError = markReadErrorUid !== null && markReadErrorUid === currentUid;
 
     const handleMarkAllAsRead = async () => {
         if (!user?.uid) return;

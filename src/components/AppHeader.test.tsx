@@ -162,8 +162,15 @@ describe('AppHeader ナビゲーション (E3)', () => {
         expect(navLikeTags.every(tag => tag.includes('min-h-11'))).toBe(true);
     });
 
-    it('中央固定のための 3 カラムグリッドを使う', () => {
-        expect(render()).toContain('grid-cols-[1fr_auto_1fr]');
+    it('デスクトップは中央固定の 3 カラム、モバイルは 2 カラム（空の右列でロゴ幅を奪わない）', () => {
+        const html = render();
+        const gridTag = html.match(/<div class="[^"]*\bgrid h-20[^"]*"/)?.[0] ?? '';
+
+        expect(gridTag).toContain('lg:grid-cols-[1fr_auto_1fr]');
+        expect(gridTag).toContain('grid-cols-[minmax(0,1fr)_auto]');
+        // 接頭辞なしの 3 カラムが残ると、モバイルで空の右列が幅の半分を取り
+        // ワードマークがメニューボタンと重なる（390px 実測で 15px 重複）。
+        expect(gridTag).not.toMatch(/[\s"]grid-cols-\[1fr_auto_1fr\]/);
     });
 });
 

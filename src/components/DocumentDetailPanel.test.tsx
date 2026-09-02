@@ -646,7 +646,7 @@ describe('DocumentDetailPanel', () => {
         }) as React.ReactNode;
 
         expect(getText(tree)).toContain('使用モデル: Gemini 3.7 Flash');
-        expect(getText(tree)).not.toContain('標準を選択');
+        expect(getText(tree)).not.toContain('（おまかせ）');
     });
 
     it('デフォルト選択で生成した文書には注記を添える', () => {
@@ -661,7 +661,7 @@ describe('DocumentDetailPanel', () => {
         }) as React.ReactNode;
 
         expect(getText(tree)).toContain(
-            '使用モデル: Gemini 3.7 Flash（標準を選択）',
+            '使用モデル: Gemini 3.7 Flash（おまかせ）',
         );
     });
 
@@ -1694,7 +1694,7 @@ describe('DocumentPrintPortal PDF テーマ', () => {
 
         expect(header).not.toBeNull();
         expect(getText(PdfDocumentHeader(header!.props))).toContain(
-            '使用モデルGemini 3.7 Flash（標準を選択）・思考: 標準',
+            '使用モデルGemini 3.7 Flash（おまかせ）・思考: 標準',
         );
     });
 
