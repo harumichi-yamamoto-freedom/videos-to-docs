@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
     getTranscriptions: vi.fn(),
     deleteTranscription: vi.fn(),
-    updateTranscriptionTitle: vi.fn(),
+    updateTranscription: vi.fn(),
     useAuth: vi.fn(),
     useCallback: vi.fn(),
     useId: vi.fn(),
@@ -35,7 +35,8 @@ vi.mock('@/hooks/useAuth', () => ({
 vi.mock('@/lib/firestore', () => ({
     getTranscriptions: mocks.getTranscriptions,
     deleteTranscription: mocks.deleteTranscription,
-    updateTranscriptionTitle: mocks.updateTranscriptionTitle,
+    updateTranscription: mocks.updateTranscription,
+    TranscriptionConflictError: class MockTranscriptionConflictError extends Error {},
 }));
 
 vi.mock('@/lib/logger', () => ({
@@ -70,34 +71,152 @@ const documentFixture: Transcription = {
 
 const userSubjectKey = JSON.stringify(['user', 'user-a']);
 
+// スロット番号(宣言順)は実装へuseState/useRefを1行足すだけで静かにずれる。
+// 位置ではなく「初期値の形」と「操作がどのsetterを呼ぶか」でスロットを特定する。
+type SidebarStateName = 'collectionState' | 'editingDocId' | 'editedTitle' | 'pendingDeleteId';
+
+interface SidebarStateOverrides {
+    editingDocId?: string;
+    editedTitle?: string;
+    pendingDeleteId?: string;
+}
+
+type SidebarSetters = Record<SidebarStateName, ReturnType<typeof vi.fn>>;
+
+function isCollectionStateInitial(value: unknown): boolean {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as { subjectKey?: unknown; status?: unknown; documents?: unknown };
+    return candidate.subjectKey === null
+        && candidate.status === 'loading'
+        && Array.isArray(candidate.documents);
+}
+
+function resolveInitialValue(initialValue: unknown): unknown {
+    return typeof initialValue === 'function'
+        ? (initialValue as () => unknown)()
+        : initialValue;
+}
+
+function uniqueSlot(
+    setterSlots: Array<ReturnType<typeof vi.fn>>,
+    label: string,
+    predicate: (setter: ReturnType<typeof vi.fn>, index: number) => boolean,
+): number {
+    const matches = setterSlots
+        .map((setter, index) => ({ setter, index }))
+        .filter(({ setter, index }) => predicate(setter, index));
+    if (matches.length !== 1) {
+        throw new Error(`${label} のスロットを一意に特定できません（候補${matches.length}件）`);
+    }
+    return matches[0].index;
+}
+
+function discoverStateSlots(): Record<SidebarStateName, number> {
+    const setterSlots: Array<ReturnType<typeof vi.fn>> = [];
+    const collectionSlots: number[] = [];
+    let probeIndex = 0;
+
+    // probe時点のuseAuthに合わせたsubjectKeyで一覧を可視化する（不一致だとloading扱いで
+    // 操作ボタンが描画されず、スロット特定ができない）。
+    const { user, loading } = mocks.useAuth() as {
+        user: { uid: string } | null;
+        loading: boolean;
+    };
+    const probeSubjectKey = loading
+        ? null
+        : JSON.stringify([user ? 'user' : 'guest', user?.uid ?? 'GUEST']);
+
+    const probeLayoutEffect = mocks.useLayoutEffect.getMockImplementation();
+    mocks.useLayoutEffect.mockImplementation(() => undefined);
+    mocks.useState.mockImplementation((initialValue: unknown) => {
+        const index = probeIndex++;
+        const setter = vi.fn();
+        setterSlots[index] = setter;
+        if (isCollectionStateInitial(initialValue)) {
+            collectionSlots.push(index);
+            return [{
+                subjectKey: probeSubjectKey,
+                status: 'success',
+                documents: [documentFixture],
+            }, setter];
+        }
+        return [resolveInitialValue(initialValue), setter];
+    });
+
+    try {
+        const probeTree = DocumentListSidebar({ onDocumentClick: vi.fn() }) as React.ReactNode;
+        const deleteButton = findElement(
+            probeTree,
+            props => props['aria-label'] === `「${documentFixture.title}」を削除`,
+        );
+        const editButton = findElement(
+            probeTree,
+            props => props['aria-label'] === `「${documentFixture.title}」のタイトルを編集`,
+        );
+        if (!deleteButton || !editButton) {
+            throw new Error('スロット特定用の削除/タイトル編集ボタンが見つかりません');
+        }
+
+        (deleteButton.props.onClick as () => void)();
+        const pendingDeleteId = uniqueSlot(setterSlots, 'pendingDeleteId', setter =>
+            setter.mock.calls.some(call => call[0] === documentFixture.id));
+
+        (editButton.props.onClick as () => void)();
+        const editedTitle = uniqueSlot(setterSlots, 'editedTitle', setter =>
+            setter.mock.calls.some(call => call[0] === documentFixture.title));
+        const editingDocId = uniqueSlot(setterSlots, 'editingDocId', (setter, index) =>
+            index !== pendingDeleteId
+            && setter.mock.calls.some(call => call[0] === documentFixture.id));
+
+        if (collectionSlots.length !== 1) {
+            throw new Error(`collectionState のスロットを一意に特定できません（候補${collectionSlots.length}件）`);
+        }
+
+        return {
+            collectionState: collectionSlots[0],
+            editingDocId,
+            editedTitle,
+            pendingDeleteId,
+        };
+    } finally {
+        if (probeLayoutEffect) mocks.useLayoutEffect.mockImplementation(probeLayoutEffect);
+    }
+}
+
 function configureHookState(
     collectionState: TestCollectionState,
-    stateOverrides: Record<number, unknown> = {},
-) {
+    stateOverrides: SidebarStateOverrides = {},
+): SidebarSetters {
+    const slots = discoverStateSlots();
+    const slotToName = new Map<number, SidebarStateName>(
+        (Object.entries(slots) as Array<[SidebarStateName, number]>)
+            .map(([name, slot]) => [slot, name]),
+    );
+    const setters = {} as SidebarSetters;
     let stateIndex = 0;
-    const setters: ReturnType<typeof vi.fn>[] = [];
 
     mocks.useState.mockImplementation((initialValue: unknown) => {
         const index = stateIndex++;
         const setter = vi.fn();
-        setters[index] = setter;
-        const value = index === 0
-            ? collectionState
-            : index in stateOverrides
-                ? stateOverrides[index]
-                : typeof initialValue === 'function'
-                    ? (initialValue as () => unknown)()
-                    : initialValue;
-        return [value, setter];
+        const name = slotToName.get(index);
+        if (name) setters[name] = setter;
+
+        if (name === 'collectionState') return [collectionState, setter];
+        if (name && name in stateOverrides) {
+            return [stateOverrides[name as keyof SidebarStateOverrides], setter];
+        }
+        return [resolveInitialValue(initialValue), setter];
     });
 
     return setters;
 }
 
 function useDocumentsRef(documents: Transcription[]) {
-    let refIndex = 0;
+    // documentsRef は「初期値が空配列である唯一のref」として内容で特定する。
     mocks.useRef.mockImplementation((initialValue: unknown) => ({
-        current: refIndex++ === 3 ? documents : initialValue,
+        current: Array.isArray(initialValue) && initialValue.length === 0
+            ? documents
+            : initialValue,
     }));
 }
 
@@ -219,7 +338,7 @@ describe('DocumentListSidebar', () => {
 
         (requestDeleteButton?.props.onClick as (() => void) | undefined)?.();
 
-        expect(initialSetters[4]).toHaveBeenCalledWith(documentFixture.id);
+        expect(initialSetters.pendingDeleteId).toHaveBeenCalledWith(documentFixture.id);
         expect(mocks.deleteTranscription).not.toHaveBeenCalled();
 
         configureHookState(
@@ -228,7 +347,7 @@ describe('DocumentListSidebar', () => {
                 status: 'success',
                 documents: [documentFixture],
             },
-            { 4: documentFixture.id },
+            { pendingDeleteId: documentFixture.id },
         );
         useDocumentsRef([documentFixture]);
         mocks.deleteTranscription.mockResolvedValueOnce('deleted');
@@ -272,7 +391,7 @@ describe('DocumentListSidebar', () => {
         });
 
         expect(onDocumentsChange).toHaveBeenNthCalledWith(1, []);
-        const lastCollectionUpdate = setters[0].mock.calls.at(-1)?.[0];
+        const lastCollectionUpdate = setters.collectionState.mock.calls.at(-1)?.[0];
         expect(typeof lastCollectionUpdate).toBe('function');
         expect(lastCollectionUpdate({
             subjectKey: userSubjectKey,
@@ -463,13 +582,13 @@ describe('DocumentListSidebar', () => {
         });
         expect(onListStateChange).not.toHaveBeenCalledWith({ status: 'error' });
 
-        expect(setters[0]).toHaveBeenLastCalledWith({
+        expect(setters.collectionState).toHaveBeenLastCalledWith({
             subjectKey: userSubjectKey,
             status: 'success',
             documents: [documentFixture],
             refreshWarning: '最新の文書一覧を取得できませんでした。',
         });
-        const recoveredState = setters[0].mock.calls.at(-1)?.[0] as TestCollectionState;
+        const recoveredState = setters.collectionState.mock.calls.at(-1)?.[0] as TestCollectionState;
         expect(recoveredState.documents[0]).toBe(documentFixture);
     });
 
@@ -486,15 +605,15 @@ describe('DocumentListSidebar', () => {
                 documents: [documentFixture],
             },
             {
-                1: documentFixture.id,
-                2: '更新後のタイトル',
+                editingDocId: documentFixture.id,
+                editedTitle: '更新後のタイトル',
             },
         );
         useDocumentsRef([latestDocument]);
         const onDocumentUpdated = vi.fn();
         const onDocumentsChange = vi.fn();
         const onListStateChange = vi.fn();
-        mocks.updateTranscriptionTitle.mockResolvedValueOnce(undefined);
+        mocks.updateTranscription.mockResolvedValueOnce(null);
 
         const tree = DocumentListSidebar({
             onDocumentClick: vi.fn(),
@@ -506,14 +625,23 @@ describe('DocumentListSidebar', () => {
         (saveButton?.props.onClick as (() => void) | undefined)?.();
         (saveButton?.props.onClick as (() => void) | undefined)?.();
 
-        expect(mocks.updateTranscriptionTitle).toHaveBeenCalledOnce();
+        expect(mocks.updateTranscription).toHaveBeenCalledOnce();
+        expect(mocks.updateTranscription).toHaveBeenCalledWith(documentFixture.id, {
+            title: '更新後のタイトル',
+        }, { expectedUpdatedAt: null });
 
         await vi.waitFor(() => {
             expect(onDocumentUpdated).toHaveBeenCalledWith(documentFixture.id, {
                 title: '更新後のタイトル',
             });
         });
-        expect(onDocumentsChange).not.toHaveBeenCalled();
+        // 一覧由来の本文をpatchに混ぜず、タイトルpatchだけを通知する。
+        // (成功後の静かな再取得が完了するまで、親へ一覧全体は流さない)
+        expect(onDocumentsChange).not.toHaveBeenCalledWith(
+            expect.arrayContaining([
+                expect.objectContaining({ text: 'ポーリングで更新された本文' }),
+            ]),
+        );
         expect(onListStateChange).toHaveBeenCalledWith({ status: 'success', count: 1 });
     });
 
@@ -525,13 +653,13 @@ describe('DocumentListSidebar', () => {
                 documents: [documentFixture],
             },
             {
-                1: documentFixture.id,
-                2: '一覧欠落中の新タイトル',
+                editingDocId: documentFixture.id,
+                editedTitle: '一覧欠落中の新タイトル',
             },
         );
         useDocumentsRef([]);
         const onDocumentUpdated = vi.fn();
-        mocks.updateTranscriptionTitle.mockResolvedValueOnce(undefined);
+        mocks.updateTranscription.mockResolvedValueOnce(null);
 
         const tree = DocumentListSidebar({
             onDocumentClick: vi.fn(),
@@ -547,6 +675,42 @@ describe('DocumentListSidebar', () => {
         });
     });
 
+    it('削除成功のローカルsnapshotはonDocumentsChangeへ流さない(親への反映はonDocumentDeletedのみ)', async () => {
+        configureHookState(
+            {
+                subjectKey: userSubjectKey,
+                status: 'success',
+                documents: [documentFixture],
+            },
+            {
+                pendingDeleteId: documentFixture.id,
+            },
+        );
+        useDocumentsRef([documentFixture, {
+            ...documentFixture,
+            id: 'document-b',
+            title: '保存前snapshotの文書B',
+        }]);
+        const onDocumentDeleted = vi.fn();
+        const onDocumentsChange = vi.fn();
+        mocks.deleteTranscription.mockResolvedValueOnce('deleted');
+
+        const tree = DocumentListSidebar({
+            onDocumentClick: vi.fn(),
+            onDocumentDeleted,
+            onDocumentsChange,
+        }) as React.ReactNode;
+        const deleteButton = findElement(tree, props => props.children === '削除する');
+        (deleteButton?.props.onClick as (() => void) | undefined)?.();
+
+        await vi.waitFor(() => {
+            expect(onDocumentDeleted).toHaveBeenCalledWith(documentFixture.id);
+        });
+        // サイドバーのローカルsnapshot(保存前本文+旧版印)をpageへ払い出すと、
+        // pageの確定済みentryが巻き戻り、版未確定警告が偽clearされる。
+        expect(onDocumentsChange).not.toHaveBeenCalled();
+    });
+
     it('本体削除成功時は副処理警告の有無にかかわらず削除を親へ通知する', async () => {
         configureHookState(
             {
@@ -555,7 +719,7 @@ describe('DocumentListSidebar', () => {
                 documents: [documentFixture],
             },
             {
-                4: documentFixture.id,
+                pendingDeleteId: documentFixture.id,
             },
         );
         useDocumentsRef([documentFixture]);
@@ -585,7 +749,7 @@ describe('DocumentListSidebar', () => {
         await vi.waitFor(() => {
             expect(onDocumentDeleted).toHaveBeenCalledWith(documentFixture.id);
         });
-        expect(onDocumentsChange).toHaveBeenCalledWith([]);
+        expect(onDocumentsChange).not.toHaveBeenCalled();
         expect(onListStateChange).toHaveBeenCalledWith({ status: 'success', count: 0 });
     });
 });

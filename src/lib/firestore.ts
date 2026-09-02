@@ -71,6 +71,57 @@ export interface TranscriptionUpdatePatch {
     transcription?: string;
 }
 
+export interface TranscriptionUpdateOptions {
+    /**
+     * 楽観的並行性制御の期待値。呼び出し側が最後に読み込んだ updatedAt を渡すと、
+     * transaction内で保存済みの updatedAt と突き合わせ、不一致なら書き込まずに
+     * TranscriptionConflictError で拒否する。
+     * undefined = 検査しない（従来挙動）。null = 「updatedAt未設定の文書を読んだ」。
+     */
+    expectedUpdatedAt?: Timestamp | Date | null;
+}
+
+/**
+ * 他の場所（別タブ・別端末）で先に更新された文書への上書き保存の拒否。
+ * 「保存に失敗」と区別し、呼び出し側が最新の読み込み導線を出せるようにする。
+ */
+export class TranscriptionConflictError extends Error {
+    constructor() {
+        super('他の場所で更新されています。内容を確認してから保存し直してください。');
+        this.name = 'TranscriptionConflictError';
+    }
+}
+
+/**
+ * updatedAt同士の一致判定。競合検査と「採用予約が指す版か」の判定を
+ * この1関数に集約する(判定が二重実装になると片方だけ較正される)。
+ */
+export function isSameUpdatedAt(
+    stored: unknown,
+    expected: Timestamp | Date | null,
+): boolean {
+    if (stored === undefined || stored === null) return expected === null;
+    if (expected === null) return false;
+
+    const storedTimestamp = stored as {
+        isEqual?: (other: unknown) => boolean;
+        toMillis?: () => number;
+    };
+    if (typeof storedTimestamp.isEqual === 'function' && !(expected instanceof Date)) {
+        return storedTimestamp.isEqual(expected);
+    }
+
+    const storedMillis = stored instanceof Date
+        ? stored.getTime()
+        : typeof storedTimestamp.toMillis === 'function'
+            ? storedTimestamp.toMillis()
+            : null;
+    const expectedMillis = expected instanceof Date
+        ? expected.getTime()
+        : expected.toMillis();
+    return storedMillis !== null && storedMillis === expectedMillis;
+}
+
 export type DeleteTranscriptionResult = 'deleted' | 'deletedWithWarning';
 
 export interface TranscriptionOwnerScope {
@@ -269,6 +320,12 @@ export async function getTranscriptions(
         }
 
         const querySnapshot = await getDocs(q);
+        // オフライン時などcache由来の読取は、サーバの現在版の証拠にならない。
+        // 版印を確定として下流(競合検査の期待値・版未確定警告のclear)に使わせない
+        // よう、cache読取の行は updatedAt を未確定(undefined)へ剥がす。
+        const isFromCache = Boolean(
+            (querySnapshot as { metadata?: { fromCache?: boolean } }).metadata?.fromCache,
+        );
         const documents: Transcription[] = [];
 
         querySnapshot.forEach((docSnapshot) => {
@@ -299,7 +356,7 @@ export async function getTranscriptions(
                 ownerId: data.ownerId || 'GUEST',
                 createdBy: data.createdBy || data.ownerId || 'GUEST',
                 createdAt,
-                updatedAt: data.updatedAt,
+                updatedAt: isFromCache ? undefined : data.updatedAt,
                 bitrate: data.bitrate,
                 sampleRate: data.sampleRate,
                 audioStoragePath: data.audioStoragePath,
@@ -409,7 +466,8 @@ async function assertTranscriptionSizeAllowed(
 export async function updateTranscription(
     documentId: string,
     patch: TranscriptionUpdatePatch,
-): Promise<void> {
+    options?: TranscriptionUpdateOptions,
+): Promise<Timestamp | null> {
     const updatePayload: Record<string, unknown> = {};
     const auditDetails: Record<string, string> = {};
 
@@ -433,19 +491,86 @@ export async function updateTranscription(
     }
 
     updatePayload.updatedAt = serverTimestamp();
+    const expectedUpdatedAt = options?.expectedUpdatedAt;
+    const docRef = doc(db, 'transcriptions', documentId);
 
-    try {
-        const docRef = doc(db, 'transcriptions', documentId);
-        await updateDoc(docRef, updatePayload);
-    } catch (error) {
-        firestoreLogger.error('文書の更新に失敗', error, { documentId });
-        throw new Error('文書の更新に失敗しました');
+    if (expectedUpdatedAt === undefined) {
+        try {
+            await updateDoc(docRef, updatePayload);
+        } catch (error) {
+            firestoreLogger.error('文書の更新に失敗', error, { documentId });
+            throw new Error('文書の更新に失敗しました');
+        }
+    } else {
+        try {
+            await runTransaction(db, async transaction => {
+                const snapshot = await transaction.get(docRef);
+                // 文書ごと消えていた場合も「他の場所での変更」として同じ導線
+                // （最新を読み込む→欠落バナー）へ流す。
+                if (
+                    !snapshot.exists()
+                    || !isSameUpdatedAt(snapshot.data().updatedAt, expectedUpdatedAt)
+                ) {
+                    throw new TranscriptionConflictError();
+                }
+
+                transaction.update(docRef, updatePayload);
+            });
+        } catch (error) {
+            if (error instanceof TranscriptionConflictError) throw error;
+            firestoreLogger.error('文書の更新に失敗', error, { documentId });
+            throw new Error('文書の更新に失敗しました');
+        }
     }
 
     try {
         await logAudit('document_update', 'document', documentId, auditDetails);
     } catch (error) {
         firestoreLogger.error('文書更新後の監査ログ記録に失敗', error, { documentId });
+    }
+
+    if (expectedUpdatedAt === undefined) return null;
+
+    // serverTimestampの実値は書き込み時点では分からない。次回保存の期待値として
+    // 読み戻して返す。読めなくても保存自体は成功している。
+    return readBackWrittenUpdatedAt(documentId, {
+        title: patch.title,
+        transcription: patch.transcription,
+    });
+}
+
+/**
+ * commit直後のupdatedAt読み戻し。commitと読取は原子でないため、間に別writer
+ * （競合検査なしのタイトル改名等）が割り込むと、読めたupdatedAtは自分が書いた版の
+ * 証拠にならない。書いたフィールドの一致を確認し、崩れていたらnullを返して
+ * 呼び出し側に期待値を据え置かせる（安全側=次回保存は競合として止まる）。
+ */
+async function readBackWrittenUpdatedAt(
+    documentId: string,
+    writtenFields: { title?: string; transcription?: string },
+): Promise<Timestamp | null> {
+    try {
+        const freshSnapshot = await getDoc(doc(db, 'transcriptions', documentId));
+        if (!freshSnapshot.exists()) return null;
+        // cacheからの読み戻しはcommit後のサーバ状態の証拠にならない(オフラインで
+        // commitだけ通った場合、cacheの旧版でフィールドが偶然一致し得る)。
+        if (
+            (freshSnapshot as { metadata?: { fromCache?: boolean } }).metadata?.fromCache
+        ) {
+            return null;
+        }
+
+        const freshData = freshSnapshot.data();
+        const writtenFieldsIntact =
+            (writtenFields.title === undefined || freshData.title === writtenFields.title)
+            && (writtenFields.transcription === undefined
+                || freshData.transcription === writtenFields.transcription);
+        if (!writtenFieldsIntact) return null;
+
+        return (freshData.updatedAt as Timestamp | undefined) ?? null;
+    } catch (error) {
+        firestoreLogger.error('保存後のupdatedAt再読込に失敗', error, { documentId });
+        return null;
     }
 }
 
@@ -457,7 +582,8 @@ export async function restoreTranscription(
     documentId: string,
     source: Transcription,
     patch: TranscriptionUpdatePatch,
-): Promise<void> {
+    options?: TranscriptionUpdateOptions,
+): Promise<Timestamp | null> {
     const currentOwnerId = getCurrentUserId();
     const currentOwnerType = getOwnerType();
     const sourceOwnerType = source.ownerType ?? currentOwnerType;
@@ -512,6 +638,16 @@ export async function restoreTranscription(
                     throw new Error('所有者が変わった文書は復元できません');
                 }
 
+                // 一覧は取得上限つきで「消えた」は削除の証拠にならない。圏外化して
+                // いただけの文書が別の場所で更新されていたら、古いdraftで消さない。
+                const expectedUpdatedAt = options?.expectedUpdatedAt;
+                if (
+                    expectedUpdatedAt !== undefined
+                    && !isSameUpdatedAt(existingData.updatedAt, expectedUpdatedAt)
+                ) {
+                    throw new TranscriptionConflictError();
+                }
+
                 transaction.update(transcriptionRef, {
                     title,
                     transcription,
@@ -534,6 +670,7 @@ export async function restoreTranscription(
             }
         });
     } catch (error) {
+        if (error instanceof TranscriptionConflictError) throw error;
         firestoreLogger.error('文書の復元に失敗', error, { documentId });
         throw new Error('文書の復元に失敗しました');
     }
@@ -546,6 +683,10 @@ export async function restoreTranscription(
     } catch (error) {
         firestoreLogger.error('文書復元後の監査ログ記録に失敗', error, { documentId });
     }
+
+    // 復元もserverTimestampを書くため、次回保存の期待値を読み戻して返す
+    // （返せないときの据え置きは偽競合=安全側で、一覧のrefetchが解消する）。
+    return readBackWrittenUpdatedAt(documentId, { title, transcription });
 }
 
 /**

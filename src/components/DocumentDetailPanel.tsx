@@ -14,7 +14,13 @@ import {
     FileTextIcon,
     Printer,
 } from 'lucide-react';
-import { DocumentSizeLimitError, Transcription } from '@/lib/firestore';
+import type { Timestamp } from 'firebase/firestore';
+import {
+    DocumentSizeLimitError,
+    isSameUpdatedAt,
+    Transcription,
+    TranscriptionConflictError,
+} from '@/lib/firestore';
 import { createLogger } from '@/lib/logger';
 import { MarkdownDocument } from '@/components/MarkdownDocument';
 import { DocumentPrintPortal } from '@/components/DocumentPrintPortal';
@@ -64,15 +70,35 @@ export interface DocumentDetailPanelHandle {
     focus: () => void;
 }
 
+export interface DocumentUpdateMeta {
+    /**
+     * このdraftが根拠にしている版のupdatedAt（楽観的並行性制御の期待値）。
+     * ポーリングで前進する一覧の最新値ではなく、エディタが内容をロード/同期した
+     * 時点の版を固定して渡す。null = 「updatedAt未設定の版を読んだ」。
+     */
+    expectedUpdatedAt: Timestamp | Date | null;
+}
+
 export interface DocumentDetailPanelProps {
     document: Transcription | null;
     onDocumentUpdate?: (
         documentId: string,
         patch: DocumentUpdatePatch,
+        meta: DocumentUpdateMeta,
     ) => Promise<void>;
     onDirtyChange?: (dirty: boolean) => void;
+    /** draftを破棄した瞬間に同期で通知する（onDirtyChange(false)は保存成功でも発火するため区別が要る）。 */
+    onDraftDiscarded?: () => void;
+    /** 保存競合時の「最新の内容を読み込む」導線。親が一覧の再取得を引き受ける。 */
+    onRequestLatestDocument?: () => void;
     onBackToList?: () => void;
 }
+
+type SaveErrorState = {
+    message: string;
+    /** 競合エラーのときだけ true。最新読込の導線をエラー表示へ添える。 */
+    canReloadLatest: boolean;
+};
 
 type DraftBaseline = DocumentUpdatePatch & { documentId: string | null };
 
@@ -80,13 +106,15 @@ export function DocumentDetailPanelView({
     document,
     onDocumentUpdate,
     onDirtyChange,
+    onDraftDiscarded,
+    onRequestLatestDocument,
     onBackToList,
 }: DocumentDetailPanelProps, ref?: React.ForwardedRef<DocumentDetailPanelHandle>) {
     const [isViewMode, setIsViewMode] = useState(true);
     const [editedTitle, setEditedTitle] = useState(document?.title ?? '');
     const [editedContent, setEditedContent] = useState(document?.text ?? '');
     const [saving, setSaving] = useState(false);
-    const [saveError, setSaveError] = useState<string | null>(null);
+    const [saveError, setSaveError] = useState<SaveErrorState | null>(null);
     const [showDiscardConfirmation, setShowDiscardConfirmation] = useState(false);
     const [includeMetadata, setIncludeMetadata] = useState(false);
     const [pdfTheme, setPdfTheme] = useState<PdfThemeId>(DEFAULT_PDF_THEME_ID);
@@ -103,6 +131,20 @@ export function DocumentDetailPanelView({
         title: document?.title ?? '',
         text: document?.text ?? '',
     });
+    // 競合検査の期待値。ライブなprops.document.updatedAtから保存時に引くと、
+    // ポーリングが他者の更新へ勝手に追随して楽観ロックが自己無効化するため、
+    // draftの根拠が最新版の内容へ揃った時（下のrebase effect）だけ前進させる。
+    const draftBaselineUpdatedAtRef = useRef<Timestamp | Date | null>(
+        document?.updatedAt ?? null,
+    );
+    // 「最新の内容を読み込む」で利用者が採用を明示した版の予約。
+    // 予約は「クリック時点で利用者が見た特定の版」に紐づき、後着の受信がその版と
+    // 一致した時だけ期待値へ採る。boolean武装(次に届く任意の版を無条件採用)にすると、
+    // 破棄を生き延びた予約や取得不発で残った予約が、利用者が一度も見ていない
+    // 別writerの版を自動採用し、無警告上書きが再発する。
+    const adoptionReservedVersionRef = useRef<
+        { updatedAt: Timestamp | Date | null } | null
+    >(null);
     const lastSavedDraftRef = useRef<DraftBaseline | null>(null);
     const discardDialogRef = useRef<HTMLDivElement>(null);
     const discardCancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -132,6 +174,8 @@ export function DocumentDetailPanelView({
 
         if (baseline.documentId !== nextBaseline.documentId) {
             baselineRef.current = nextBaseline;
+            draftBaselineUpdatedAtRef.current = document?.updatedAt ?? null;
+            adoptionReservedVersionRef.current = null;
             lastSavedDraftRef.current = null;
             discardReturnFocusRef.current = null;
             setEditedTitle(nextBaseline.title);
@@ -166,6 +210,22 @@ export function DocumentDetailPanelView({
         };
         baselineRef.current = rebasedBaseline;
 
+        // draft全体が受信版の内容に根拠を持つ時だけ期待値を前進させる。dirtyな
+        // フィールドが旧版のまま残る部分rebaseで前進させると、保存が他者の変更を
+        // 競合検査を素通りして上書きする。例外は「最新の内容を読み込む」で利用者が
+        // 採用を明示した特定版の再取得だけ。予約版と異なる版(利用者が見ていない
+        // 別writerの版)が届いても採用せず、通常の競合として扱う。
+        const reservedVersion = adoptionReservedVersionRef.current;
+        adoptionReservedVersionRef.current = null;
+        if (
+            (rebasedBaseline.title === nextBaseline.title
+                && rebasedBaseline.text === nextBaseline.text)
+            || (reservedVersion !== null
+                && isSameUpdatedAt(document?.updatedAt ?? null, reservedVersion.updatedAt))
+        ) {
+            draftBaselineUpdatedAtRef.current = document?.updatedAt ?? null;
+        }
+
         if (!titleIsDirty && currentTitleRef.current !== nextBaseline.title) {
             setEditedTitle(nextBaseline.title);
         }
@@ -179,7 +239,9 @@ export function DocumentDetailPanelView({
         ) {
             setDraftRevision(revision => revision + 1);
         }
-    }, [document?.id, document?.text, document?.title]);
+        // updatedAtも依存に含める: 内容が同一で版だけ前進した受信でも、cleanな
+        // draftの期待値は最新版へ追随させる（dirty時は上の完全一致条件が据え置く）。
+    }, [document?.id, document?.text, document?.title, document?.updatedAt]);
 
     useEffect(() => {
         onDirtyChange?.(hasChanges);
@@ -304,6 +366,12 @@ export function DocumentDetailPanelView({
         };
 
         baselineRef.current = nextBaseline;
+        // 破棄後のdraftはpropsの現行版の内容そのもの。期待値も同じ版へ揃えないと
+        // 以後の保存が常に偽競合し、文書を切り替えるまで保存不能になる。
+        draftBaselineUpdatedAtRef.current = activeDocument?.updatedAt ?? null;
+        // 破棄はdraftの根拠を選び直す操作。破棄前の「最新読込」予約は無効にする
+        // (残すと破棄後の新draftが古い同意で後着版を採り得る)。
+        adoptionReservedVersionRef.current = null;
         lastSavedDraftRef.current = null;
         discardReturnFocusRef.current = null;
         setEditedTitle(nextBaseline.title);
@@ -312,6 +380,7 @@ export function DocumentDetailPanelView({
         setSaveError(null);
         setShowDiscardConfirmation(false);
         onDirtyChange?.(false);
+        onDraftDiscarded?.();
     };
 
     const requestDiscard = (): void => {
@@ -339,6 +408,20 @@ export function DocumentDetailPanelView({
         window.requestAnimationFrame(() => rootRef.current?.focus({ preventScroll: true }));
     };
 
+    const handleReloadLatestDocument = (): void => {
+        // draftは保持したまま親へ一覧の再取得を頼み、表示モードで最新の本文を確認
+        // できるようにする（編集タブへ戻ればdraftはそのまま残っている）。
+        onRequestLatestDocument?.();
+        // 利用者が「最新を読み込んで確認する」と明示した時点で見えている版を採用し、
+        // 同じ版の再取得だけを後着採用として予約する。draftはそのまま=手動マージ
+        // して保存し直せる。
+        const consentedUpdatedAt = document?.updatedAt ?? null;
+        draftBaselineUpdatedAtRef.current = consentedUpdatedAt;
+        adoptionReservedVersionRef.current = { updatedAt: consentedUpdatedAt };
+        setIsViewMode(true);
+        setSaveError(null);
+    };
+
     const handleSave = async (): Promise<boolean> => {
         if (!onDocumentUpdate || savingRef.current) {
             return false;
@@ -349,12 +432,18 @@ export function DocumentDetailPanelView({
         const savedContent = currentContentRef.current;
 
         if (!documentId) {
-            setSaveError('文書を確認できないため保存できませんでした。');
+            setSaveError({
+                message: '文書を確認できないため保存できませんでした。',
+                canReloadLatest: false,
+            });
             return false;
         }
 
         if (!savedTitle.trim() || !savedContent.trim()) {
-            setSaveError('タイトルと本文を入力してください。');
+            setSaveError({
+                message: 'タイトルと本文を入力してください。',
+                canReloadLatest: false,
+            });
             return false;
         }
 
@@ -371,6 +460,8 @@ export function DocumentDetailPanelView({
             await onDocumentUpdate(documentId, {
                 title: savedTitle,
                 text: savedContent,
+            }, {
+                expectedUpdatedAt: draftBaselineUpdatedAtRef.current,
             });
 
             if (selectedDocumentIdRef.current === documentId) {
@@ -393,9 +484,18 @@ export function DocumentDetailPanelView({
             documentDetailLogger.error('文書の保存に失敗', error, { documentId });
             if (selectedDocumentIdRef.current === documentId) {
                 // 上限超過は本文を削れば保存できるため、原因を伏せずそのまま伝える。
-                setSaveError(error instanceof DocumentSizeLimitError
-                    ? `${error.message} 本文を短くしてから保存してください。`
-                    : '保存に失敗しました。編集内容は保持されています。');
+                // 競合は「保存に失敗」と区別し、最新を読み込んで確認できる導線を添える。
+                setSaveError(error instanceof TranscriptionConflictError
+                    ? { message: error.message, canReloadLatest: true }
+                    : error instanceof DocumentSizeLimitError
+                        ? {
+                            message: `${error.message} 本文を短くしてから保存してください。`,
+                            canReloadLatest: false,
+                        }
+                        : {
+                            message: '保存に失敗しました。編集内容は保持されています。',
+                            canReloadLatest: false,
+                        });
             }
             return false;
         } finally {
@@ -684,9 +784,18 @@ export function DocumentDetailPanelView({
             {saveError && (
                 <div
                     role="alert"
-                    className="mx-4 mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                    className="mx-4 mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
                 >
-                    {saveError}
+                    <span>{saveError.message}</span>
+                    {saveError.canReloadLatest && onRequestLatestDocument && (
+                        <button
+                            type="button"
+                            onClick={handleReloadLatestDocument}
+                            className="min-h-11 shrink-0 rounded-lg border border-red-300 bg-white px-3 text-sm font-medium text-red-700 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                        >
+                            最新の内容を読み込む
+                        </button>
+                    )}
                 </div>
             )}
             {showDiscardConfirmation && (

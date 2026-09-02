@@ -23,7 +23,8 @@ import {
     deleteTranscription,
     getTranscriptions,
     Transcription,
-    updateTranscriptionTitle,
+    TranscriptionConflictError,
+    updateTranscription,
 } from '@/lib/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { createLogger } from '@/lib/logger';
@@ -192,6 +193,15 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
     const refreshButtonRef = useRef<HTMLButtonElement>(null);
     const deleteCancelButtonRef = useRef<HTMLButtonElement>(null);
     const editingInputRef = useRef<HTMLInputElement>(null);
+    // 改名の競合検査の期待値。ポーリングで前進する行のライブな updatedAt からで
+    // なく、編集を開始した時点の版で固定する（本文保存のpinと同じ規律）。
+    const editingBaselineUpdatedAtRef = useRef<Transcription['updatedAt'] | null>(null);
+    const editingDocIdRef = useRef<string | null>(null);
+    // 編集セッション世代。取り直しの着弾が基準(editingBaseline)へ書けるのは
+    // 「その取り直しを予約した編集セッションが今も続いている」時だけ。文書IDと
+    // owner世代だけの検査では、S1が予約した取り直しがS2の再編集セッションへ
+    // 別writer版の基準を書き込み、S2保存が無警告上書きになる(ABA)。
+    const editingSessionRef = useRef(0);
     const callbacksRef = useRef({
         onDocumentUpdated,
         onDocumentDeleted,
@@ -200,6 +210,7 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
     });
 
     subjectKeyRef.current = subjectKey;
+    editingDocIdRef.current = editingDocId;
     callbacksRef.current = {
         onDocumentUpdated,
         onDocumentDeleted,
@@ -320,6 +331,7 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         });
         setEditingDocId(null);
         setEditedTitle('');
+        editingBaselineUpdatedAtRef.current = null;
         setSavingDocumentId(null);
         setPendingDeleteId(null);
         setDeletingDocumentId(null);
@@ -440,7 +452,11 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
             const deletedDocumentIndex = documentsRef.current.findIndex(document => document.id === documentId);
             const documents = documentsRef.current.filter(document => document.id !== documentId);
             const nextFocusDocumentId = documents[Math.min(deletedDocumentIndex, documents.length - 1)]?.id;
-            publishLocalDocuments(documents);
+            // 親への削除反映はonDocumentDeletedが担う。ここでonDocumentsChangeへ
+            // ローカルsnapshotを流すと、サイドバーが持つ保存前本文+旧版印のstale
+            // コピーがpageの確定済みentryを巻き戻し、版未確定警告も偽clearされる
+            // (改名経路と同じ理由でnotifyしない)。
+            publishLocalDocuments(documents, false);
             callbacksRef.current.onDocumentDeleted?.(documentId);
             setPendingDeleteId(null);
             setOperationMessage(result === 'deletedWithWarning'
@@ -480,8 +496,23 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         if (!transcription.id || activeOperationRef.current) return;
         setPendingDeleteId(null);
         setEditingDocId(transcription.id);
+        editingDocIdRef.current = transcription.id;
         setEditedTitle(transcription.title);
+        editingSessionRef.current += 1;
+        editingBaselineUpdatedAtRef.current = transcription.updatedAt ?? null;
         setOperationMessage(null);
+
+        // 版印を剥がした直後の行(updatedAt未確定)から編集を始めた場合、そのままだと
+        // 初回保存が必ず偽競合する。このセッション自身の取り直しで基準を種付けする。
+        if (transcription.updatedAt === undefined && subjectKeyRef.current !== null) {
+            void reloadAndRefreshEditingBaseline(
+                transcription.id,
+                subjectKeyRef.current,
+                subjectGenerationRef.current,
+                editingSessionRef.current,
+                transcription.title,
+            );
+        }
     };
 
     const filteredTranscriptions = useMemo(() => {
@@ -532,12 +563,21 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         try {
             setSavingDocumentId(documentId);
             setOperationMessage(null);
-            await updateTranscriptionTitle(documentId, nextTitle);
+            await updateTranscription(documentId, { title: nextTitle }, {
+                expectedUpdatedAt: editingBaselineUpdatedAtRef.current ?? null,
+            });
             if (!isOperationCurrent()) return;
 
             const latestDocument = documentsRef.current.find(document => document.id === documentId);
             if (latestDocument) {
-                const updatedDocument = { ...latestDocument, title: nextTitle };
+                // commit後にpollが他者版を格納済みだと、行の updatedAt を温存した
+                // タイトルpatchは「古い改名+最新版印」の捏造になり、同版pollは参照を
+                // 温存するため自然回復もしない。版印は剥がして未確定に落とす。
+                const updatedDocument = {
+                    ...latestDocument,
+                    title: nextTitle,
+                    updatedAt: undefined,
+                };
                 const documents = documentsRef.current.map(document => (
                     document.id === documentId ? updatedDocument : document
                 ));
@@ -549,14 +589,38 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
             setEditedTitle('');
             setOperationMessage({ type: 'success', text: 'タイトルを更新しました。' });
             restoreDocumentButtonFocus(documentId);
+            // 剥がした版印は実状態の取り直しで即座に埋め戻す。編集は閉じたので
+            // 基準への書き込みは行わない(次の編集セッションが自分で種付けする)。
+            void loadTranscriptionsForSubject(
+                operationSubjectKey,
+                ownerId,
+                ownerType,
+                operationGeneration,
+                false,
+            );
         } catch (error) {
             documentListLogger.error('文書タイトルの更新に失敗', error, { documentId });
             if (!isOperationCurrent()) return;
             renameFailed = true;
-            setOperationMessage({
-                type: 'error',
-                text: 'タイトルを更新できませんでした。入力内容は保持されています。',
-            });
+            if (error instanceof TranscriptionConflictError) {
+                setOperationMessage({
+                    type: 'error',
+                    text: '他の場所で更新されています。最新の状態を取得しました。内容を確認してから、もう一度お試しください。',
+                });
+                // 取り直しの着弾で基準を最新版へ進め、再試行を成功可能にする。
+                // 予約はこの(失敗した)編集セッションに紐づく。
+                void reloadAndRefreshEditingBaseline(
+                    documentId,
+                    operationSubjectKey,
+                    operationGeneration,
+                    editingSessionRef.current,
+                );
+            } else {
+                setOperationMessage({
+                    type: 'error',
+                    text: 'タイトルを更新できませんでした。入力内容は保持されています。',
+                });
+            }
         } finally {
             if (isOperationCurrent()) {
                 activeOperationRef.current = null;
@@ -568,8 +632,47 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
         }
     };
 
+    // 静かな取り直しの着弾で、それを予約した編集セッションの競合検査基準を
+    // 最新版へ前進させる。競合後の再試行が案内どおり成功し、剥がした版印の行から
+    // 始めた編集が偽競合しないための共通機構。
+    //
+    // expectedTitle は種付け経路(編集開始時の無言取得)だけが渡す:
+    // 取得結果のタイトルが編集開始時に見ていた値と一致する時だけ基準に採り、
+    // 不一致(=第三者の改名が挟まった)なら据え置いて保存を競合へ流す。
+    // 見ていない版を無言で基準に採ると初回保存が競合検査素通りになる。
+    // 競合経路が無条件なのは意図的な非対称: そちらは競合表示と「内容を確認して
+    // から」の案内、着弾後の行表示の更新がセットで、同意の形成を伴うため。
+    const reloadAndRefreshEditingBaseline = async (
+        documentId: string,
+        operationSubjectKey: string,
+        operationGeneration: number,
+        editingSession: number,
+        expectedTitle?: string,
+    ): Promise<void> => {
+        await loadTranscriptionsForSubject(
+            operationSubjectKey,
+            ownerId,
+            ownerType,
+            operationGeneration,
+            false,
+        );
+        if (subjectGenerationRef.current !== operationGeneration) return;
+        if (editingSessionRef.current !== editingSession) return;
+        if (editingDocIdRef.current !== documentId) return;
+
+        const refreshedDocument = documentsRef.current
+            .find(document => document.id === documentId);
+        if (expectedTitle !== undefined && refreshedDocument?.title !== expectedTitle) {
+            return;
+        }
+        editingBaselineUpdatedAtRef.current = refreshedDocument?.updatedAt ?? null;
+    };
+
     const handleCancelEdit = (documentId: string) => {
         setEditingDocId(null);
+        editingDocIdRef.current = null;
+        // セッションを進め、閉じた編集が予約した取り直しの書き込みを無効化する。
+        editingSessionRef.current += 1;
         setEditedTitle('');
         restoreDocumentButtonFocus(documentId);
     };
