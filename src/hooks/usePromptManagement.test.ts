@@ -113,3 +113,46 @@ describe('usePromptManagement failure handling (V5/H10)', () => {
         expect((reactHarness.stateValues[0] as { status: string }).status).toBe('success');
     });
 });
+
+describe('usePromptManagement default selection (S2-6)', () => {
+    const selectedIds = () => reactHarness.stateValues[1] as string[];
+
+    it('auto-selects the first admin template prompt (isDefault) instead of the newest prompt', async () => {
+        // 一覧は作成日時の新しい順。先頭はゲストが最後に作った任意のプロンプト
+        serviceMocks.getPrompts.mockResolvedValue([
+            createPrompt('newest-guest-prompt'),
+            { ...createPrompt('default-1'), isDefault: true },
+            { ...createPrompt('default-2'), isDefault: true },
+        ]);
+
+        const hook = usePromptManagement();
+        await hook.retry();
+
+        expect(selectedIds()).toEqual(['default-1']);
+    });
+
+    it('leaves the selection empty when there is no admin template prompt', async () => {
+        serviceMocks.getPrompts.mockResolvedValue([
+            createPrompt('guest-a'),
+            createPrompt('guest-b'),
+        ]);
+
+        const hook = usePromptManagement();
+        await hook.retry();
+
+        expect(selectedIds()).toEqual([]);
+    });
+
+    it('keeps a selection the user already made', async () => {
+        serviceMocks.getPrompts.mockResolvedValue([
+            { ...createPrompt('default-1'), isDefault: true },
+            createPrompt('guest-a'),
+        ]);
+
+        const hook = usePromptManagement();
+        hook.toggleBulkPrompt('guest-a');
+        await hook.retry();
+
+        expect(selectedIds()).toEqual(['guest-a']);
+    });
+});

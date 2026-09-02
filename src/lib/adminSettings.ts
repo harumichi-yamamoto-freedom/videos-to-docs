@@ -227,6 +227,30 @@ function canonicalizeDefaultPrompts(
     }));
 }
 
+/**
+ * 2つのテンプレートが同じ内容か。name/content は完全一致、model/thinkingLevel は
+ * 正規化して比較する (未設定と既定値の違いは変更とみなさない)。
+ * ゲスト同期の要否判定と、同期時の「変更のあった doc だけ書く」判定の両方で使う。
+ */
+export function isEquivalentDefaultPrompt(
+    left: DefaultPromptTemplate,
+    right: DefaultPromptTemplate,
+): boolean {
+    return left.name === right.name
+        && left.content === right.content
+        && canonicalizeGeminiModel(left.model) === canonicalizeGeminiModel(right.model)
+        && canonicalizeThinkingLevel(left.thinkingLevel)
+            === canonicalizeThinkingLevel(right.thinkingLevel);
+}
+
+export function areEquivalentDefaultPrompts(
+    left: DefaultPromptTemplate[],
+    right: DefaultPromptTemplate[],
+): boolean {
+    return left.length === right.length
+        && left.every((prompt, index) => isEquivalentDefaultPrompt(prompt, right[index]));
+}
+
 function withCanonicalDefaultPrompts(
     settings: AdminSettings,
     prompts: DefaultPromptTemplate[],
@@ -489,6 +513,54 @@ export async function retryGuestDefaultPromptsSync(updatedBy: string): Promise<v
     }
 }
 
+interface GuestSyncBaseline {
+    /** 保存前に config へ入っていた defaultPrompts。未保存なら null */
+    defaultPrompts: DefaultPromptTemplate[] | null;
+    /** 前回のゲスト同期が failed / pending のまま残っているか */
+    syncUnresolved: boolean;
+}
+
+/**
+ * ゲスト同期の要否判定に使う、保存前の config を読む。
+ * 読めなければ null を返し、呼び出し側が安全側 (同期する) に倒す。
+ */
+async function readGuestSyncBaseline(updatedBy: string): Promise<GuestSyncBaseline | null> {
+    try {
+        const snapshot = await getDoc(doc(db, 'adminSettings', 'config'));
+        if (!snapshot.exists()) {
+            return { defaultPrompts: null, syncUnresolved: false };
+        }
+
+        const currentSettings = snapshot.data() as Partial<AdminSettings>;
+        return {
+            defaultPrompts: currentSettings.defaultPrompts == null
+                ? null
+                : canonicalizeDefaultPrompts(currentSettings.defaultPrompts),
+            syncUnresolved: currentSettings.lastGuestSyncStatus === 'failed'
+                || currentSettings.lastGuestSyncStatus === 'pending',
+        };
+    } catch (error) {
+        adminSettingsLogger.error('保存前の管理者設定を読めなかったためゲスト同期を実行', error, {
+            updatedBy,
+        });
+        return null;
+    }
+}
+
+/**
+ * ゲスト共通プロンプトの同期は defaultPrompts が実際に変わった時だけ走らせる。
+ * 保存のたびに全件を作り直すと、途中で切れた時にゲストのプロンプトが 0 件になる窓ができる。
+ * 保存前の値が分からない (未保存・読み取り失敗) 時と前回同期が未解消の時は安全側で同期する。
+ */
+function shouldSyncGuestDefaultPrompts(
+    baseline: GuestSyncBaseline | null,
+    nextDefaultPrompts: DefaultPromptTemplate[],
+): boolean {
+    if (baseline === null || baseline.defaultPrompts === null) return true;
+    if (baseline.syncUnresolved) return true;
+    return !areEquivalentDefaultPrompts(baseline.defaultPrompts, nextDefaultPrompts);
+}
+
 /**
  * 管理者設定を更新（管理者のみ）
  */
@@ -513,7 +585,11 @@ export async function updateAdminSettings(
             canonicalSettings.defaultPrompts = canonicalizeDefaultPrompts(settings.defaultPrompts);
         }
 
-        const guestSyncRequested = canonicalSettings.defaultPrompts != null;
+        const guestSyncRequested = canonicalSettings.defaultPrompts != null
+            && shouldSyncGuestDefaultPrompts(
+                await readGuestSyncBaseline(updatedBy),
+                canonicalSettings.defaultPrompts,
+            );
         const guestSyncOperationId = guestSyncRequested
             ? createGuestSyncOperationId()
             : null;
