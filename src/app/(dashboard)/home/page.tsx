@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { FileDropZone } from '@/components/FileDropZone';
+import { ConversionSettings, DEFAULT_AUDIO_BITRATE } from '@/components/ConversionSettings';
+import { Dialog } from '@/components/ui/Dialog';
 import { ProcessingStatusList } from '@/components/ProcessingStatusList';
 import { DebugControls } from '@/components/DebugControls';
 import { BulkPromptSelector } from '@/components/BulkPromptSelector';
@@ -14,12 +16,16 @@ import { useFileManagement } from '@/hooks/useFileManagement';
 import { usePromptManagement } from '@/hooks/usePromptManagement';
 import { useVideoProcessing } from '@/hooks/useVideoProcessing';
 import { useProcessingWorkflow } from '@/hooks/useProcessingWorkflow';
+import { useNavigationGuard } from '@/hooks/useNavigationGuard';
 import { DebugErrorMode, FileProcessingStatus } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
 import { useAuth } from '@/hooks/useAuth';
 import { createLogger } from '@/lib/logger';
 
 const homePageLogger = createLogger('HomePage');
+
+/** S2-2: 離脱ガードが history.state に埋める印。文書画面の印と衝突しない名前にする */
+const HOME_PROCESSING_GUARD_STATE_KEY = '__homeProcessingGuard';
 
 /**
  * V3: ファイル削除は fileIds と processingStatuses を同じ fileId で同時に落とす。
@@ -53,7 +59,8 @@ export default function HomePage() {
   // 🎬 動画を直接送信する機能（試験的）
   const [sendVideoDirectly, setSendVideoDirectly] = useState(false);
 
-  const bitrate = '192k';
+  // S2-1: 192k 固定だと約 10 分で inline 上限に達して失敗していた。既定を 128k に下げ、画面から選べるようにする
+  const [bitrate, setBitrate] = useState<string>(DEFAULT_AUDIO_BITRATE);
   const sampleRate = 44100;
 
   const {
@@ -101,6 +108,16 @@ export default function HomePage() {
     forceDiscardProcessing,
     countPendingSaves,
   } = useVideoProcessing(availablePrompts, debugErrorMode, () => { });
+
+  // S2-2: 実行中のジョブか保存待ちの下書きがある間は、離脱 (リロード/戻る/リンク/ログイン・ログアウト) を
+  // 確認してから通す。何もしないと unmount で全ジョブが中止され、課金済みの生成結果が無言で消える
+  const { leaveConfirmation, approveLeave, denyLeave } = useNavigationGuard({
+    active: needsDiscardConfirm,
+    stateKey: HOME_PROCESSING_GUARD_STATE_KEY,
+  });
+  const leaveDialogTitleId = useId();
+  const leaveDialogDescriptionId = useId();
+  const leaveStayButtonRef = useRef<HTMLButtonElement>(null);
 
   const {
     handleStartProcessing,
@@ -337,6 +354,15 @@ export default function HomePage() {
                     音声変換をスキップして動画をそのまま送信します。ファイルサイズが大きいと失敗することがあります。
                   </p>
                 </div>
+              )}
+
+              {/* S2-1: ビットレートは送れる長さを決める。開始前にだけ選べる */}
+              {selectedFiles.length > 0 && !hasStatuses && (
+                <ConversionSettings
+                  bitrate={bitrate}
+                  onBitrateChange={setBitrate}
+                  disabled={isBusy}
+                />
               )}
 
               {selectedFiles.length === 0 && (
@@ -604,6 +630,49 @@ export default function HomePage() {
         onSave={handlePromptSaved}
         onDelete={handlePromptDeleted}
       />
+
+      {/* S2-2: 処理中の離脱確認。文書画面の未保存ガードと同じ共通 Dialog で出す */}
+      {leaveConfirmation && (
+        <Dialog
+          isOpen
+          onClose={denyLeave}
+          initialFocusRef={leaveStayButtonRef}
+          aria-labelledby={leaveDialogTitleId}
+          aria-describedby={leaveDialogDescriptionId}
+          className="w-[calc(100%-2rem)] max-w-md rounded-xl border-0 bg-white p-6 shadow-2xl"
+        >
+          <h2 id={leaveDialogTitleId} className="text-lg font-bold text-gray-900">
+            処理中です
+          </h2>
+          <p id={leaveDialogDescriptionId} className="mt-2 text-sm leading-6 text-gray-600">
+            {leaveConfirmation.kind === 'action'
+              ? '続行すると変換・生成結果が失われます。続行しますか？'
+              : '移動すると変換・生成結果が失われます。移動しますか？'}
+          </p>
+          {pendingSaveCount > 0 && (
+            <p className="mt-2 text-sm font-medium text-red-900">
+              生成済みで保存待ちの文書 {pendingSaveCount} 件が失われます。
+            </p>
+          )}
+          <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              ref={leaveStayButtonRef}
+              type="button"
+              onClick={denyLeave}
+              className="min-h-11 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              このページに残る
+            </button>
+            <button
+              type="button"
+              onClick={approveLeave}
+              className="min-h-11 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+            >
+              {leaveConfirmation.kind === 'action' ? '続行する' : '移動する'}
+            </button>
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -926,3 +926,117 @@ describe('savePendingPromptIds has a single writer (G2 invariant)', () => {
         expect(violating.match(/promptStates: \{/g) ?? []).toHaveLength(1);
     });
 });
+
+describe('useVideoProcessing Files API 迂回 (S2-1)', () => {
+    const geminiDoubles = {
+        uploadMedia: vi.fn(),
+        deleteUploadedMedia: vi.fn(),
+        transcribeWithFileUri: vi.fn(),
+    };
+    /** inline 予算 (Base64 + プロンプト ≦ 16MiB) を確実に超えるサイズ。中身は読まないので size だけ持つ */
+    const largeBlob = { size: 13 * 1024 * 1024, type: 'audio/mpeg' } as Blob;
+    const smallBlob = new Blob(['audio'], { type: 'audio/mpeg' });
+
+    const DEBUG_OFF = { ffmpegError: false, geminiError: false, errorAtFileIndex: 0, errorAtSegmentIndex: 0 };
+    /** フック本体は各テスト内で呼ぶ (rules-of-hooks)。ここは戻り値に test double を差すだけ */
+    const attachDoubles = (hook: ReturnType<typeof useVideoProcessing>, promptCount: number) => {
+        hook.setProcessingStatuses([createStatus(promptCount)]);
+        hook.geminiClientRef.current = {
+            getBase64: serviceMocks.getBase64,
+            transcribeWithBase64: serviceMocks.transcribeWithBase64,
+            ...geminiDoubles,
+        } as never;
+        return hook;
+    };
+
+    beforeEach(() => {
+        geminiDoubles.uploadMedia.mockReset().mockResolvedValue({
+            name: 'files/abc',
+            fileUri: 'https://files/abc',
+            mimeType: 'audio/mpeg',
+        });
+        geminiDoubles.deleteUploadedMedia.mockReset().mockResolvedValue(undefined);
+        geminiDoubles.transcribeWithFileUri.mockReset().mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+    });
+
+    it('inline 予算を超える音声は getBase64 ではなく uploadMedia で上げ、fileUri で生成する', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = attachDoubles(useVideoProcessing([prompt], DEBUG_OFF, vi.fn()), 1);
+        const file = createFile([prompt.id!]);
+
+        await hook.processTranscription(createJob(file), largeBlob, '128k', 44100);
+
+        expect(serviceMocks.getBase64).not.toHaveBeenCalled();
+        expect(serviceMocks.transcribeWithBase64).not.toHaveBeenCalled();
+        expect(geminiDoubles.uploadMedia).toHaveBeenCalledTimes(1);
+        expect(geminiDoubles.uploadMedia).toHaveBeenCalledWith(
+            largeBlob,
+            'sample.mp3',
+            expect.objectContaining({ signal: expect.any(AbortSignal) })
+        );
+        expect(geminiDoubles.transcribeWithFileUri).toHaveBeenCalledWith(
+            'https://files/abc',
+            'audio/mpeg',
+            'sample.mp3',
+            'Prompt A content',
+            'gemini-test',
+            undefined
+        );
+        expect(getCurrentStatus()).toMatchObject({ status: 'completed', transcriptionCount: 1 });
+        // 生成が決着したら Files API 上のファイルは消す
+        expect(geminiDoubles.deleteUploadedMedia).toHaveBeenCalledWith('files/abc');
+    });
+
+    it('予算内の音声は従来どおり Base64 で送り、Files API を使わない', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = attachDoubles(useVideoProcessing([prompt], DEBUG_OFF, vi.fn()), 1);
+        const file = createFile([prompt.id!]);
+
+        await hook.processTranscription(createJob(file), smallBlob, '128k', 44100);
+
+        expect(geminiDoubles.uploadMedia).not.toHaveBeenCalled();
+        expect(geminiDoubles.transcribeWithFileUri).not.toHaveBeenCalled();
+        expect(serviceMocks.getBase64).toHaveBeenCalledTimes(1);
+        // 予算超過の文言を「約N分」で出せるよう、ビットレートも渡す
+        expect(serviceMocks.transcribeWithBase64).toHaveBeenCalledWith(
+            'base64-data',
+            'audio/mpeg',
+            'sample.mp3',
+            'Prompt A content',
+            'gemini-test',
+            undefined,
+            '128k'
+        );
+        expect(geminiDoubles.deleteUploadedMedia).not.toHaveBeenCalled();
+        expect(getCurrentStatus()).toMatchObject({ status: 'completed' });
+    });
+
+    it('複数プロンプトでもアップロードは 1 回で、参照を共有する', async () => {
+        const prompts = [createPrompt('prompt-a', 'Prompt A'), createPrompt('prompt-b', 'Prompt B')];
+        const hook = attachDoubles(useVideoProcessing(prompts, DEBUG_OFF, vi.fn()), prompts.length);
+        const file = createFile(prompts.map(prompt => prompt.id!));
+
+        await hook.processTranscription(createJob(file), largeBlob, '128k', 44100);
+
+        expect(geminiDoubles.uploadMedia).toHaveBeenCalledTimes(1);
+        expect(geminiDoubles.transcribeWithFileUri).toHaveBeenCalledTimes(2);
+        expect(geminiDoubles.deleteUploadedMedia).toHaveBeenCalledTimes(1);
+        expect(getCurrentStatus()).toMatchObject({ status: 'completed', transcriptionCount: 2 });
+    });
+
+    it('Files API のアップロードに失敗したら upload フェーズで止め、ビットレートの目安を示す', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        geminiDoubles.uploadMedia.mockRejectedValue(new Error('CORS blocked'));
+        const hook = attachDoubles(useVideoProcessing([prompt], DEBUG_OFF, vi.fn()), 1);
+        const file = createFile([prompt.id!]);
+
+        await hook.processTranscription(createJob(file), largeBlob, '128k', 44100);
+
+        expect(getCurrentStatus()).toMatchObject({ status: 'error', failedPhase: 'upload' });
+        expect(getCurrentStatus().error).toContain('Gemini Files API アップロード: CORS blocked');
+        expect(getCurrentStatus().error).toContain('ビットレート 128k では約13分を超えると失敗します');
+        expect(geminiDoubles.transcribeWithFileUri).not.toHaveBeenCalled();
+        expect(geminiDoubles.deleteUploadedMedia).not.toHaveBeenCalled();
+    });
+});

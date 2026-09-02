@@ -1,116 +1,67 @@
 'use client';
 
 import React from 'react';
+import { estimateInlineLimitMinutes } from '@/lib/inlineMediaBudget';
+
+/**
+ * S2-1: 既定は 128k。192k だと約 10 分でそのまま送れる上限に達し、長い商談録音が全滅していた。
+ * 音声認識の用途では 128k で十分で、そのまま送れる長さが 1.5 倍に伸びる。
+ */
+export const DEFAULT_AUDIO_BITRATE = '128k';
+
+export const AUDIO_BITRATE_OPTIONS = [
+    { value: '64k', label: '64 kbps', description: '長い録音向け（音質は低め）' },
+    { value: '96k', label: '96 kbps', description: '長めの録音向け' },
+    { value: '128k', label: '128 kbps', description: '標準（推奨）' },
+    { value: '192k', label: '192 kbps', description: '高音質（短い録音向け）' },
+] as const;
 
 interface ConversionSettingsProps {
     bitrate: string;
-    sampleRate: number;
     onBitrateChange: (bitrate: string) => void;
-    onSampleRateChange: (sampleRate: number) => void;
+    disabled?: boolean;
 }
 
 export const ConversionSettings: React.FC<ConversionSettingsProps> = ({
     bitrate,
-    sampleRate,
     onBitrateChange,
-    onSampleRateChange,
-}) => {
-    const bitrateOptions = [
-        { value: '128k', label: '128 kbps (標準品質)' },
-        { value: '192k', label: '192 kbps (高品質)' },
-        { value: '256k', label: '256 kbps (最高品質)' },
-        { value: '320k', label: '320 kbps (無損品質)' },
-    ];
-
-    const sampleRateOptions = [
-        { value: 44100, label: '44.1 kHz (CD品質)' },
-        { value: 48000, label: '48 kHz (DVD品質)' },
-        { value: 96000, label: '96 kHz (高解像度)' },
-    ];
-
-    return (
-        <div className="bg-gray-50 rounded-lg p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">
-                変換設定
-            </h3>
-
-            <div className="space-y-6">
-                {/* ビットレート設定 */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                        ビットレート
+    disabled = false,
+}) => (
+    <fieldset className="rounded-lg border border-gray-200 bg-gray-50 p-4" disabled={disabled}>
+        <legend className="px-1 text-sm font-medium text-gray-900">音声のビットレート</legend>
+        <p className="mt-1 text-[13px] text-gray-700">
+            低いほど長い録音をそのまま送れます。目安を超える長さは大きなファイル用の送信方式に自動で切り替えます。うまくいかない場合はビットレートを下げるか、ファイルを分割してください。
+        </p>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {AUDIO_BITRATE_OPTIONS.map(option => {
+                const minutes = estimateInlineLimitMinutes(option.value);
+                return (
+                    <label
+                        key={option.value}
+                        className="flex min-h-11 cursor-pointer items-center rounded-lg border border-gray-200 bg-white p-3 transition-colors hover:bg-gray-100 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50"
+                    >
+                        <input
+                            type="radio"
+                            name="audio-bitrate"
+                            value={option.value}
+                            checked={bitrate === option.value}
+                            onChange={event => onBitrateChange(event.target.value)}
+                            className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="ml-3 min-w-0">
+                            <span className="block text-sm font-medium text-gray-900">
+                                {option.label}
+                                <span className="ml-2 font-normal text-gray-600">{option.description}</span>
+                            </span>
+                            {minutes !== null && (
+                                <span className="block text-xs text-gray-600">
+                                    そのまま送れる目安: 約{minutes}分
+                                </span>
+                            )}
+                        </span>
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
-                        {bitrateOptions.map((option) => (
-                            <label
-                                key={option.value}
-                                className="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
-                            >
-                                <input
-                                    type="radio"
-                                    name="bitrate"
-                                    value={option.value}
-                                    checked={bitrate === option.value}
-                                    onChange={(e) => onBitrateChange(e.target.value)}
-                                    className="mr-3"
-                                />
-                                <div>
-                                    <div className="text-sm font-medium text-gray-900">
-                                        {option.value}
-                                    </div>
-                                    <div className="text-xs text-gray-500">
-                                        {option.label}
-                                    </div>
-                                </div>
-                            </label>
-                        ))}
-                    </div>
-                </div>
-
-                {/* サンプルレート設定 */}
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                        サンプルレート
-                    </label>
-                    <div className="space-y-2">
-                        {sampleRateOptions.map((option) => (
-                            <label
-                                key={option.value}
-                                className="flex items-center p-3 border rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
-                            >
-                                <input
-                                    type="radio"
-                                    name="sampleRate"
-                                    value={option.value}
-                                    checked={sampleRate === option.value}
-                                    onChange={(e) => onSampleRateChange(Number(e.target.value))}
-                                    className="mr-3"
-                                />
-                                <div>
-                                    <div className="text-sm font-medium text-gray-900">
-                                        {option.value.toLocaleString()} Hz
-                                    </div>
-                                    <div className="text-xs text-gray-500">
-                                        {option.label}
-                                    </div>
-                                </div>
-                            </label>
-                        ))}
-                    </div>
-                </div>
-
-                {/* 設定の説明 */}
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h4 className="text-sm font-medium text-blue-900 mb-2">
-                        設定について
-                    </h4>
-                    <ul className="text-xs text-blue-800 space-y-1">
-                        <li>• ビットレートが高いほど音質は向上しますが、ファイルサイズも大きくなります</li>
-                        <li>• サンプルレートは音の周波数範囲を決定します</li>
-                        <li>• 一般的な用途では192kbps/44.1kHzが推奨されます</li>
-                    </ul>
-                </div>
-            </div>
+                );
+            })}
         </div>
-    );
-};
+    </fieldset>
+);

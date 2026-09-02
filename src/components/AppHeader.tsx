@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useAdmin } from '@/hooks/useAdmin';
 import { Music, Shield, Home, FileText, Users, ChevronDown, LogOut, Key, Trash2, User, Edit3, Bell, Menu, X } from 'lucide-react';
 import { signOutNow } from '@/lib/auth';
+import { requestGuardedAction } from '@/hooks/useNavigationGuard';
 import { createLogger } from '@/lib/logger';
 import AuthModal from './AuthModal';
 import PasswordChangeModal from './PasswordChangeModal';
@@ -192,10 +193,18 @@ export const AppHeader: React.FC = () => {
         setShowMobileTeamMenu(false);
     };
 
-    const handleLogout = async () => {
+    // S2-2: 認証の変更は処理中のジョブを中止して課金済みの結果を消す。
+    // 処理中の画面 (ホーム) が居れば問い合わせ、承認されてから実行する。
+    const handleLogout = () => {
         setShowDropdown(false);
         closeMobileMenu();
-        await signOutNow();
+        requestGuardedAction('signout', () => {
+            void signOutNow();
+        });
+    };
+
+    const openAuthModal = () => {
+        requestGuardedAction('signin', () => setShowAuthModal(true));
     };
 
     const handlePasswordChange = () => {
@@ -207,7 +216,9 @@ export const AppHeader: React.FC = () => {
     const handleDeleteAccount = () => {
         setShowDropdown(false);
         closeMobileMenu();
-        void beginAccountDeletion();
+        requestGuardedAction('account-deletion', () => {
+            void beginAccountDeletion();
+        });
     };
 
     const isEmailProvider = user?.providerData.some(p => p.providerId === 'password') || false;
@@ -433,7 +444,7 @@ export const AppHeader: React.FC = () => {
                                     )}
                                 </div>
                             ) : (
-                                <Button onClick={() => setShowAuthModal(true)}>{SIGN_IN_LABEL}</Button>
+                                <Button onClick={openAuthModal}>{SIGN_IN_LABEL}</Button>
                             )}
                         </div>
 
@@ -626,7 +637,7 @@ export const AppHeader: React.FC = () => {
                                                 className="w-full"
                                                 onClick={() => {
                                                     closeMobileMenu();
-                                                    setShowAuthModal(true);
+                                                    openAuthModal();
                                                 }}
                                             >
                                                 {SIGN_IN_LABEL}
