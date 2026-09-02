@@ -142,7 +142,7 @@ function expectJunction(expression: string, operator: '&&' | '||', expected: str
 }
 
 // ============================================================
-// allow 式の完全一致(prompts / transcriptions / relationships / systemNotifications)
+// allow 式の完全一致(prompts / transcriptions / relationships / systemNotifications / auditLogs)
 // ============================================================
 
 describe('firestore.rules: allow 式の完全一致', () => {
@@ -150,6 +150,7 @@ describe('firestore.rules: allow 式の完全一致', () => {
     const transcriptions = extractAllowExpressions(extractMatchBlock('transcriptions'));
     const relationships = extractAllowExpressions(extractMatchBlock('relationships'));
     const notifications = extractAllowExpressions(extractMatchBlock('systemNotifications'));
+    const auditLogs = extractAllowExpressions(extractMatchBlock('auditLogs'));
 
     it('prompts: get は 存在確認/所有者/承認済み上司、list は canListExisting() のみ', () => {
         expect(prompts.get).toBe(
@@ -213,6 +214,16 @@ describe('firestore.rules: allow 式の完全一致', () => {
         expect(notifications.list).toBe(
             "isSuperuser() || (resource.data.keys().hasAll(['published']) && resource.data.published == true)",
         );
+    });
+
+    it('auditLogs: 作成は「本人 uid」か「未ログインの GUEST」のみ(if true の全開放は不可)、読取は管理者のみ、更新・削除の許可文は無い', () => {
+        // S2-3: 旧ルール `allow create: if true` は未ログインでも他人の uid を名乗る偽ログを書けた。
+        expect(auditLogs.create).toBe(
+            "(isSignedIn() && request.resource.data.userId == request.auth.uid) || (!isSignedIn() && request.resource.data.userId == 'GUEST')",
+        );
+        expect(auditLogs.read).toBe('isSuperuser()');
+        // 監査ログの不変性: create / read 以外の allow 文(update / delete / write)が増えたら錠を落とす。
+        expect(Object.keys(auditLogs).sort()).toEqual(['create', 'read']);
     });
 });
 

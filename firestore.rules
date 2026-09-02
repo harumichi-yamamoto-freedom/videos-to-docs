@@ -297,13 +297,22 @@ service cloud.firestore {
       allow write: if isSuperuser();
     }
 
-    // auditLogs コレクション
+    // auditLogs コレクション(クライアント書込の監査ログ)
+    //
+    // 書き手は src/lib/auditLog.ts logAudit() と src/lib/firestore.ts
+    // recordDocumentDeletionAudit() の2か所で、どちらも userId に
+    // getCurrentUserId() (= auth.currentUser?.uid ?? 'GUEST') を入れる。
     match /auditLogs/{logId} {
-      // 誰でも書き込み可能（システムログ記録用）
-      allow create: if true;
+      // 作成: 記録主体(userId)は「本人の uid」か「未ログインの 'GUEST'」に限る。
+      //   旧ルール(if true)では未ログインでも他人の uid を名乗る偽ログを書けた(S2-3)。
+      //   userId 欠落は参照の評価エラー=拒否(fail-closed・エミュレータ実測 2026-09-03)。
+      allow create: if (isSignedIn() && request.resource.data.userId == request.auth.uid)
+        || (!isSignedIn() && request.resource.data.userId == 'GUEST');
 
       // 管理者のみ読み取り可能
       allow read: if isSuperuser();
+
+      // update / delete の許可文は意図的に無い: 監査ログは管理者を含め誰も改竄・削除できない。
     }
 
     // systemNotifications コレクション（システムからのお知らせ）
