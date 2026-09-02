@@ -187,20 +187,40 @@ function findElement(
     return null;
 }
 
+// collectionState は宣言順のスロット番号ではなく初期値の形で特定する
+// （実装へuseStateを足してもfixtureが別スロットへ静かに再結合しないため）。
+function isCollectionStateInitial(value: unknown): boolean {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as { ownerKey?: unknown; status?: unknown; prompts?: unknown };
+    return candidate.ownerKey === null
+        && candidate.status === 'loading'
+        && Array.isArray(candidate.prompts);
+}
+
 function configureHookState(collectionState: TestCollectionState) {
-    let stateIndex = 0;
+    // 契約: setters[0] = collectionState のsetter。それ以外は呼出順に1から並ぶ。
     const setters: ReturnType<typeof vi.fn>[] = [];
+    let nonCollectionCursor = 1;
+    let sawCollectionSlot = false;
 
     mocks.useState.mockImplementation((initialValue: unknown) => {
-        const index = stateIndex++;
         const setter = vi.fn();
-        setters[index] = setter;
-        const value = index === 0
-            ? collectionState
-            : typeof initialValue === 'function'
+        if (isCollectionStateInitial(initialValue)) {
+            if (sawCollectionSlot) {
+                throw new Error('collectionState と同形の初期値を持つstateが複数あります');
+            }
+            sawCollectionSlot = true;
+            setters[0] = setter;
+            return [collectionState, setter];
+        }
+
+        setters[nonCollectionCursor++] = setter;
+        return [
+            typeof initialValue === 'function'
                 ? (initialValue as () => unknown)()
-                : initialValue;
-        return [value, setter];
+                : initialValue,
+            setter,
+        ];
     });
 
     return setters;

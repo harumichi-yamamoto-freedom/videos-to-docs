@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { FileText, RefreshCw, Plus, Trash2, Lock } from 'lucide-react';
+import { FileText, RefreshCw, Plus, Trash2, Lock, XCircle } from 'lucide-react';
 import { Prompt, getPrompts, deletePrompt, initializeDefaultPrompts, addDefaultPrompts } from '@/lib/prompts';
 import { useAuth } from '@/hooks/useAuth';
 import { getGeminiModelLabel } from '@/constants/geminiModels';
 import { createLogger } from '@/lib/logger';
 import { AddDefaultPromptsModal } from './AddDefaultPromptsModal';
+import { Dialog } from './ui/Dialog';
 import { getDefaultPrompts, DefaultPromptTemplate } from '@/lib/adminSettings';
 
 const promptListLogger = createLogger('PromptListSidebar');
@@ -49,7 +50,11 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [defaultTemplates, setDefaultTemplates] = useState<DefaultPromptTemplate[]>([]);
+    const [pendingDeletePrompt, setPendingDeletePrompt] = useState<Prompt | null>(null);
+    const [isDeletingPrompt, setIsDeletingPrompt] = useState(false);
+    const [actionError, setActionError] = useState<string | null>(null);
     const menuRef = useRef<HTMLDivElement>(null);
+    const deleteCancelButtonRef = useRef<HTMLButtonElement>(null);
     const ownerGenerationRef = useRef(0);
     const requestIdRef = useRef(0);
     const ownerKeyRef = useRef(ownerKey);
@@ -199,6 +204,9 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
             prompts: [],
         });
         setIsInitializing(false);
+        setPendingDeletePrompt(null);
+        setIsDeletingPrompt(false);
+        setActionError(null);
 
         if (ownerKey === null) return;
 
@@ -233,27 +241,54 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
         };
     }, [isMenuOpen]);
 
-    const handleDelete = async (prompt: Prompt, event: React.MouseEvent) => {
+    const requestDeletePrompt = (prompt: Prompt, event: React.MouseEvent) => {
         event.stopPropagation();
 
-        // ゲストのデフォルトプロンプトは削除不可
+        // ゲストのデフォルトプロンプトは削除不可（削除ボタン自体を出していないが多重防御）
         if (!user && prompt.ownerType === 'guest' && prompt.isDefault) {
-            alert('デフォルトプロンプトは削除できません');
+            setActionError('デフォルトプロンプトは削除できません。');
             return;
         }
 
-        if (!confirm(`「${prompt.name}」を削除しますか？`)) return;
+        setActionError(null);
+        setPendingDeletePrompt(prompt);
+    };
 
+    const closeDeleteDialog = () => {
+        if (isDeletingPrompt) return;
+        setPendingDeletePrompt(null);
+    };
+
+    const confirmDeletePrompt = async () => {
+        const prompt = pendingDeletePrompt;
+        if (!prompt?.id || isDeletingPrompt) return;
+
+        // owner切替を跨いだ古いcontinuationが、共有request IDを進めて新ownerの
+        // 取得を失効させたり、新しい画面のstateを書き換えたりしないための世代検査。
+        const operationGeneration = ownerGenerationRef.current;
+        const isOperationCurrent = () => ownerGenerationRef.current === operationGeneration;
+
+        setIsDeletingPrompt(true);
+        setActionError(null);
         try {
-            await deletePrompt(prompt.id!);
+            await deletePrompt(prompt.id);
+            if (!isOperationCurrent()) return;
             await loadPromptsQuietly();
+            if (!isOperationCurrent()) return;
+            setPendingDeletePrompt(null);
             // 親コンポーネントに削除を通知
             if (onPromptDeleted) {
                 onPromptDeleted();
             }
         } catch (error) {
-            alert('削除に失敗しました');
             promptListLogger.error('プロンプトの削除に失敗', error, { promptId: prompt.id });
+            if (!isOperationCurrent()) return;
+            setPendingDeletePrompt(null);
+            setActionError('プロンプトを削除できませんでした。時間をおいて再度お試しください。');
+        } finally {
+            if (isOperationCurrent()) {
+                setIsDeletingPrompt(false);
+            }
         }
     };
 
@@ -277,6 +312,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
     // デフォルトプロンプトを追加（モーダルを開く）
     const handleAddDefaults = async () => {
         setIsMenuOpen(false);
+        setActionError(null);
         try {
             // デフォルトプロンプトのリストを取得
             const templates = await getDefaultPrompts();
@@ -284,7 +320,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
             setIsModalOpen(true);
         } catch (error) {
             promptListLogger.error('デフォルトプロンプトの取得に失敗', error, { userId: user?.uid });
-            alert('デフォルトプロンプトの取得に失敗しました');
+            setActionError('デフォルトプロンプトを取得できませんでした。時間をおいて再度お試しください。');
         }
     };
 
@@ -296,8 +332,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
             await loadPromptsQuietly();
         } catch (error) {
             promptListLogger.error('デフォルトプロンプトの追加に失敗', error, { userId: user?.uid });
-            alert('デフォルトプロンプトの追加に失敗しました');
-            throw error; // モーダルにエラーを伝える
+            throw error; // 開いたままのモーダルがインラインエラーを表示する
         } finally {
             setIsInitializing(false);
         }
@@ -392,6 +427,23 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
 
             {/* コンテンツ */}
             <div className="flex-1 overflow-y-auto p-4">
+                {actionError && (
+                    <div
+                        role="alert"
+                        className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+                    >
+                        <span>{actionError}</span>
+                        <button
+                            type="button"
+                            onClick={() => setActionError(null)}
+                            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
+                            aria-label="エラーを閉じる"
+                        >
+                            <XCircle className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
+
                 {/* プロンプトリスト */}
                 {loadStatus === 'loading' ? (
                     <div className="flex items-center justify-center h-32">
@@ -455,7 +507,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                                 {canDeletePrompt(prompt) && (
                                     <button
                                         type="button"
-                                        onClick={(e) => handleDelete(prompt, e)}
+                                        onClick={(e) => requestDeletePrompt(prompt, e)}
                                         className="absolute right-4 top-4 z-20 flex min-h-11 min-w-11 items-center justify-center rounded-lg opacity-0 transition-colors hover:bg-red-50 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
                                         title="削除"
                                     >
@@ -467,6 +519,51 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                     </div>
                 )}
             </div>
+
+            {/* 削除確認ダイアログ */}
+            {pendingDeletePrompt && (
+                <Dialog
+                    isOpen
+                    onClose={closeDeleteDialog}
+                    initialFocusRef={deleteCancelButtonRef}
+                    dismissible={!isDeletingPrompt}
+                    aria-labelledby="prompt-delete-dialog-title"
+                    aria-describedby="prompt-delete-dialog-description"
+                    className="w-[calc(100%-2rem)] max-w-md rounded-xl border-0 bg-white p-6 shadow-2xl"
+                >
+                    <h2
+                        id="prompt-delete-dialog-title"
+                        className="text-lg font-bold text-gray-900"
+                    >
+                        「{pendingDeletePrompt.name}」を削除しますか？
+                    </h2>
+                    <p
+                        id="prompt-delete-dialog-description"
+                        className="mt-2 text-sm leading-6 text-gray-600"
+                    >
+                        この操作は取り消せません。
+                    </p>
+                    <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                        <button
+                            ref={deleteCancelButtonRef}
+                            type="button"
+                            onClick={closeDeleteDialog}
+                            disabled={isDeletingPrompt}
+                            className="min-h-11 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
+                        >
+                            キャンセル
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => void confirmDeletePrompt()}
+                            disabled={isDeletingPrompt}
+                            className="min-h-11 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:opacity-50"
+                        >
+                            {isDeletingPrompt ? '削除中…' : '削除する'}
+                        </button>
+                    </div>
+                </Dialog>
+            )}
 
             {/* デフォルトプロンプト追加モーダル */}
             <AddDefaultPromptsModal

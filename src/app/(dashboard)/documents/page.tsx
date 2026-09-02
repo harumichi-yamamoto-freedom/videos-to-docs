@@ -13,10 +13,12 @@ import React, {
 } from 'react';
 import { FilePlus2, FileText } from 'lucide-react';
 import { DocumentListSidebar } from '@/components/DocumentListSidebar';
+import { Dialog } from '@/components/ui/Dialog';
 import { PageHeader } from '@/components/ui/PageHeader';
 import {
   DocumentDetailPanel,
   type DocumentDetailPanelHandle,
+  type DocumentUpdateMeta,
   type DocumentUpdatePatch,
 } from '@/components/DocumentDetailPanel';
 import {
@@ -35,7 +37,6 @@ type DocumentTitlePatch = {
   title: string;
 };
 
-const UNSAVED_NAVIGATION_MESSAGE = '未保存の変更があります。このページから移動しますか？';
 const HISTORY_GUARD_STATE_KEY = '__documentsUnsavedChangesGuard';
 
 type HistoryGuardRole = 'base' | 'sentinel';
@@ -47,6 +48,33 @@ type HistoryGuardSession = {
 };
 
 type HistoryExitApproval = 'none' | 'history' | 'router';
+
+type LeaveConfirmationRequest =
+  | { kind: 'history' }
+  | { kind: 'router'; target: HTMLElement };
+
+type LeaveConfirmationActions = {
+  approve: () => void;
+  deny: () => void;
+};
+
+// pageのdocuments[]へ書き戻す全経路の不変条件:
+// 確定していない版印(readBackがnullを返した/そもそも版を検証していない経路)は、
+// 必ず updatedAt: undefined へ剥がして未確定に落とす。1経路でも現在entryの
+// updatedAt(pollで他者版へ前進していることがある)を温存すると、「自分の内容+
+// 他者の版印」の捏造版が生まれ、panelがその版をpinして次の保存が無警告上書きになる。
+// documents[]への合成は必ずこのヘルパを通すこと。
+function withCertifiedVersion<T extends Transcription>(
+  document: T,
+  patch: Partial<Pick<Transcription, 'title' | 'text'>>,
+  certifiedUpdatedAt: Transcription['updatedAt'] | null,
+): T {
+  return {
+    ...document,
+    ...patch,
+    updatedAt: certifiedUpdatedAt ?? undefined,
+  };
+}
 
 export default function DocumentsPage() {
   const { user, loading: authLoading } = useAuth();
@@ -66,6 +94,12 @@ export default function DocumentsPage() {
   const [isResolvingMissingDocument, setIsResolvingMissingDocument] = useState(false);
   const [missingDocumentError, setMissingDocumentError] = useState<string | null>(null);
   const [ownerChangeDraft, setOwnerChangeDraft] = useState<DocumentUpdatePatch | null>(null);
+  // 版を確定できなかった保存(readBack null)の警告。文書ごとに保持し、畳むのは
+  // 「版印つきの取得成功が届いた時」か「同じ文書の確定保存」だけ。ボタン押下や
+  // 別文書の保存で消すと、取得失敗時に最新確認済みという誤認が生まれる。
+  const [staleSaveDocumentIds, setStaleSaveDocumentIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
   const [activeOwnerKey, setActiveOwnerKey] = useState(ownerKey);
   const detailPanelRef = useRef<DocumentDetailPanelHandle>(null);
   const listSectionRef = useRef<HTMLDivElement>(null);
@@ -76,9 +110,13 @@ export default function DocumentsPage() {
   const switchAttemptRef = useRef(0);
   const missingDocumentAttemptRef = useRef(0);
   const historyGuardId = useId();
+  const leaveDialogTitleId = useId();
+  const leaveDialogDescriptionId = useId();
+  const [leaveConfirmation, setLeaveConfirmation] = useState<LeaveConfirmationRequest | null>(null);
+  const leaveConfirmationActionsRef = useRef<LeaveConfirmationActions | null>(null);
+  const leaveStayButtonRef = useRef<HTMLButtonElement>(null);
   const historyGuardSessionRef = useRef<HistoryGuardSession | null>(null);
   const historyExitApprovalRef = useRef<HistoryExitApproval>('none');
-  const routerExitFallbackTimerRef = useRef<number | null>(null);
   const routerExitStartPathnameRef = useRef<string | null>(null);
   const componentMountedRef = useRef(false);
   const hasUnsavedChanges = isDirty || ownerChangeDraft !== null;
@@ -138,6 +176,23 @@ export default function DocumentsPage() {
   const handleDocumentsChange = useCallback((nextDocuments: Transcription[]) => {
     setDocuments(nextDocuments);
 
+    // 版印つきの取得成功が届いた文書は「最新を確認できる状態になった」ので、
+    // 版未確定警告を畳む(ローカルで剥がしたentryはupdatedAt undefinedのため
+    // サーバ由来の版印と区別できる)。
+    setStaleSaveDocumentIds(currentIds => {
+      if (currentIds.size === 0) return currentIds;
+      let nextIds: Set<string> | null = null;
+      for (const warnedDocumentId of currentIds) {
+        const refreshedDocument = nextDocuments.find(
+          document => document.id === warnedDocumentId,
+        );
+        if (refreshedDocument && refreshedDocument.updatedAt !== undefined) {
+          (nextIds ??= new Set(currentIds)).delete(warnedDocumentId);
+        }
+      }
+      return nextIds ?? currentIds;
+    });
+
     const selectedDocumentStillExists = Boolean(
       selectedDocumentId && nextDocuments.some(document => document.id === selectedDocumentId),
     );
@@ -173,12 +228,16 @@ export default function DocumentsPage() {
     patch: DocumentTitlePatch,
   ) => {
     if (!documentId) return;
+    // 改名通知は版を検証しない経路なので、不変条件どおり版印は未確定に落とす
+    // (サイドバー側が予約する静かな再取得が実状態を埋め戻す)。
     setDocuments(currentDocuments => currentDocuments.map(document =>
-      document.id === documentId ? { ...document, title: patch.title } : document,
+      document.id === documentId
+        ? withCertifiedVersion(document, { title: patch.title }, null)
+        : document,
     ));
     setMissingDirtyDocument(currentDocument =>
       currentDocument?.id === documentId
-        ? { ...currentDocument, title: patch.title }
+        ? withCertifiedVersion(currentDocument, { title: patch.title }, null)
         : currentDocument,
     );
   }, []);
@@ -200,6 +259,7 @@ export default function DocumentsPage() {
   const handleDocumentUpdate = useCallback(async (
     documentId: string,
     patch: DocumentUpdatePatch,
+    meta: DocumentUpdateMeta,
   ) => {
     const missingDocumentToRestore = missingDirtyDocument?.id === documentId
       ? missingDirtyDocument
@@ -209,25 +269,53 @@ export default function DocumentsPage() {
       title: patch.title,
       transcription: patch.text,
     };
+    let savedUpdatedAt: Awaited<ReturnType<typeof updateTranscription>> = null;
     if (missingDocumentToRestore) {
-      await restoreTranscription(documentId, missingDocumentToRestore, persistedPatch);
+      savedUpdatedAt = await restoreTranscription(
+        documentId,
+        missingDocumentToRestore,
+        persistedPatch,
+        // 復元先に同IDが残っていた場合(圏外化)は、通常保存と同じ競合検査を課す。
+        { expectedUpdatedAt: meta.expectedUpdatedAt },
+      );
     } else {
-      await updateTranscription(documentId, persistedPatch);
+      // 楽観的並行性制御: 期待値はポーリングで前進するdocuments[]からではなく、
+      // エディタがdraftの根拠として固定した版(meta)から受け取る。ライブ値だと
+      // 他者の更新へ勝手に追随し、競合検査が自己無効化する。
+      savedUpdatedAt = await updateTranscription(documentId, persistedPatch, {
+        expectedUpdatedAt: meta.expectedUpdatedAt,
+      });
     }
 
+    // savedUpdatedAt=null は「保存は通ったが自分の版を確定できなかった」信号。
+    // 不変条件どおり withCertifiedVersion で合成し、未確定の版印は必ず剥がす。
     setDocuments(currentDocuments => {
       let didUpdateDocument = false;
       const nextDocuments = currentDocuments.map(document => {
         if (document.id !== documentId) return document;
         didUpdateDocument = true;
-        return { ...document, title: patch.title, text: patch.text };
+        return withCertifiedVersion(
+          document,
+          { title: patch.title, text: patch.text },
+          savedUpdatedAt,
+        );
       });
 
       if (didUpdateDocument || !missingDocumentToRestore) return nextDocuments;
       return [
-        { ...missingDocumentToRestore, title: patch.title, text: patch.text },
+        withCertifiedVersion(
+          missingDocumentToRestore,
+          { title: patch.title, text: patch.text },
+          savedUpdatedAt,
+        ),
         ...nextDocuments,
       ];
+    });
+    setStaleSaveDocumentIds(currentIds => {
+      const nextIds = new Set(currentIds);
+      if (savedUpdatedAt) nextIds.delete(documentId);
+      else nextIds.add(documentId);
+      return nextIds;
     });
     if (missingDocumentToRestore) {
       setMissingDirtyDocument(null);
@@ -320,10 +408,40 @@ export default function DocumentsPage() {
     setOwnerChangeDraft(null);
   }, []);
 
+  const handleDetailDraftDiscarded = useCallback(() => {
+    if (!missingDirtyDocument) return;
+    // 詳細パネル側の破棄で編集は消えているのに、欠落バナーが次のポーリング（最大5秒）
+    // まで「未保存の変更があります」と主張し続けるのを防ぎ、同期で畳んで選択も外す。
+    missingDocumentAttemptRef.current += 1;
+    setIsResolvingMissingDocument(false);
+    setMissingDocumentError(null);
+    setMissingDirtyDocument(null);
+    setSelectedDocumentId(null);
+  }, [missingDirtyDocument]);
+
+  const handleRequestLatestDocument = useCallback(() => {
+    setDocumentUpdateTrigger(current => current + 1);
+  }, []);
+
+  const handleReloadAfterStaleSave = useCallback(() => {
+    // 押下は再取得の要求。警告は版印つきの取得成功が届いた時だけ畳む。
+    setDocumentUpdateTrigger(current => current + 1);
+  }, []);
+
   const handleBackToList = useCallback(() => {
     if (!window.matchMedia('(max-width: 1023px)').matches) return;
     listSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     listSectionRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const handleApproveLeave = useCallback(() => {
+    leaveConfirmationActionsRef.current?.approve();
+  }, []);
+
+  const handleDenyLeave = useCallback(() => {
+    leaveConfirmationActionsRef.current?.deny();
+    // ガードeffect解体後に閉じ損ねたダイアログも、表示だけは確実に畳む。
+    setLeaveConfirmation(null);
   }, []);
 
   useLayoutEffect(() => {
@@ -346,6 +464,7 @@ export default function DocumentsPage() {
     setMissingDirtyDocument(null);
     setIsResolvingMissingDocument(false);
     setMissingDocumentError(null);
+    setStaleSaveDocumentIds(new Set<string>());
   }, [isDirty, isOwnerContextChanged, ownerKey]);
 
   useLayoutEffect(() => {
@@ -362,10 +481,6 @@ export default function DocumentsPage() {
     componentMountedRef.current = true;
     return () => {
       componentMountedRef.current = false;
-      if (routerExitFallbackTimerRef.current !== null) {
-        window.clearTimeout(routerExitFallbackTimerRef.current);
-        routerExitFallbackTimerRef.current = null;
-      }
       routerExitStartPathnameRef.current = null;
     };
   }, []);
@@ -374,10 +489,6 @@ export default function DocumentsPage() {
     const navigationStartPathname = routerExitStartPathnameRef.current;
     if (navigationStartPathname === null || pathname === navigationStartPathname) return;
 
-    if (routerExitFallbackTimerRef.current !== null) {
-      window.clearTimeout(routerExitFallbackTimerRef.current);
-      routerExitFallbackTimerRef.current = null;
-    }
     routerExitStartPathnameRef.current = null;
     historyExitApprovalRef.current = 'none';
   }, [pathname]);
@@ -467,17 +578,29 @@ export default function DocumentsPage() {
     let bypassNextRouterClick = false;
     let pendingRouterTarget: HTMLElement | null = null;
     let historyExitFallbackTimer: number | null = null;
+    let pendingLeaveRequest: LeaveConfirmationRequest | null = null;
+    let pendingHistoryExitDelta = 0;
+    let approveHistoryExitAfterRecovery = false;
 
+    // タブを閉じる・リロードする離脱は、ページ破棄前に出せるUIがブラウザ標準の
+    // 確認ダイアログしか存在しない（カスタムUIは描画される前に破棄される）ため、
+    // beforeunloadだけはネイティブ挙動を温存する。
+    // 承認状態では免除しない: 承認されたのはSPA内遷移であってリロード/クローズ
+    // ではなく、遷移が完了すればunmountでこのlistenerごと消える。時間ではなく
+    // 「dirtyでmountされている」という状態だけで判定する。
     const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
-      if (historyExitApprovalRef.current !== 'none') return;
       event.preventDefault();
       (event as unknown as { returnValue: boolean }).returnValue = true;
     };
 
-    const recoverToSentinel = (): void => {
-      historyExitApprovalRef.current = 'none';
-      isRecoveringToSentinel = true;
-      window.history.forward();
+    const requestLeaveConfirmation = (request: LeaveConfirmationRequest): void => {
+      pendingLeaveRequest = request;
+      setLeaveConfirmation(request);
+    };
+
+    const closeLeaveConfirmation = (): void => {
+      pendingLeaveRequest = null;
+      setLeaveConfirmation(null);
     };
 
     const scheduleFailedHistoryExitRecovery = (session: HistoryGuardSession): void => {
@@ -490,18 +613,41 @@ export default function DocumentsPage() {
           !componentMountedRef.current
           || !hasUnsavedChangesRef.current
           || historyExitApprovalRef.current !== 'history'
-          || historyExitTraversalObserved
         ) {
+          return;
+        }
+
+        if (historyExitTraversalObserved) {
+          // 遷移は観測されたがcomponentが残っている。ただし着地先が別pathnameなら
+          // 旧pageのunmountが遅れているだけであり、そこへ再武装するとpushStateが
+          // Forward側の履歴を切り落として他routeのentryを汚染する。再武装は
+          // query/hash違いの同一route着地（unmountが来ない=承認が恒久残留する
+          // ケース）に限る。
+          // trailing slashの揺れ(/documents と /documents/)は同一routeとして
+          // 比較する。厳密一致だと同一tree別表記への着地で再武装されず、
+          // 承認状態が残って以後の確認を迂回してしまう。
+          const normalizePathname = (pathname: string): string =>
+            pathname.replace(/\/+$/, '') || '/';
+          let guardedPathname: string | null = null;
+          try {
+            guardedPathname = normalizePathname(new URL(session.url).pathname);
+          } catch {
+            guardedPathname = null;
+          }
+          if (normalizePathname(window.location.pathname) !== guardedPathname) return;
+
+          historyExitApprovalRef.current = 'none';
+          installGuardSession();
           return;
         }
 
         if (
           window.location.href === session.url
-          && readGuardRole(window.history.state) === 'base'
+          && readGuardRole(window.history.state) === 'sentinel'
         ) {
-          // baseが履歴先頭だった場合、二段目のbackは発火しない。
-          // 承認状態を解除してsentinelへ戻り、ガードを再武装する。
-          recoverToSentinel();
+          // 履歴前項目が足りずgo()が何も遷移しなかった場合。承認前にsentinelへ
+          // 復帰済みなので、承認状態だけを解除してガードを再武装する。
+          historyExitApprovalRef.current = 'none';
         }
       }, 250);
     };
@@ -518,40 +664,27 @@ export default function DocumentsPage() {
       }
 
       window.queueMicrotask(() => {
-        if (!target.isConnected || !componentMountedRef.current) return;
-        bypassNextRouterClick = true;
-        const navigationStartPathname = window.location.pathname;
-        routerExitStartPathnameRef.current = navigationStartPathname;
-        target.click();
-
-        if (routerExitFallbackTimerRef.current !== null) {
-          window.clearTimeout(routerExitFallbackTimerRef.current);
-        }
-        routerExitFallbackTimerRef.current = window.setTimeout(() => {
-          routerExitFallbackTimerRef.current = null;
-          if (
-            !componentMountedRef.current
-            || !hasUnsavedChangesRef.current
-            || historyExitApprovalRef.current !== 'router'
-          ) {
-            return;
-          }
-
-          if (
-            routerExitStartPathnameRef.current !== navigationStartPathname
-            || window.location.pathname !== navigationStartPathname
-          ) {
-            routerExitStartPathnameRef.current = null;
-            historyExitApprovalRef.current = 'none';
-            return;
-          }
-
-          // replay後も同じcomponentが残っているなら、遷移成否に関係なく
-          // guardを再武装して承認状態を永久に残さない。
-          routerExitStartPathnameRef.current = null;
+        if (!componentMountedRef.current) {
           historyExitApprovalRef.current = 'none';
-          installGuardSession();
-        }, 250);
+          return;
+        }
+        if (!target.isConnected) {
+          // replay対象が再描画で消えた。遷移は起こせないので、承認を残して
+          // beforeunloadと以後のBackが恒久的に確認を迂回する状態にせず、
+          // その場でガードを再武装して留まる。
+          historyExitApprovalRef.current = 'none';
+          if (hasUnsavedChangesRef.current) installGuardSession();
+          return;
+        }
+        bypassNextRouterClick = true;
+        routerExitStartPathnameRef.current = window.location.pathname;
+        target.click();
+        // 遷移の完了は時間でなく状態で観測する: pathnameが変われば上のeffectが
+        // 承認を解除し、unmountすれば承認はrefごと消える。250ms等の時刻でguardを
+        // 履歴へ再挿入すると、prefetch無しの正常な遅い遷移が完了した後方に
+        // base/sentinelが残り、Backで/documentsを二重に踏む。遷移が起こらない
+        // 残留状態でも危険は無い: リロード/クローズはbeforeunloadが常時確認し、
+        // 次のクリックは監視が改めて確認し、popstateは下の分岐が承認を解除する。
       });
     };
 
@@ -561,14 +694,27 @@ export default function DocumentsPage() {
       if (historyExitApprovalRef.current === 'router' && pendingRouterTarget) {
         if (role === 'base') {
           replayRouterNavigation(historyGuardSessionRef.current, pendingRouterTarget);
+          return;
         }
+        // replayの往路以外のtraversalが来た(承認直後のBack等)。承認を解除して
+        // このtraversalは素通しする(sentinelは承認時に消費済みで保留できない)。
+        historyExitApprovalRef.current = 'none';
+        pendingRouterTarget = null;
         return;
       }
 
       if (isRecoveringToSentinel) {
         if (role === 'sentinel') {
           isRecoveringToSentinel = false;
+          if (approveHistoryExitAfterRecovery) {
+            // 復帰完了前に押された「移動する」をここで実行する(無言で捨てると
+            // 利用者には押しても効かないボタンになる)。
+            approveHistoryExitAfterRecovery = false;
+            performApprovedHistoryExit();
+          }
         } else {
+          // sentinelへ戻る一段ごとに、承認時へ引き継ぐ離脱の深さを積む。
+          pendingHistoryExitDelta -= 1;
           window.history.forward();
         }
         return;
@@ -580,28 +726,35 @@ export default function DocumentsPage() {
       }
       if (role === 'sentinel') return;
 
-      if (role === 'base') {
-        if (window.confirm(UNSAVED_NAVIGATION_MESSAGE)) {
-          const session = historyGuardSessionRef.current;
-          historyExitApprovalRef.current = 'history';
-          historyExitTraversalObserved = false;
-          window.history.back();
-          if (session) scheduleFailedHistoryExitRecovery(session);
-        } else {
-          isRecoveringToSentinel = true;
-          window.history.forward();
-        }
-        return;
-      }
+      // sentinelを設置できなかった環境では遷移を保留できない(存在しないsentinelへ
+      // forwardで戻ろうとすると履歴末尾で復帰フラグが永久に立ったままになる)。
+      // popstate経由の離脱は素通しし、beforeunloadとクリック監視だけで守る。
+      if (!historyGuardSessionRef.current) return;
 
-      // 履歴メニュー等でsentinelを飛び越えた場合、キャンセル後は
-      // confirmを繰り返さず、forwardを一段ずつ進めてsentinelへ戻す。
-      if (window.confirm(UNSAVED_NAVIGATION_MESSAGE)) {
-        historyExitApprovalRef.current = 'history';
-      } else {
-        isRecoveringToSentinel = true;
-        window.history.forward();
-      }
+      // popstateの時点で答えが要るのはwindow.confirmだから成立していた同期判断。
+      // 画面内ダイアログは非同期なので、先に同期でsentinelへの復帰を開始して遷移を
+      // 保留し、意思確認をダイアログへ委ねる。承認時は保留中に積んだ深さぶんだけ
+      // history.go()で本来の離脱をやり直す（baseは同一URLの人工entryなので+1深い）。
+      //
+      // 【既知制約】複数entryを飛び越えるBackで、routerのpopstate listener(登録が
+      // このpageより先)が別routeのcommitを先に完了させると、この保留は挟めず
+      // unmountで確認なしに離脱する(page.test.tsxの同名テストが記録)。一段Backは
+      // sentinelが同一URLのためrouterが反応せず守れる。リロード/クローズは
+      // beforeunload、SPA内クリックはクリック監視が守る。この窓だけは実ブラウザ
+      // 検証を要する。
+      pendingHistoryExitDelta = role === 'base' ? -2 : -1;
+      isRecoveringToSentinel = true;
+      approveHistoryExitAfterRecovery = false;
+      window.history.forward();
+      requestLeaveConfirmation({ kind: 'history' });
+    };
+
+    const performApprovedHistoryExit = (): void => {
+      const session = historyGuardSessionRef.current;
+      historyExitApprovalRef.current = 'history';
+      historyExitTraversalObserved = false;
+      window.history.go(pendingHistoryExitDelta);
+      if (session) scheduleFailedHistoryExitRecovery(session);
     };
 
     const handleRouterNavigation = (event: MouseEvent): void => {
@@ -656,18 +809,45 @@ export default function DocumentsPage() {
       event.stopPropagation();
       event.stopImmediatePropagation();
 
-      if (!window.confirm(UNSAVED_NAVIGATION_MESSAGE)) return;
-
+      // クリックは既に握り潰してあるので履歴は動いていない。承認されたときだけ
+      // approve側でclickをreplayする。
       const navigationTarget = anchor ?? headerNavigationButton;
       if (!navigationTarget) return;
-      historyExitApprovalRef.current = 'router';
-      pendingRouterTarget = navigationTarget;
-      const session = historyGuardSessionRef.current;
-      if (session && readGuardRole(window.history.state) === 'sentinel') {
-        window.history.back();
-      } else {
-        replayRouterNavigation(session, navigationTarget);
-      }
+      requestLeaveConfirmation({ kind: 'router', target: navigationTarget });
+    };
+
+    leaveConfirmationActionsRef.current = {
+      approve: () => {
+        const request = pendingLeaveRequest;
+        if (!request) return;
+
+        if (request.kind === 'history') {
+          closeLeaveConfirmation();
+          // sentinelへの復帰走行が終わるまで離脱の深さが確定しない。完了前の承認は
+          // 捨てずに予約し、復帰完了(popstateのsentinel到達)で実行する。
+          if (isRecoveringToSentinel) {
+            approveHistoryExitAfterRecovery = true;
+            return;
+          }
+          performApprovedHistoryExit();
+          return;
+        }
+
+        closeLeaveConfirmation();
+        historyExitApprovalRef.current = 'router';
+        pendingRouterTarget = request.target;
+        const session = historyGuardSessionRef.current;
+        if (session && readGuardRole(window.history.state) === 'sentinel') {
+          window.history.back();
+        } else {
+          replayRouterNavigation(session, request.target);
+        }
+      },
+      deny: () => {
+        // 履歴経由の離脱は既にsentinelへ復帰済み、クリック経由は握り潰し済み。
+        // どちらも閉じるだけで「このページに残る」が成立する。
+        closeLeaveConfirmation();
+      },
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -677,12 +857,10 @@ export default function DocumentsPage() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('popstate', handlePopState);
       window.document.removeEventListener('click', handleRouterNavigation, true);
+      leaveConfirmationActionsRef.current = null;
+      setLeaveConfirmation(null);
       if (historyExitFallbackTimer !== null) {
         window.clearTimeout(historyExitFallbackTimer);
-      }
-      if (routerExitFallbackTimerRef.current !== null) {
-        window.clearTimeout(routerExitFallbackTimerRef.current);
-        routerExitFallbackTimerRef.current = null;
       }
       routerExitStartPathnameRef.current = null;
 
@@ -837,6 +1015,33 @@ export default function DocumentsPage() {
               </div>
             ) : (
               <div className="flex h-full min-h-0 flex-col gap-3">
+                {selectedDocumentId !== null
+                  && staleSaveDocumentIds.has(selectedDocumentId)
+                  && !isSelectedDocumentMissing && (
+                  <section
+                    role="alert"
+                    aria-labelledby="stale-save-warning-title"
+                    className="shrink-0 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 shadow-sm"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h2 id="stale-save-warning-title" className="text-sm font-bold">
+                          保存は完了しましたが、他の場所で更新された可能性があります
+                        </h2>
+                        <p className="mt-1 text-xs leading-5 text-amber-800">
+                          最新の内容を読み込んで、保存結果をご確認ください。
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleReloadAfterStaleSave}
+                        className="min-h-11 shrink-0 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
+                      >
+                        最新の内容を読み込む
+                      </button>
+                    </div>
+                  </section>
+                )}
                 {isSelectedDocumentMissing && (
                   <section
                     role="alert"
@@ -884,6 +1089,8 @@ export default function DocumentsPage() {
                     document={selectedDocument}
                     onDocumentUpdate={handleDocumentUpdate}
                     onDirtyChange={setIsDirty}
+                    onDraftDiscarded={handleDetailDraftDiscarded}
+                    onRequestLatestDocument={handleRequestLatestDocument}
                     onBackToList={handleBackToList}
                   />
                 </div>
@@ -944,6 +1151,41 @@ export default function DocumentsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {leaveConfirmation && (
+        <Dialog
+          isOpen
+          onClose={handleDenyLeave}
+          initialFocusRef={leaveStayButtonRef}
+          aria-labelledby={leaveDialogTitleId}
+          aria-describedby={leaveDialogDescriptionId}
+          className="w-[calc(100%-2rem)] max-w-md rounded-xl border-0 bg-white p-6 shadow-2xl"
+        >
+          <h2 id={leaveDialogTitleId} className="text-lg font-bold text-gray-900">
+            未保存の変更があります
+          </h2>
+          <p id={leaveDialogDescriptionId} className="mt-2 text-sm leading-6 text-gray-600">
+            このページから移動しますか？移動すると、保存されていない変更は失われます。
+          </p>
+          <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              ref={leaveStayButtonRef}
+              type="button"
+              onClick={handleDenyLeave}
+              className="min-h-11 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
+            >
+              このページに残る
+            </button>
+            <button
+              type="button"
+              onClick={handleApproveLeave}
+              className="min-h-11 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+            >
+              移動する
+            </button>
+          </div>
+        </Dialog>
       )}
     </div>
   );

@@ -105,6 +105,7 @@ import {
     getTranscriptionsByOwnerId,
     restoreTranscription,
     saveTranscription,
+    TranscriptionConflictError,
     updateTranscription,
     updateTranscriptionContent,
 } from './firestore';
@@ -432,6 +433,9 @@ describe('firestore', () => {
                 'document-id',
                 { title: '更新後のタイトル', content: 'updated' },
             );
+            // expectedUpdatedAtを渡さない従来呼出しはtransaction経路へ流さない。
+            expect(mocks.runTransaction).not.toHaveBeenCalled();
+            expect(mocks.getDoc).not.toHaveBeenCalled();
         });
 
         it('Firestore更新に失敗した場合は監査ログを記録せず失敗を返す', async () => {
@@ -447,7 +451,7 @@ describe('firestore', () => {
             mocks.logAudit.mockRejectedValueOnce(new Error('audit failed'));
 
             await expect(updateTranscription('document-id', { title: '更新後' }))
-                .resolves.toBeUndefined();
+                .resolves.toBeNull();
 
             expect(mocks.updateDoc).toHaveBeenCalledOnce();
         });
@@ -457,6 +461,367 @@ describe('firestore', () => {
                 .rejects.toThrow('更新内容が指定されていません');
 
             expect(mocks.updateDoc).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('updateTranscription 楽観的並行性制御', () => {
+        const storedUpdatedAt = new Date('2026-09-01T10:00:00.000Z');
+        const freshUpdatedAt = new Date('2026-09-01T10:00:05.000Z');
+
+        it('expectedUpdatedAt一致時はtransaction内で読取・比較してから原子更新し、書き込んだupdatedAtを返す', async () => {
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ updatedAt: storedUpdatedAt }),
+            });
+            mocks.getDoc.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({
+                    title: '更新後のタイトル',
+                    transcription: '更新後の本文',
+                    updatedAt: freshUpdatedAt,
+                }),
+            });
+
+            const result = await updateTranscription('document-id', {
+                title: '更新後のタイトル',
+                transcription: '更新後の本文',
+            }, { expectedUpdatedAt: new Date('2026-09-01T10:00:00.000Z') });
+
+            expect(result).toBe(freshUpdatedAt);
+            expect(mocks.updateDoc).not.toHaveBeenCalled();
+            expect(mocks.runTransaction).toHaveBeenCalledWith(
+                mocks.database,
+                expect.any(Function),
+            );
+            expect(mocks.transactionGet).toHaveBeenCalledWith(mocks.documentReference);
+            expect(mocks.transactionUpdate).toHaveBeenCalledWith(mocks.documentReference, {
+                title: '更新後のタイトル',
+                transcription: '更新後の本文',
+                text: mocks.deleteFieldValue,
+                updatedAt: mocks.timestamp,
+            });
+            expect(mocks.transactionGet.mock.invocationCallOrder[0])
+                .toBeLessThan(mocks.transactionUpdate.mock.invocationCallOrder[0]);
+            expect(mocks.logAudit).toHaveBeenCalledWith(
+                'document_update',
+                'document',
+                'document-id',
+                { title: '更新後のタイトル', content: 'updated' },
+            );
+        });
+
+        it('updatedAt不一致は書き込まずTranscriptionConflictErrorで拒否する', async () => {
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ updatedAt: new Date('2026-09-01T10:00:07.000Z') }),
+            });
+
+            const rejection = await updateTranscription('document-id', {
+                transcription: '競合する本文',
+            }, { expectedUpdatedAt: storedUpdatedAt }).catch((error: unknown) => error);
+
+            expect(rejection).toBeInstanceOf(TranscriptionConflictError);
+            expect((rejection as Error).message)
+                .toBe('他の場所で更新されています。内容を確認してから保存し直してください。');
+            expect(mocks.transactionUpdate).not.toHaveBeenCalled();
+            expect(mocks.updateDoc).not.toHaveBeenCalled();
+            expect(mocks.logAudit).not.toHaveBeenCalled();
+        });
+
+        it('文書が消えていた場合も競合として拒否する', async () => {
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => false,
+                data: () => ({}),
+            });
+
+            const rejection = await updateTranscription('document-id', {
+                transcription: '消えた文書への本文',
+            }, { expectedUpdatedAt: storedUpdatedAt }).catch((error: unknown) => error);
+
+            expect(rejection).toBeInstanceOf(TranscriptionConflictError);
+            expect(mocks.transactionUpdate).not.toHaveBeenCalled();
+        });
+
+        it('expectedUpdatedAt=nullはupdatedAt未設定の保存済み文書とだけ一致する', async () => {
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({}),
+            });
+            mocks.getDoc.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ title: '初回更新のタイトル', updatedAt: freshUpdatedAt }),
+            });
+
+            await expect(updateTranscription('document-id', {
+                title: '初回更新のタイトル',
+            }, { expectedUpdatedAt: null })).resolves.toBe(freshUpdatedAt);
+
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ updatedAt: storedUpdatedAt }),
+            });
+            const rejection = await updateTranscription('document-id', {
+                title: '二重更新のタイトル',
+            }, { expectedUpdatedAt: null }).catch((error: unknown) => error);
+            expect(rejection).toBeInstanceOf(TranscriptionConflictError);
+        });
+
+        it('Timestamp同士はisEqualで厳密比較する', async () => {
+            const expectedTimestamp = {
+                toMillis: () => 1_756_720_800_000,
+            };
+            const isEqual = vi.fn((other: unknown) => other === expectedTimestamp);
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ updatedAt: { isEqual, toMillis: () => 1_756_720_800_000 } }),
+            });
+            mocks.getDoc.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ title: '厳密比較のタイトル', updatedAt: freshUpdatedAt }),
+            });
+
+            await expect(updateTranscription('document-id', {
+                title: '厳密比較のタイトル',
+            }, {
+                expectedUpdatedAt: expectedTimestamp as never,
+            })).resolves.toBe(freshUpdatedAt);
+
+            expect(isEqual).toHaveBeenCalledWith(expectedTimestamp);
+        });
+
+        it('上限超過でも保存済みより縮む本文は競合検査つきの更新でも受理する', async () => {
+            mocks.validateDocumentSize.mockResolvedValue({
+                valid: false,
+                size: 4096,
+                maxSize: 1024,
+            });
+            mocks.getDoc
+                .mockResolvedValueOnce({
+                    exists: () => true,
+                    data: () => ({ transcription: 'x'.repeat(9000) }),
+                })
+                .mockResolvedValueOnce({
+                    exists: () => true,
+                    data: () => ({
+                        transcription: '削って縮めた本文',
+                        updatedAt: freshUpdatedAt,
+                    }),
+                });
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ updatedAt: storedUpdatedAt }),
+            });
+
+            await expect(updateTranscription('document-id', {
+                transcription: '削って縮めた本文',
+            }, { expectedUpdatedAt: storedUpdatedAt })).resolves.toBe(freshUpdatedAt);
+
+            expect(mocks.transactionUpdate).toHaveBeenCalledOnce();
+        });
+
+        it.each([
+            {
+                brokenField: 'title',
+                freshData: {
+                    title: '割り込みwriterのタイトル',
+                    transcription: '更新後の本文',
+                },
+            },
+            {
+                brokenField: 'transcription',
+                freshData: {
+                    title: '更新後のタイトル',
+                    transcription: '割り込みwriterの本文',
+                },
+            },
+        ])('commitと読み戻しの間に$brokenFieldへ別writerが割り込んだ痕跡があればupdatedAtを返さない', async ({ freshData }) => {
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ updatedAt: storedUpdatedAt }),
+            });
+            // 読み戻しは自分の書いた版とは限らない: 無検査writer(タイトル改名等)が
+            // 割り込むと、そのupdatedAtを返却→期待値が他人の版へ前進→次の保存が
+            // 割り込みを無音上書きする。書いたフィールドの一致で見分ける。
+            mocks.getDoc.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ ...freshData, updatedAt: freshUpdatedAt }),
+            });
+
+            await expect(updateTranscription('document-id', {
+                title: '更新後のタイトル',
+                transcription: '更新後の本文',
+            }, { expectedUpdatedAt: storedUpdatedAt })).resolves.toBeNull();
+
+            expect(mocks.transactionUpdate).toHaveBeenCalledOnce();
+            expect(mocks.logAudit).toHaveBeenCalledOnce();
+        });
+
+        it('復元先に同IDが存在しexpectedUpdatedAtと版が食い違えば、上書きせず競合として拒否する', async () => {
+            mocks.getCurrentUserId.mockReturnValue('user-id');
+            mocks.getOwnerType.mockReturnValue('user');
+            // 一覧は100件上限なので「一覧から消えた」は削除の証拠ではない。
+            // 圏外化した文書が別writerに更新されていた場合、古いdraftで消してはならない。
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({
+                    ownerType: 'user',
+                    ownerId: 'user-id',
+                    updatedAt: new Date('2026-09-01T10:00:07.000Z'),
+                }),
+            });
+
+            const rejection = await restoreTranscription('document-id', {
+                id: 'document-id',
+                title: '退避中のタイトル',
+                fileName: 'recording.wav',
+                text: '退避中の本文',
+                promptName: '議事録',
+                originalFileType: 'audio',
+                ownerType: 'user',
+                ownerId: 'user-id',
+                createdBy: 'user-id',
+                createdAt: new Date('2026-09-01T00:00:00.000Z'),
+            }, {
+                transcription: '古いdraftの本文',
+            }, { expectedUpdatedAt: storedUpdatedAt }).catch((error: unknown) => error);
+
+            expect(rejection).toBeInstanceOf(TranscriptionConflictError);
+            expect(mocks.transactionUpdate).not.toHaveBeenCalled();
+            expect(mocks.transactionSet).not.toHaveBeenCalled();
+            expect(mocks.logAudit).not.toHaveBeenCalled();
+        });
+
+        it('復元先が真に存在しない場合はexpectedUpdatedAt付きでも再作成する', async () => {
+            mocks.getCurrentUserId.mockReturnValue('user-id');
+            mocks.getOwnerType.mockReturnValue('user');
+            mocks.transactionGet
+                .mockResolvedValueOnce({
+                    exists: () => false,
+                    data: () => ({}),
+                })
+                .mockResolvedValueOnce({
+                    exists: () => true,
+                    data: () => ({ documentCount: 4 }),
+                });
+
+            await expect(restoreTranscription('document-id', {
+                id: 'document-id',
+                title: '退避中のタイトル',
+                fileName: 'recording.wav',
+                text: '退避中の本文',
+                promptName: '議事録',
+                originalFileType: 'audio',
+                ownerType: 'user',
+                ownerId: 'user-id',
+                createdBy: 'user-id',
+                createdAt: new Date('2026-09-01T00:00:00.000Z'),
+            }, {
+                transcription: '復元する本文',
+            }, { expectedUpdatedAt: storedUpdatedAt })).resolves.toBeNull();
+
+            expect(mocks.transactionSet).toHaveBeenCalledOnce();
+        });
+
+        it('復元成功時も書き戻したupdatedAtを返し、割り込み痕があればnullを返す', async () => {
+            mocks.getCurrentUserId.mockReturnValue('user-id');
+            mocks.getOwnerType.mockReturnValue('user');
+            const restoreSource = {
+                id: 'document-id',
+                title: '退避中のタイトル',
+                fileName: 'recording.wav',
+                text: '退避中の本文',
+                promptName: '議事録',
+                originalFileType: 'audio',
+                ownerType: 'user' as const,
+                ownerId: 'user-id',
+                createdBy: 'user-id',
+                createdAt: new Date('2026-09-01T00:00:00.000Z'),
+            };
+
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ ownerType: 'user', ownerId: 'user-id' }),
+            });
+            mocks.getDoc.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({
+                    title: '保存後のタイトル',
+                    transcription: '保存後の本文',
+                    updatedAt: freshUpdatedAt,
+                }),
+            });
+            await expect(restoreTranscription('document-id', restoreSource, {
+                title: '保存後のタイトル',
+                transcription: '保存後の本文',
+            })).resolves.toBe(freshUpdatedAt);
+
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ ownerType: 'user', ownerId: 'user-id' }),
+            });
+            mocks.getDoc.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({
+                    title: '割り込みwriterのタイトル',
+                    transcription: '保存後の本文',
+                    updatedAt: freshUpdatedAt,
+                }),
+            });
+            await expect(restoreTranscription('document-id', restoreSource, {
+                title: '保存後のタイトル',
+                transcription: '保存後の本文',
+            })).resolves.toBeNull();
+        });
+
+        it('cacheからの読み戻しは版の証拠にせずnullを返す(フィールドが一致していても)', async () => {
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ updatedAt: storedUpdatedAt }),
+            });
+            // オフラインでcommitだけ通った場合、読み戻しはcacheの旧断面を返し得る。
+            // 書いたフィールドが偶然一致していても、fromCacheの版印は確定にしない。
+            mocks.getDoc.mockResolvedValueOnce({
+                exists: () => true,
+                metadata: { fromCache: true },
+                data: () => ({
+                    title: '更新後のタイトル',
+                    transcription: '更新後の本文',
+                    updatedAt: freshUpdatedAt,
+                }),
+            });
+
+            await expect(updateTranscription('document-id', {
+                title: '更新後のタイトル',
+                transcription: '更新後の本文',
+            }, { expectedUpdatedAt: storedUpdatedAt })).resolves.toBeNull();
+
+            expect(mocks.transactionUpdate).toHaveBeenCalledOnce();
+        });
+
+        it('更新後のupdatedAt再読込に失敗しても保存は成功としnullを返す', async () => {
+            mocks.transactionGet.mockResolvedValueOnce({
+                exists: () => true,
+                data: () => ({ updatedAt: storedUpdatedAt }),
+            });
+            mocks.getDoc.mockRejectedValueOnce(new Error('fresh read failed'));
+
+            await expect(updateTranscription('document-id', {
+                title: '再読込失敗のタイトル',
+            }, { expectedUpdatedAt: storedUpdatedAt })).resolves.toBeNull();
+
+            expect(mocks.transactionUpdate).toHaveBeenCalledOnce();
+            expect(mocks.logAudit).toHaveBeenCalledOnce();
+        });
+
+        it('競合以外のtransaction失敗は従来どおり更新失敗として包む', async () => {
+            mocks.runTransaction.mockRejectedValueOnce(new Error('transaction failed'));
+
+            await expect(updateTranscription('document-id', {
+                title: '失敗するタイトル',
+            }, { expectedUpdatedAt: storedUpdatedAt }))
+                .rejects.toThrow('文書の更新に失敗しました');
+
+            expect(mocks.logAudit).not.toHaveBeenCalled();
         });
     });
 
@@ -1059,7 +1424,7 @@ describe('firestore', () => {
 
             await expect(updateTranscription('document-id', {
                 transcription: '削って縮めた本文',
-            })).resolves.toBeUndefined();
+            })).resolves.toBeNull();
 
             expect(mocks.updateDoc).toHaveBeenCalledOnce();
         });
@@ -1134,6 +1499,21 @@ describe('firestore', () => {
                 generatedByThinkingLevel: row.data.generatedByThinkingLevel,
                 modelSelection: row.data.modelSelection,
             })));
+        });
+
+        it('cache由来の一覧取得は版印を確定として扱わない(updatedAtを剥がす)', async () => {
+            mocks.getDocs.mockResolvedValueOnce({
+                metadata: { fromCache: true },
+                forEach: (callback: (snapshot: { id: string; data: () => MockDocumentData }) => void) => {
+                    callback({ id: 'cached-document', data: () => mappingCases[0].data });
+                },
+            });
+
+            const documents = await getTranscriptions();
+
+            // サーバ確認の証拠にならない版印を下流(競合期待値・警告clear)へ流さない。
+            expect(documents[0].updatedAt).toBeUndefined();
+            expect(documents[0].text).toBe(mappingCases[0].expected);
         });
 
         it('一覧の読出しで音声メタデータを落とさない', async () => {
