@@ -6,7 +6,7 @@ import {
     where,
     getDocs,
     getDoc,
-    addDoc,
+    setDoc,
     serverTimestamp,
     updateDoc,
     doc,
@@ -38,6 +38,24 @@ export interface Relationship {
 
 const relationshipsCol = collection(db, 'relationships');
 const relationshipsLogger = createLogger('relationships');
+
+/**
+ * 関係docのID(複合キー)。firestore.rules の isApprovedSupervisorOf() が
+ * `relationships/{supervisorId}_{subordinateId}` を exists()/get() で引くため、
+ * この形式は Rules 側と厳密に一致していなければならない。
+ */
+export function buildRelationshipId(supervisorId: string, subordinateId: string): string {
+    return `${supervisorId}_${subordinateId}`;
+}
+
+/**
+ * 旧形式(addDoc によるランダムID)で保存された関係かどうか。
+ * 旧形式の doc は Rules のアドレス解決に掛からず閲覧権限の根拠にならないため、
+ * UI で「解除して再申請」への誘導に使う。
+ */
+export function isLegacyRelationship(rel: Pick<Relationship, 'id' | 'supervisorId' | 'subordinateId'>): boolean {
+    return rel.id !== buildRelationshipId(rel.supervisorId, rel.subordinateId);
+}
 
 function convertRelationshipDoc(docSnap: QueryDocumentSnapshot<DocumentData>): Relationship {
     const data = docSnap.data();
@@ -160,7 +178,11 @@ export async function requestSupervisorRelationship(subordinateId: string, super
         }
     }
 
-    await addDoc(relationshipsCol, {
+    // 複合ID(supervisorId_subordinateId)で作成する。Rules が create 時に
+    // このID形式を強制しており、同一ペアへの二重申請は doc が既に存在するため
+    // update 扱いとなり拒否される(事前チェックはメッセージ品質のために残す)。
+    const relationshipRef = doc(relationshipsCol, buildRelationshipId(supervisorProfile.uid, subordinateId));
+    await setDoc(relationshipRef, {
         supervisorId: supervisorProfile.uid,
         supervisorEmail: supervisorProfile.email,
         supervisorName: supervisorProfile.displayName || '',

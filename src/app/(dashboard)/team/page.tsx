@@ -19,7 +19,7 @@ const VIEW_DESCRIPTION: Record<TeamView, string> = {
 };
 
 function TeamPageContent() {
-    const { user } = useAuth();
+    const { user, loading } = useAuth();
     const searchParams = useSearchParams();
     const router = useRouter();
 
@@ -38,7 +38,7 @@ function TeamPageContent() {
     return (
         <>
             <PageHeader title="チーム" description={VIEW_DESCRIPTION[currentView]} icon={Users} />
-            <TeamPanel user={user} view={currentView} />
+            <TeamPanel user={user} view={currentView} authLoading={loading} />
         </>
     );
 }
