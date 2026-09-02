@@ -315,6 +315,18 @@ service cloud.firestore {
       // update / delete の許可文は意図的に無い: 監査ログは管理者を含め誰も改竄・削除できない。
     }
 
+    // clientErrors コレクション (S2-8 #13: クライアント未捕捉エラーの best-effort 収集)
+    // 書き手は src/lib/clientErrorReporter.ts のみ。userId は本人 uid か未ログインの 'GUEST' に限定し
+    // (auditLogs と同方針)、必須フィールドの欠落した形は受け付けない。更新・削除は誰もできない。
+    match /clientErrors/{errorId} {
+      allow create: if request.resource.data.userId == (request.auth != null ? request.auth.uid : 'GUEST')
+        && request.resource.data.keys().hasAll(['message', 'source', 'url', 'timestamp', 'userId', 'ownerType', 'createdAt'])
+        && request.resource.data.message is string
+        && request.resource.data.message.size() <= 4000
+        && request.resource.data.source in ['window.error', 'unhandledrejection'];
+      allow read: if isSuperuser();
+    }
+
     // systemNotifications コレクション（システムからのお知らせ）
     match /systemNotifications/{notificationId} {
       // 読み取り(単体): 管理者は全件 / 一般は公開中(published=true)のみ
