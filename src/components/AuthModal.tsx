@@ -309,7 +309,19 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
                             />
                         </div>
 
-                        <div className="text-center text-sm text-gray-500">または</div>
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="min-h-11 w-full rounded-lg bg-blue-700 px-4 py-2.5 font-medium text-white transition-colors hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-500"
+                        >
+                            {loading ? '処理中...' : mode === 'signin' ? 'ログイン' : 'アカウント作成'}
+                        </button>
+
+                        <div className="flex items-center gap-3 text-sm text-gray-500">
+                            <span aria-hidden="true" className="h-px flex-1 bg-gray-200" />
+                            または
+                            <span aria-hidden="true" className="h-px flex-1 bg-gray-200" />
+                        </div>
 
                         <button
                             type="button"
@@ -365,16 +377,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
                                 </p>
                             )}
                         </div>
-                    </div>
-
-                    <div className="sticky bottom-0 z-10 shrink-0 border-t border-gray-200 bg-white px-6 py-4">
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="min-h-11 w-full rounded-lg bg-blue-700 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-500"
-                        >
-                            {loading ? '処理中...' : mode === 'signin' ? 'ログイン' : 'アカウント作成'}
-                        </button>
                     </div>
                 </form>
             </div>
