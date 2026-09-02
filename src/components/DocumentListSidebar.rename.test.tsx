@@ -7,7 +7,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Transcription } from '@/lib/firestore';
-import { DocumentListSidebar } from './DocumentListSidebar';
+import { DOCUMENT_LIST_POLL_INTERVAL_MS, DocumentListSidebar } from './DocumentListSidebar';
 
 const mocks = vi.hoisted(() => ({
   getTranscriptions: vi.fn(),
@@ -134,10 +134,14 @@ describe('DocumentListSidebar 改名の楽観的並行性制御', () => {
   }
 
   async function pollAdvancesToOtherWriter(): Promise<void> {
+    const fetchCallsBeforePoll = mocks.getTranscriptions.mock.calls.length;
     mocks.getTranscriptions.mockResolvedValueOnce([documentAfterPoll]);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5000);
+      await vi.advanceTimersByTimeAsync(DOCUMENT_LIST_POLL_INTERVAL_MS);
     });
+    // 定期取得が実際に着弾した証人。間隔が伸びて空振りすると、以降の
+    // 「版が前進しても」の検査が何も前進していない状態で緑になる。
+    expect(mocks.getTranscriptions.mock.calls.length).toBe(fetchCallsBeforePoll + 1);
   }
 
   async function typeTitleAndSave(nextTitle: string): Promise<void> {
