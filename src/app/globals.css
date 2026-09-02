@@ -6,6 +6,11 @@
   /* 背景色・前景色は意図的に単一（ライト）テーマとする。 */
   --background: #ffffff;
   --foreground: #171717;
+  /* プレースホルダ文字色。@theme inline の --color-muted と同値だが、::placeholder は
+     手書き規則から参照する。@theme inline の変数は :root へ出力されず var() が
+     guaranteed-invalid になるため（下の body font-family と同じ理由）、実 :root 変数として持つ。
+     white 上 10.31:1（Tailwind v4 preflight 既定の 50% アルファ ≒3.4:1 を置き換える）。 */
+  --color-placeholder: #374151;
 }
 
 @theme inline {
@@ -72,4 +77,12 @@ body {
      var() は guaranteed-invalid になり font-family が preflight 既定へ静かに落ちる。 */
   font-family: var(--font-ui), "Noto Sans JP", Arial, Helvetica,
     "Hiragino Sans", "Yu Gothic Medium", "Yu Gothic", Meiryo, sans-serif;
+}
+
+/* 入力欄プレースホルダの可読性（b4f 実測: v4 preflight 既定は本文色の 50% アルファ＝
+   白上 3.37–3.40:1 で WCAG 未達）。@import "tailwindcss" より後に置き、同詳細度の
+   preflight ::placeholder を後勝ちで上書きする。opacity:1 は Firefox の既定を打ち消す。 */
+::placeholder {
+  color: var(--color-placeholder);
+  opacity: 1;
 }
