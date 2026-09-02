@@ -360,7 +360,7 @@ describe('SettingsPanel', () => {
         expect(loadSetters.guestSyncFailed).toHaveBeenLastCalledWith(true);
         expect(loadSetters.feedback).toHaveBeenLastCalledWith({
             kind: 'warning',
-            message: '前回のゲストユーザー向けデフォルトプロンプト同期が失敗しています。',
+            message: '前回のゲスト用共通プロンプトの同期が失敗しています。',
         });
 
         arrangePanelState({
@@ -368,7 +368,7 @@ describe('SettingsPanel', () => {
             originalSettings: failedSettings,
             feedback: {
                 kind: 'warning',
-                message: '前回のゲストユーザー向けデフォルトプロンプト同期が失敗しています。',
+                message: '前回のゲスト用共通プロンプトの同期が失敗しています。',
             },
             guestSyncFailed: true,
         });
@@ -376,7 +376,7 @@ describe('SettingsPanel', () => {
         const restoredTree = renderPanel();
 
         expect(getText(restoredTree)).toContain(
-            '前回のゲストユーザー向けデフォルトプロンプト同期が失敗しています。',
+            '前回のゲスト用共通プロンプトの同期が失敗しています。',
         );
         expect(findButton(restoredTree, '同期を再試行')).not.toBeNull();
     });
@@ -397,7 +397,7 @@ describe('SettingsPanel', () => {
         expect(loadSetters.guestSyncFailed).toHaveBeenLastCalledWith(true);
         expect(loadSetters.feedback).toHaveBeenLastCalledWith({
             kind: 'warning',
-            message: 'ゲストユーザー向けデフォルトプロンプト同期が完了していません。',
+            message: 'ゲスト用共通プロンプトの同期が完了していません。',
         });
 
         arrangePanelState({
@@ -405,7 +405,7 @@ describe('SettingsPanel', () => {
             originalSettings: pendingSettings,
             feedback: {
                 kind: 'warning',
-                message: 'ゲストユーザー向けデフォルトプロンプト同期が完了していません。',
+                message: 'ゲスト用共通プロンプトの同期が完了していません。',
             },
             guestSyncFailed: true,
         });
@@ -444,7 +444,7 @@ describe('SettingsPanel', () => {
         expect(setters.guestSyncFailed).toHaveBeenCalledWith(true);
         expect(setters.feedback).toHaveBeenCalledWith({
             kind: 'warning',
-            message: '設定は保存しましたが、ゲストユーザーのデフォルトプロンプトを同期できませんでした。',
+            message: '設定は保存しましたが、ゲスト用共通プロンプトを同期できませんでした。',
         });
     });
 
@@ -482,7 +482,7 @@ describe('SettingsPanel', () => {
         const setters = arrangePanelState({
             feedback: {
                 kind: 'warning',
-                message: '設定は保存しましたが、ゲストユーザーのデフォルトプロンプトを同期できませんでした。',
+                message: '設定は保存しましたが、ゲスト用共通プロンプトを同期できませんでした。',
             },
             guestSyncFailed: true,
         });
@@ -497,7 +497,7 @@ describe('SettingsPanel', () => {
         expect(setters.guestSyncFailed).toHaveBeenCalledWith(false);
         expect(setters.feedback).toHaveBeenLastCalledWith({
             kind: 'success',
-            message: 'ゲストユーザーのデフォルトプロンプトを同期しました。',
+            message: 'ゲスト用共通プロンプトを同期しました。',
         });
     });
 
@@ -505,7 +505,7 @@ describe('SettingsPanel', () => {
         const setters = arrangePanelState({
             feedback: {
                 kind: 'warning',
-                message: '前回のゲストユーザー向けデフォルトプロンプト同期が失敗しています。',
+                message: '前回のゲスト用共通プロンプトの同期が失敗しています。',
             },
             guestSyncFailed: true,
         });
@@ -516,7 +516,7 @@ describe('SettingsPanel', () => {
         expect(setters.guestSyncFailed).toHaveBeenCalledWith(true);
         expect(setters.feedback).toHaveBeenLastCalledWith({
             kind: 'error',
-            message: 'ゲストユーザーのデフォルトプロンプトを同期できませんでした。再試行してください。',
+            message: 'ゲスト用共通プロンプトを同期できませんでした。再試行してください。',
         });
     });
 

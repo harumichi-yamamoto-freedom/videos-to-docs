@@ -220,7 +220,7 @@ export function getGeminiModelLabel(model?: string | null): string {
     if (canonicalModel === GEMINI_DEFAULT_MODEL_SENTINEL) {
         const defaultModelLabel = GEMINI_MODEL_MAP.get(DEFAULT_GEMINI_MODEL)?.label
             ?? DEFAULT_GEMINI_MODEL;
-        return `デフォルト（${defaultModelLabel}）`;
+        return `標準（${defaultModelLabel}）`;
     }
     return GEMINI_MODEL_MAP.get(canonicalModel)?.label || canonicalModel;
 }

@@ -51,7 +51,7 @@ export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
     const resolvedDefaultModel = resolveGeminiModel(GEMINI_DEFAULT_MODEL_SENTINEL);
     const defaultOption = {
         value: GEMINI_DEFAULT_MODEL_SENTINEL,
-        label: `デフォルト（現在: ${getGeminiModelLabel(resolvedDefaultModel)}）`,
+        label: `標準（現在: ${getGeminiModelLabel(resolvedDefaultModel)}）`,
         description: 'アプリの推奨モデルに自動追従します',
     };
     const comparisonOptions = [defaultOption, ...GEMINI_MODEL_OPTIONS];

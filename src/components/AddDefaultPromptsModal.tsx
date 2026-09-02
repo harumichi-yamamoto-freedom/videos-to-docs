@@ -136,7 +136,7 @@ export function AddDefaultPromptsModal({
                         tabIndex={templates.length === 0 ? -1 : undefined}
                         className="text-xl font-bold text-gray-900 focus:outline-none"
                     >
-                        デフォルトプロンプトを追加
+                        テンプレートから追加
                     </h2>
                     <button
                         type="button"

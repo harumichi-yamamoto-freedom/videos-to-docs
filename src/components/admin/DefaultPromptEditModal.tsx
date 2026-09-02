@@ -186,7 +186,7 @@ export default function DefaultPromptEditModal({
             !== effectiveThinkingLevel(selectedModel, selectedThinkingLevel);
 
     const headingText = title
-        || (mode === 'create' ? 'デフォルトプロンプトを追加' : 'デフォルトプロンプトを編集');
+        || (mode === 'create' ? 'テンプレートを追加' : 'テンプレートを編集');
 
     const rememberConfirmationTrigger = () => {
         const activeElement = document.activeElement;
@@ -303,7 +303,7 @@ export default function DefaultPromptEditModal({
         ? `「${headingText}」を削除しますか？`
         : '未保存の変更があります';
     const confirmationDescription = confirmation?.type === 'delete'
-        ? '削除したデフォルトプロンプトは元に戻せません。'
+        ? '削除したテンプレートは元に戻せません。'
         : confirmation?.action === 'close'
             ? '閉じると、保存していない変更は失われます。'
             : '表示モードに戻ると、保存していない変更は失われます。';

@@ -282,7 +282,7 @@ const PromptEditSessionModal: React.FC<PromptEditSessionModalProps> = ({
                         このプロンプトは編集・削除できません。
                     </p>
                     <p className="mt-1 text-xs text-amber-700">
-                        未ログインユーザー向けのデフォルトプロンプトは保護されています。
+                        全員に共通のプロンプトです。ログインすると、自分のプロンプトを作成・編集できます。
                     </p>
                 </div>
             </div>
@@ -290,7 +290,7 @@ const PromptEditSessionModal: React.FC<PromptEditSessionModalProps> = ({
     ) : prompt.isDefault ? (
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
             <p className="text-xs text-blue-800">
-                ℹ️ このプロンプトはデフォルトプロンプトです。
+                ℹ️ テンプレートから追加したプロンプトです。編集しても元のテンプレートは変わりません。
             </p>
         </div>
     ) : undefined;

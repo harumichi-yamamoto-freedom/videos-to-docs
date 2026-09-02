@@ -118,7 +118,7 @@ describe('geminiModels', () => {
             );
             expect(defaultOption).toBeDefined();
             expect(getGeminiModelLabel(GEMINI_DEFAULT_MODEL_SENTINEL)).toBe(
-                `デフォルト（${defaultOption?.label}）`,
+                `標準（${defaultOption?.label}）`,
             );
         });
 

@@ -22,10 +22,13 @@ export const BulkPromptSelector: React.FC<BulkPromptSelectorProps> = ({
     }
 
     return (
-        <fieldset className="rounded-lg border border-purple-200 bg-purple-50 p-4">
+        <fieldset className="min-w-0 rounded-lg border border-purple-200 bg-purple-50 p-4">
             <legend className="px-1 text-sm font-medium text-purple-900">
-                デフォルトプロンプト（ファイル追加時に適用します）
+                適用するプロンプトを選ぶ
             </legend>
+            <p className="mb-3 text-xs leading-relaxed text-purple-800">
+                これから追加するファイルすべてに適用されます。ファイルごとの変更は追加後にできます。プロンプトの追加・編集は「プロンプトの管理」から行えます。
+            </p>
             <div className="space-y-1">
                 {availablePrompts.map(prompt => {
                     const checkboxId = `${groupId}-${prompt.id}`;

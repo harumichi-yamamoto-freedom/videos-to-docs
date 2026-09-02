@@ -82,8 +82,8 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                 setFeedback({
                     kind: 'warning',
                     message: settingsData.lastGuestSyncStatus === 'failed'
-                        ? '前回のゲストユーザー向けデフォルトプロンプト同期が失敗しています。'
-                        : 'ゲストユーザー向けデフォルトプロンプト同期が完了していません。',
+                        ? '前回のゲスト用共通プロンプトの同期が失敗しています。'
+                        : 'ゲスト用共通プロンプトの同期が完了していません。',
                 });
             }
         } catch (error) {
@@ -123,7 +123,7 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
         if (duplicateName) {
             setFeedback({
                 kind: 'error',
-                message: `デフォルトプロンプト名「${duplicateName}」が重複しています。名前は一意にしてください。`,
+                message: `テンプレート名「${duplicateName}」が重複しています。名前は一意にしてください。`,
             });
             return;
         }
@@ -146,7 +146,7 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
             setFeedback(syncFailed
                 ? {
                     kind: 'warning',
-                    message: '設定は保存しましたが、ゲストユーザーのデフォルトプロンプトを同期できませんでした。',
+                    message: '設定は保存しましたが、ゲスト用共通プロンプトを同期できませんでした。',
                 }
                 : {
                     kind: 'success',
@@ -164,7 +164,7 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                 setFeedback({
                     kind: 'warning',
                     message: syncFailed
-                        ? '設定は保存しましたが、ゲストユーザーのデフォルトプロンプト同期と監査ログ記録に失敗しました。'
+                        ? '設定は保存しましたが、ゲスト用共通プロンプトの同期と監査ログ記録に失敗しました。'
                         : '設定は保存しましたが、監査ログを記録できませんでした。',
                 });
             }
@@ -187,14 +187,14 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
             setGuestSyncFailed(false);
             setFeedback({
                 kind: 'success',
-                message: 'ゲストユーザーのデフォルトプロンプトを同期しました。',
+                message: 'ゲスト用共通プロンプトを同期しました。',
             });
         } catch (error) {
             adminSettingsPanelLogger.error('ゲストデフォルトプロンプトの再同期に失敗', error);
             setGuestSyncFailed(true);
             setFeedback({
                 kind: 'error',
-                message: 'ゲストユーザーのデフォルトプロンプトを同期できませんでした。再試行してください。',
+                message: 'ゲスト用共通プロンプトを同期できませんでした。再試行してください。',
             });
         } finally {
             setSyncingGuestPrompts(false);
@@ -258,7 +258,7 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
             <div>
                 <div className="mb-6">
                     <h2 className="text-2xl font-bold text-gray-900">システム設定</h2>
-                    <p className="text-gray-600 text-sm mt-1">プロンプトと文書のサイズ上限、デフォルトプロンプトを設定</p>
+                    <p className="text-gray-600 text-sm mt-1">プロンプトと文書のサイズ上限、プロンプトテンプレートを設定</p>
                 </div>
                 <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-800">
                     <p className="font-medium">{loadError ?? '設定を読み込めませんでした。'}</p>
@@ -278,7 +278,7 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
         <div>
             <div className="mb-6">
                 <h2 className="text-2xl font-bold text-gray-900">システム設定</h2>
-                <p className="text-gray-600 text-sm mt-1">プロンプトと文書のサイズ上限、デフォルトプロンプトを設定</p>
+                <p className="text-gray-600 text-sm mt-1">プロンプトと文書のサイズ上限、プロンプトテンプレートを設定</p>
             </div>
 
             {feedback && (
@@ -352,9 +352,9 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                 <div className="bg-gray-50 p-6 rounded-lg">
                     <div className="flex items-center justify-between mb-4">
                         <div>
-                            <h3 className="text-lg font-medium text-gray-900">デフォルトプロンプト</h3>
+                            <h3 className="text-lg font-medium text-gray-900">プロンプトテンプレート</h3>
                             <p className="text-xs text-gray-500 mt-1">
-                                新規ユーザーに自動的に作成されるプロンプトテンプレート
+                                新規ユーザーに自動で作成されるプロンプトの雛形。ユーザーは「テンプレートから追加」でも取り込め、ログイン前の共通プロンプトにも同期されます。
                             </p>
                         </div>
                         <button
@@ -400,7 +400,7 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
 
                         {defaultPrompts.length === 0 && (
                             <div className="text-center py-8 text-gray-500">
-                                デフォルトプロンプトがありません。「追加」ボタンで作成してください。
+                                テンプレートがありません。「追加」ボタンで作成してください。
                             </div>
                         )}
                     </div>
