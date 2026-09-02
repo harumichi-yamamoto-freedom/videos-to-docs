@@ -15,6 +15,7 @@ const reactHarness = vi.hoisted(() => ({
 const hookMocks = vi.hoisted(() => ({
     resetProcessing: vi.fn(),
     forceDiscardProcessing: vi.fn(),
+    handleStartProcessing: vi.fn(),
     handleRemoveFile: vi.fn(),
     clearFiles: vi.fn(),
     statuses: [] as FileProcessingStatus[],
@@ -29,6 +30,9 @@ vi.mock('react', async () => {
     return {
         ...actual,
         useCallback: <T,>(callback: T) => callback,
+        // S2-2: 離脱ダイアログ用の ref / id。描画器なしで呼ぶので本物は使えない
+        useRef: <T,>(initialValue: T) => ({ current: initialValue }),
+        useId: () => 'home-test-id',
         useEffect: (effect: () => void | (() => void)) => {
             reactHarness.effects.push(() => { effect(); });
         },
@@ -123,12 +127,17 @@ vi.mock('@/hooks/useVideoProcessing', () => ({
 
 vi.mock('@/hooks/useProcessingWorkflow', () => ({
     useProcessingWorkflow: () => ({
-        handleStartProcessing: vi.fn(),
+        handleStartProcessing: hookMocks.handleStartProcessing,
         handleResumeFile: vi.fn(),
         workflowError: null,
         clearWorkflowError: vi.fn(),
         reportWorkflowError: vi.fn(),
     }),
+}));
+
+// S2-2: 離脱ガードは next/navigation を使う。この配線テストの対象外なので差し替える
+vi.mock('@/hooks/useNavigationGuard', () => ({
+    useNavigationGuard: () => ({ leaveConfirmation: null, approveLeave: vi.fn(), denyLeave: vi.fn() }),
 }));
 
 vi.mock('@/components/PromptListSidebar', () => ({ PromptListSidebar: () => null }));
@@ -456,5 +465,33 @@ describe('per-file removal gate (G3)', () => {
         expect(hookMocks.handleRemoveFile).not.toHaveBeenCalled();
         expect(hookMocks.statuses).toHaveLength(1);
         expect(render().text).not.toContain('保存されていない生成結果があります');
+    });
+});
+
+describe('bitrate wiring (S2-1)', () => {
+    beforeEach(() => {
+        hookMocks.fileIds = ['media-1'];
+        hookMocks.handleStartProcessing.mockResolvedValue({ ok: true });
+    });
+
+    it('既定の 128k を開始処理へ渡す (192k 固定だと約 10 分で送れなくなる)', async () => {
+        await click('変換・文書生成を開始する');
+
+        expect(hookMocks.handleStartProcessing).toHaveBeenCalledTimes(1);
+        expect(hookMocks.handleStartProcessing.mock.calls[0][2]).toBe('128k');
+        expect(hookMocks.handleStartProcessing.mock.calls[0][3]).toBe(44100);
+    });
+
+    it('画面で選んだビットレートを開始処理へ渡す', async () => {
+        const settings = render().elements.find(element =>
+            typeof element.props.onBitrateChange === 'function'
+        );
+        expect(settings, 'ConversionSettings が配線されていない').toBeDefined();
+        expect(settings!.props.bitrate).toBe('128k');
+
+        (settings!.props.onBitrateChange as (bitrate: string) => void)('64k');
+        await click('変換・文書生成を開始する');
+
+        expect(hookMocks.handleStartProcessing.mock.calls[0][2]).toBe('64k');
     });
 });
