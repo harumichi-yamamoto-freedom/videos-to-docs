@@ -31,6 +31,10 @@ import { createLogger } from '@/lib/logger';
 
 const documentListLogger = createLogger('DocumentListSidebar');
 
+// 一覧の定期取り直し間隔。本文つき最大100件を毎回転送するため、5秒では
+// 待機中のタブだけで読取量が膨らむ(#9)。表示中のタブでも30秒未満にしない。
+export const DOCUMENT_LIST_POLL_INTERVAL_MS = 30_000;
+
 export type DocumentListStatus = 'loading' | 'success' | 'error';
 
 export interface DocumentListStateChange {
@@ -91,7 +95,7 @@ const getTimestampKey = (timestamp: ComparableTimestamp | undefined): string | n
 };
 
 const hashText = (value: string): string => {
-    // 5秒ポーリングで長い本文を比較するため、本文そのものではなく安定した指紋を使う。
+    // 定期取り直しで長い本文を比較するため、本文そのものではなく安定した指紋を使う。
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
         hash ^= value.charCodeAt(index);
@@ -341,14 +345,42 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
 
         if (subjectKey === null) return;
 
-        void loadTranscriptionsForSubject(subjectKey, ownerId, ownerType, generation, true);
-        const interval = window.setInterval(() => {
-            if (activeFetchRequestRef.current !== null) return;
-            void loadTranscriptionsForSubject(subjectKey, ownerId, ownerType, generation, false);
-        }, 5000);
+        // 非表示タブでは一覧の読取(本文つき最大100件)を一切発生させない。初回取得も
+        // 表示されるまで保留し、表示中だけ DOCUMENT_LIST_POLL_INTERVAL_MS ごとに静かに
+        // 取り直す。非表示→表示の復帰時は即時に1回取り直してから周期を仕切り直す。
+        let pollTimer: number | null = null;
+        const stopPolling = () => {
+            if (pollTimer === null) return;
+            window.clearInterval(pollTimer);
+            pollTimer = null;
+        };
+        const startPolling = () => {
+            stopPolling();
+            pollTimer = window.setInterval(() => {
+                if (activeFetchRequestRef.current !== null) return;
+                void loadTranscriptionsForSubject(subjectKey, ownerId, ownerType, generation, false);
+            }, DOCUMENT_LIST_POLL_INTERVAL_MS);
+        };
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                stopPolling();
+                return;
+            }
+            if (activeFetchRequestRef.current === null) {
+                void loadTranscriptionsForSubject(subjectKey, ownerId, ownerType, generation, false);
+            }
+            startPolling();
+        };
+
+        if (!document.hidden) {
+            void loadTranscriptionsForSubject(subjectKey, ownerId, ownerType, generation, true);
+            startPolling();
+        }
+        document.addEventListener('visibilitychange', handleVisibilityChange);
 
         return () => {
-            window.clearInterval(interval);
+            stopPolling();
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
             invalidatePendingRequests();
         };
     }, [invalidatePendingRequests, loadTranscriptionsForSubject, ownerId, ownerType, subjectKey]);
