@@ -1,6 +1,23 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ============================================================
+    // 意味論の前提(エミュレータ実測で確認済み・2026-09-02):
+    //
+    //  - get / update / delete の resource.data は「実ドキュメントの中身」。
+    //    フィールド欠落の後方互換フォールバック(移行期doc)はここでだけ意味を持つ。
+    //
+    //  - 🔴 list の resource.data は「クエリの等値制約から作られた仮想doc」。
+    //    where で絞っていないフィールドは【存在しない】ものとして評価される。
+    //    → 「欠落なら guest 扱い」型のフォールバックを list に使うと、
+    //      絞っていないクエリが全部ゲスト共有と判定され、未ログインでも
+    //      全ユーザーのデータを列挙できてしまう(fail-open)。
+    //    → list 側は逆に「必要なフィールドがクエリで固定されていること」を
+    //      前提条件にし、欠けていれば閉じる(fail-closed)。
+    //    このため単体doc用(canAccessExisting/canMutateExisting)と
+    //    list用(canListExisting)の判定は別関数として分離している。混ぜないこと。
+    // ============================================================
+
     // ログイン中かどうかを判定
     function isSignedIn() {
       return request.auth != null;
@@ -26,7 +43,7 @@ service cloud.firestore {
         && resource.data.ownerId == request.resource.data.ownerId;
     }
 
-    // 管理者かどうかを判定
+    // 管理者かどうかを判定(users/{uid} の1点読みのみ)
     function isSuperuser() {
       return request.auth != null
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
@@ -41,12 +58,30 @@ service cloud.firestore {
         );
     }
 
-    // 読み取り/更新/削除判定（既存ドキュメントの所有に基づく）
+    // 移行期間中: ownerType / ownerId フィールドがない実docは一時的にゲスト扱い。
+    // ⚠ 実docを読む文脈(get)専用。list の仮想docに使うと fail-open になる。
+    function docOwnerType() {
+      return resource.data.keys().hasAll(['ownerType']) ? resource.data.ownerType : 'guest';
+    }
+
+    function docOwnerId() {
+      return resource.data.keys().hasAll(['ownerId']) ? resource.data.ownerId : 'GUEST';
+    }
+
+    // 単体doc(get)の所有判定。移行期フォールバックを効かせる。
+    //
+    // 裁定(2026-09-02): フィールド欠落docへの get は開けたまま残す。
+    //  - このクラスのdocは認証導入前(ゲストパラダイム)のデータで、歴史的に共有物。
+    //  - 等値 where はフィールドが実在するdocしか返さないため、欠落docは
+    //    製品のどの一覧クエリにも載らない=ランダムな docId を知る直リンクのみ。
+    //  - fail-closed に倒すと、身元を持たないゲスト作成者から自分の旧docへの
+    //    到達手段が恒久に消える(回復不能)。
+    //  - あるべき終着は scripts/migrate-existing-data.ts でのバックフィル完了後に
+    //    このフォールバック自体を削除すること(残件として報告済み)。
     function canAccessExisting() {
-      // 移行期間中: ownerType フィールドがない場合は一時的にゲスト扱い
-      let ownerType = resource.data.keys().hasAll(['ownerType']) ? resource.data.ownerType : 'guest';
-      let ownerId = resource.data.keys().hasAll(['ownerId']) ? resource.data.ownerId : 'GUEST';
-      
+      let ownerType = docOwnerType();
+      let ownerId = docOwnerId();
+
       return (
         ownerType == "guest" // ゲスト共有: 誰でもOK
       ) || (
@@ -56,78 +91,195 @@ service cloud.firestore {
       );
     }
 
+    // 変異(update/delete)の所有判定。移行期フォールバック【無し】。
+    //
+    // 裁定(2026-09-02): 読み(get)と違い、書き換え・削除は fail-closed に倒す。
+    //  - フィールド欠落docは製品UIから到達不能(上記)なので、正規の導線で
+    //    これを update / delete するフローは存在しない=閉じても何も壊れない。
+    //  - 実際に塞いだ穴は【delete だけ】(エミュレータ実測 2026-09-02):
+    //    旧ルールでは docId を知る誰でも欠落docを削除できた(破壊的)。
+    //    update は ownershipUnchanged() が欠落フィールドを参照して評価エラー
+    //    → 元から拒否されていた。update 側にこの関数を使うのは「評価エラー
+    //    頼みの拒否」を明示的な条件に置き換える明示化・堅牢化であって、
+    //    穴を塞いだわけではない。
+    // ゲスト共有doc(フィールド実在)が誰でも変異できるのは従来どおり
+    // (ゲストパラダイムの仕様。本便のスコープ外)。
+    function canMutateExisting() {
+      return resource.data.keys().hasAll(['ownerType', 'ownerId'])
+        && (
+          resource.data.ownerType == "guest"
+          || (isSignedIn()
+              && resource.data.ownerType == "user"
+              && resource.data.ownerId == request.auth.uid)
+        );
+    }
+
+    // ---- list(クエリ)専用の判定 ----------------------------------------
+    // 各関数は「クエリが該当フィールドをこの値に固定していることを証明できるか」を
+    // 見る。仮想docではフィールド欠落 = hasAll が false になり、その分岐は閉じる。
+
+    // ゲスト共有の一覧: where('ownerType','==','guest') を要求
+    function queryPinsGuestShared() {
+      return resource.data.keys().hasAll(['ownerType'])
+        && resource.data.ownerType == "guest";
+    }
+
+    // 本人の一覧: where('ownerId','==',自分のuid) を要求
+    function queryPinsOwner() {
+      return isSignedIn()
+        && resource.data.keys().hasAll(['ownerId'])
+        && resource.data.ownerId == request.auth.uid;
+    }
+
+    // 承認済み上司による部下の一覧: where('ownerId','==',部下uid) を要求。
+    // ownerId が1値に固定されるため、関係docのパスが静的に定まり、
+    // ページ内の全行が同一の関係docを引く(参照上限を件数比例で食わない)。
+    function queryPinsSupervisedOwner() {
+      return isSignedIn()
+        && resource.data.keys().hasAll(['ownerId'])
+        && isApprovedSupervisorOf(resource.data.ownerId);
+    }
+
+    // 一覧の入口。参照コストの安い順(前2つはドキュメント参照ゼロ)。
+    // isSuperuser() は管理画面の横断クエリ(音声ファイル管理など、owner で
+    // 絞らない/絞れないクエリ)のための分岐。
+    function canListExisting() {
+      return queryPinsGuestShared()
+        || queryPinsOwner()
+        || queryPinsSupervisedOwner()
+        || isSuperuser();
+    }
+
+    // relationships の一覧: クエリが supervisorId == 自分 か subordinateId == 自分 を
+    // 固定している形だけを通す。isRelationshipParticipant() を list に流用しないのは、
+    // 仮想docで片側フィールドが欠落した時の評価をエラー吸収(CELの||)に
+    // 依存させないため。hasAll ガードで両分岐とも決定的に評価される。
+    //
+    // ⚠ 効き目の実測(エミュレータ 2026-09-02): Firestore は list 仮想docの
+    //   欠落フィールド参照エラーを分岐 false として吸収するため、この関数は
+    //   isRelationshipParticipant() と観測可能な差を作れない(等価変異)。
+    //   価値は堅牢化(吸収仕様への非依存)と意図の明示であり、
+    //   「この関数があるから安全」の根拠には使わないこと。
+    function queryPinsRelationshipParticipant() {
+      return isSignedIn()
+        && (
+          (resource.data.keys().hasAll(['supervisorId'])
+            && resource.data.supervisorId == request.auth.uid)
+          || (resource.data.keys().hasAll(['subordinateId'])
+            && resource.data.subordinateId == request.auth.uid)
+        );
+    }
+
+    // ---- 承認済み上司の読取判定 ------------------------------------------
+    //
+    // 不変条件: 権限はパスではなく本文が決める。
+    //   relationships/{supervisorId}_{subordinateId} というパスは関係docを引く
+    //   入口にすぎない(Rules にはクエリが無く、決定的IDでなければ
+    //   「この閲覧者はこのownerの承認済み上司か」を1点読みで引けない)。
+    //   パスが当たっても
+    //     supervisorId == 閲覧者 / subordinateId == 対象owner / status == approved
+    //   の3点を本文で必ず照合する。これにより
+    //   (a) uid に '_' が含まれてパスの区切りが曖昧になっても、
+    //   (b) 決定的ID化より前に作られた旧docが同じパスに居ても、
+    //   照合が落ちるので権限は生まれない。
+    function isApprovedSupervisorOf(ownerId) {
+      let relPath = /databases/$(database)/documents/relationships/$(request.auth.uid + '_' + ownerId);
+
+      return isSignedIn()
+        && exists(relPath)
+        && get(relPath).data.status == "approved"
+        && get(relPath).data.supervisorId == request.auth.uid
+        && get(relPath).data.subordinateId == ownerId;
+    }
+
+    // 承認済み上司による「部下コンテンツの単体閲覧」分岐。
+    //
+    // 不変条件: 読み取り専用。create / update / delete には決して足さないこと。
+    //   UI(TeamPanel)の約束は「承認すると閲覧権限が付与されます」=閲覧のみで、
+    //   詳細モーダルも isEditable={false} で開く。書込みを足すと約束と乖離する。
+    function canReadAsSupervisor() {
+      return isSignedIn() && isApprovedSupervisorOf(docOwnerId());
+    }
+
     // プロンプトコレクションのルール
     match /prompts/{promptId} {
-      // 読み取り: 存在確認は誰でも可能、存在する場合は所有権チェック
+      // 読み取り(単体): 存在確認は誰でも可能、存在する場合は所有権チェック、
+      //   または承認済み上司による部下コンテンツの閲覧
       allow get: if !exists(/databases/$(database)/documents/prompts/$(promptId))
-        || canAccessExisting();
+        || canAccessExisting()
+        || canReadAsSupervisor();
 
-      // リスト取得: 所有権チェック
-      allow list: if canAccessExisting();
+      // リスト取得: クエリが「ゲスト共有 / 自分 / 承認済み部下」のいずれかに
+      //   絞り込まれていること(絞られていなければ拒否)。管理者は横断可。
+      allow list: if canListExisting();
 
       // 作成: ゲスト/ユーザーによる通常作成、または管理者によるゲストデフォルトプロンプト作成
-      allow create: if isGuestCreate() 
+      allow create: if isGuestCreate()
         || isUserCreate()
-        || (isSuperuser() 
-            && request.resource.data.ownerType == "guest" 
+        || (isSuperuser()
+            && request.resource.data.ownerType == "guest"
             && request.resource.data.ownerId == "GUEST"
             && request.resource.data.isDefault == true);
 
-      // 更新: 通常の更新、または管理者によるゲストデフォルトプロンプト更新
-      allow update: if (canAccessExisting() 
+      // 更新: 通常の更新(移行期フォールバック無し)、または管理者によるゲストデフォルトプロンプト更新
+      allow update: if (canMutateExisting()
         && ownershipUnchanged()
-        && !(resource.data.keys().hasAll(['ownerType', 'isDefault']) 
-            && resource.data.ownerType == "guest" 
+        && !(resource.data.keys().hasAll(['ownerType', 'isDefault'])
+            && resource.data.ownerType == "guest"
             && resource.data.isDefault == true))
         || (isSuperuser()
             && resource.data.keys().hasAll(['ownerType', 'isDefault'])
-            && resource.data.ownerType == "guest" 
+            && resource.data.ownerType == "guest"
             && resource.data.isDefault == true
             && ownershipUnchanged());
 
-      // 削除: 通常の削除、または管理者によるゲストデフォルトプロンプト削除
-      allow delete: if (canAccessExisting()
+      // 削除: 通常の削除(移行期フォールバック無し)、または管理者によるゲストデフォルトプロンプト削除
+      allow delete: if (canMutateExisting()
         && !(resource.data.keys().hasAll(['ownerType', 'isDefault'])
-            && resource.data.ownerType == "guest" 
+            && resource.data.ownerType == "guest"
             && resource.data.isDefault == true))
         || (isSuperuser()
             && resource.data.keys().hasAll(['ownerType', 'isDefault'])
-            && resource.data.ownerType == "guest" 
+            && resource.data.ownerType == "guest"
             && resource.data.isDefault == true);
     }
 
     // 生成文書コレクションのルール
     match /transcriptions/{docId} {
-      // 読み取り
-      allow get, list: if canAccessExisting();
+      // 読み取り(単体): 所有権チェック、または承認済み上司による部下コンテンツの閲覧
+      allow get: if canAccessExisting() || canReadAsSupervisor();
+
+      // リスト取得: クエリが「ゲスト共有 / 自分 / 承認済み部下」のいずれかに
+      //   絞り込まれていること(絞られていなければ拒否)。管理者は横断可。
+      allow list: if canListExisting();
 
       // 作成
       allow create: if isGuestCreate() || isUserCreate();
 
-      // 更新
-      allow update: if canAccessExisting() && ownershipUnchanged();
+      // 更新: 上司分岐を足さない(閲覧のみ)。移行期フォールバック無し。
+      allow update: if canMutateExisting() && ownershipUnchanged();
 
-      // 削除
-      allow delete: if canAccessExisting();
+      // 削除: 上司分岐を足さない(閲覧のみ)。移行期フォールバック無し。
+      allow delete: if canMutateExisting();
     }
 
     // users コレクション
     match /users/{userId} {
       // ログイン済みユーザーは誰のプロファイルでも読み取り可能
       allow get: if request.auth != null;
-      
+
       // 管理者はすべてのユーザーを読み取り可能
       allow list: if isSuperuser();
-      
+
       // ユーザープロファイルの作成（自分のみ）
       allow create: if request.auth != null && request.auth.uid == userId;
-      
+
       // ユーザープロファイルの更新（自分のみ、superuserフィールドは変更不可）
-      allow update: if request.auth != null 
+      allow update: if request.auth != null
         && request.auth.uid == userId
-        && (!request.resource.data.keys().hasAll(['superuser']) || 
+        && (!request.resource.data.keys().hasAll(['superuser']) ||
             resource.data.superuser == request.resource.data.superuser);
-      
+
       // 削除: 自分のプロファイルのみ削除可能
       allow delete: if request.auth != null && request.auth.uid == userId;
 
@@ -140,7 +292,7 @@ service cloud.firestore {
     match /adminSettings/{doc} {
       // 読み取り: 全員可能（設定を参照するため）
       allow read: if true;
-      
+
       // 書き込み: 管理者のみ可能
       allow write: if isSuperuser();
     }
@@ -149,18 +301,24 @@ service cloud.firestore {
     match /auditLogs/{logId} {
       // 誰でも書き込み可能（システムログ記録用）
       allow create: if true;
-      
+
       // 管理者のみ読み取り可能
       allow read: if isSuperuser();
     }
 
     // systemNotifications コレクション（システムからのお知らせ）
     match /systemNotifications/{notificationId} {
-      // 読み取り: 管理者は全件 / 一般は公開中（published=true）のみ
-      // 旧データには published フィールドが無いため、欠落時は公開扱い（後方互換）
-      allow read: if isSuperuser()
+      // 読み取り(単体): 管理者は全件 / 一般は公開中(published=true)のみ
+      // 旧データには published フィールドが無いため、実docでの欠落時は公開扱い(後方互換)
+      allow get: if isSuperuser()
         || !('published' in resource.data)
         || resource.data.published == true;
+
+      // リスト取得: 一般は where('published','==',true) をクエリで固定した形のみ。
+      // ⚠ get 側の「欠落時は公開扱い」を list に持ち込むと、仮想docには published が
+      //   無い=絞っていないクエリが全部通り、下書き(published=false)が漏れる。
+      allow list: if isSuperuser()
+        || (resource.data.keys().hasAll(['published']) && resource.data.published == true);
 
       // 作成: 管理者のみ
       allow create: if isSuperuser()
@@ -177,25 +335,64 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
-    // relationships コレクション
+    // relationships コレクション(上司-部下の承認関係)
+    //
+    // このコレクションは prompts / transcriptions の閲覧権限の根拠になる。
+    // データモデル: 1ペア1ドキュメント。docID = {supervisorId}_{subordinateId} に固定。
+    // ライフサイクル: 部下が pending で作成(申請) → 上司が approved に更新(承認)
+    //               → どちらかが削除(拒否/解除/取消)。この3遷移以外は存在しない。
     match /relationships/{relationshipId} {
-      allow get, list: if isRelationshipParticipant();
+      // IDと本文の対応を書込み時に固定し、承認済みdocが必ず正規パスに載るようにする。
+      // (権限の可否そのものは isApprovedSupervisorOf() 側の本文照合が決める。
+      //  ここはあくまで「引ける場所に置く」ための制約。)
+      function isCanonicalId() {
+        return relationshipId ==
+          request.resource.data.supervisorId + '_' + request.resource.data.subordinateId;
+      }
 
+      // 参照(単体): 当事者(上司・部下)のみ。第三者は関係の存在すら見えない。
+      allow get: if isRelationshipParticipant();
+
+      // 参照(一覧): クエリが supervisorId == 自分 か subordinateId == 自分 を
+      // 固定している形のみ(クライアントの fetch*Relationships / 購読と整合)。
+      allow list: if queryPinsRelationshipParticipant();
+
+      // 作成 = 申請: 「見られる側」である部下本人だけが作れる。
+      // 不変条件:
+      //  - subordinateId は作成者本人に固定 → 上司側から部下を勝手に登録する
+      //    docは物理的に作れない=閲覧関係は必ず部下の同意で始まる。
+      //  - status は "pending" 固定 → 作成と同時に承認済みの関係は作れない。
+      //  - docID は正規形を強制 → 読取ルールのアドレス解決先と一致し、
+      //    同一ペアの重複申請も物理的に排除される。
+      //  - 自分自身を上司に指名できない(自己承認ループの排除)。
       allow create: if isSignedIn()
         && request.resource.data.subordinateId == request.auth.uid
-        && request.resource.data.status == "pending";
+        && request.resource.data.supervisorId is string
+        && request.resource.data.supervisorId != request.auth.uid
+        && request.resource.data.status == "pending"
+        && isCanonicalId();
 
+      // 更新 = 承認: 申請で指名された上司本人だけが pending → approved に倒せる。
+      // 不変条件:
+      //  - 遷移は pending → approved の一方向のみ(承認済みdocの再更新は全て拒否)。
+      //  - 変更できるキーは status / updatedAt だけ(diff().affectedKeys())
+      //    → supervisorId / subordinateId のすり替えも、表示用メタデータ
+      //      (メールアドレス・氏名)の事後改竄も不可。
+      //  - docID の正規形も要求(hasOnly により request.resource の ID ペアは
+      //    既存値と同一なので isCanonicalId が update でもそのまま使える)
+      //    → 旧形式(ランダムID)doc を承認しても読取権限が生まれない
+      //      「静かな空承認」を、「承認が通らない」という見える失敗に変える。
       allow update: if isSignedIn()
         && resource.data.supervisorId == request.auth.uid
-        && request.resource.data.supervisorId == resource.data.supervisorId
-        && request.resource.data.subordinateId == resource.data.subordinateId
-        && request.resource.data.status == "approved";
+        && resource.data.status == "pending"
+        && request.resource.data.status == "approved"
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && isCanonicalId();
 
-      allow delete: if isSignedIn()
-        && (
-          resource.data.supervisorId == request.auth.uid
-          || resource.data.subordinateId == request.auth.uid
-        );
+      // 削除 = 拒否/解除/取消: 当事者どちらでも可(=部下はいつでも閲覧を止められる)。
+      // 旧形式IDの doc にも許す(複合IDへの移行時、旧docの掃除に必要)。
+      // 削除した瞬間から isApprovedSupervisorOf は false になり、以後の読取は拒否される。
+      allow delete: if isRelationshipParticipant();
     }
   }
 }
