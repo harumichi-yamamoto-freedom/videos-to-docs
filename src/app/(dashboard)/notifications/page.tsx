@@ -137,7 +137,7 @@ function NotificationsPageContent() {
                         type="button"
                         onClick={handleMarkAllAsRead}
                         disabled={!hasUnread || isMarkingAllAsRead}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="inline-flex min-h-11 items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                         <CheckCheck className="w-3.5 h-3.5" />
                         {isMarkingAllAsRead ? '既読にしています...' : '全て既読にする'}
@@ -165,7 +165,7 @@ function NotificationsPageContent() {
                         type="button"
                         onClick={retry}
                         disabled={retrying}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-900 bg-white border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="inline-flex min-h-11 items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-900 bg-white border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                         <RefreshCw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} />
                         {retrying ? '再接続中です...' : '再試行する'}
@@ -185,7 +185,7 @@ function NotificationsPageContent() {
                         type="button"
                         onClick={handleMarkAllAsRead}
                         disabled={isMarkingAllAsRead}
-                        className="inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-white border border-red-300 rounded-lg hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="inline-flex min-h-11 shrink-0 items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-700 bg-white border border-red-300 rounded-lg hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                         <RefreshCw className="w-3.5 h-3.5" />
                         もう一度既読にする
