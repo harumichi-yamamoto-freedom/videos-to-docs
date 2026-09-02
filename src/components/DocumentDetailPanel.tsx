@@ -579,7 +579,11 @@ export function DocumentDetailPanelView({
                     </button>
                 )}
                 <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                    <div className="flex-1 min-w-0">
+                    {/* lg:min-w-[18rem] は必須。右の操作群は basis:auto=max-content(印刷/表示/編集＋
+                        文書情報＋デザイン/フォント)で横一列を食い尽くすため、この左ブロックが
+                        flex:1 1 0% のままだと残り幅が数pxに潰れ、メタ情報がCJK1文字幅で縦積みに
+                        崩れる(実測: 幅0px/14行)。lg で最低幅の床を与え、操作群側を折り返させる。 */}
+                    <div className="flex-1 min-w-0 lg:min-w-[18rem]">
                         {isEditable && !isViewMode ? (
                             <input
                                 type="text"
@@ -609,7 +613,7 @@ export function DocumentDetailPanelView({
                             )}
                         </div>
                     </div>
-                    <div className="flex flex-col items-end gap-1">
+                    <div className="flex flex-col items-end gap-1 min-w-0">
                         <div className="flex w-full flex-wrap items-center justify-end gap-2 rounded-lg bg-white/80 p-1 shadow-sm sm:w-auto">
                             <button
                                 type="button"
