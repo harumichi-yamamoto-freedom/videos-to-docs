@@ -296,12 +296,12 @@ describe('PromptListSidebar 削除フローとインラインエラー', () => {
             findButton(container, '新規プロンプト')!.click();
         });
         await act(async () => {
-            findButton(container, 'デフォルトプロンプトを追加')!.click();
+            findButton(container, 'テンプレートから追加')!.click();
             await vi.runAllTimersAsync();
         });
 
         const inlineError = container.querySelector('[role="alert"]');
         expect(inlineError?.textContent)
-            .toContain('デフォルトプロンプトを取得できませんでした。時間をおいて再度お試しください。');
+            .toContain('テンプレートを取得できませんでした。時間をおいて再度お試しください。');
     });
 });

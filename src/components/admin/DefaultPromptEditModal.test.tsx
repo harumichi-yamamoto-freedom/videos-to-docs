@@ -332,7 +332,7 @@ describe('DefaultPromptEditModal', () => {
         expect(onDelete).not.toHaveBeenCalled();
         expect(dialogElement().getAttribute('role')).toBe('alertdialog');
         expect(container.textContent).toContain('「保存済みプロンプト」を削除しますか？');
-        expect(container.textContent).toContain('削除したデフォルトプロンプトは元に戻せません。');
+        expect(container.textContent).toContain('削除したテンプレートは元に戻せません。');
 
         await act(async () => {
             findButton('削除する').click();

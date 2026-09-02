@@ -246,7 +246,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
 
         // ゲストのデフォルトプロンプトは削除不可（削除ボタン自体を出していないが多重防御）
         if (!user && prompt.ownerType === 'guest' && prompt.isDefault) {
-            setActionError('デフォルトプロンプトは削除できません。');
+            setActionError('共通プロンプトは削除できません。');
             return;
         }
 
@@ -320,7 +320,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
             setIsModalOpen(true);
         } catch (error) {
             promptListLogger.error('デフォルトプロンプトの取得に失敗', error, { userId: user?.uid });
-            setActionError('デフォルトプロンプトを取得できませんでした。時間をおいて再度お試しください。');
+            setActionError('テンプレートを取得できませんでした。時間をおいて再度お試しください。');
         }
     };
 
@@ -352,7 +352,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                     <div className="flex items-center space-x-2">
                         <FileText className="w-6 h-6 text-blue-600" />
                         <h2 className="text-xl font-bold text-gray-900">
-                            プロンプト一覧
+                            プロンプトの管理
                         </h2>
                     </div>
                     <div className="flex items-center space-x-2">
@@ -370,7 +370,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
 
                             {/* ログインユーザー用ドロップダウンメニュー */}
                             {user && isMenuOpen && (
-                                <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                                <div className="absolute left-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
                                     <button
                                         onClick={() => {
                                             setIsMenuOpen(false);
@@ -385,7 +385,7 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                                         disabled={isInitializing}
                                         className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        {isInitializing ? '追加中...' : 'デフォルトプロンプトを追加'}
+                                        {isInitializing ? '追加中...' : 'テンプレートから追加'}
                                     </button>
                                 </div>
                             )}
@@ -480,13 +480,17 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
                                 <div className={`p-4 ${canDeletePrompt(prompt) ? 'pr-14' : ''}`}>
                                     <div className="min-w-0">
                                         <div className="flex items-center space-x-2">
-                                            <h3 className="text-sm font-semibold text-gray-900 truncate group-hover:text-blue-700 transition-colors">
+                                            <h3 className="min-w-0 text-sm font-semibold text-gray-900 truncate group-hover:text-blue-700 transition-colors">
                                                 {prompt.name}
                                             </h3>
-                                            {prompt.isDefault && (
-                                                <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded flex items-center gap-1">
-                                                    {prompt.ownerType === 'guest' && <Lock className="w-3 h-3" />}
-                                                    デフォルト
+                                            {prompt.isDefault && prompt.ownerType === 'guest' && (
+                                                <span
+                                                    className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-600"
+                                                    title="全員に共通のプロンプト（編集・削除はできません）"
+                                                >
+                                                    <Lock className="w-3 h-3" aria-hidden="true" />
+                                                    共通
+                                                    <span className="sr-only">（編集不可）</span>
                                                 </span>
                                             )}
                                         </div>

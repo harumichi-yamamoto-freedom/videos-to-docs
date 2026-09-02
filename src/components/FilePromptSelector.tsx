@@ -30,7 +30,7 @@ export const FilePromptSelector: React.FC<FilePromptSelectorProps> = ({
       {selectedFiles.map((fileWithPrompts, fileIndex) => (
         <fieldset
           key={`${groupId}-${fileIndex}`}
-          className="rounded-lg border border-gray-200 bg-gray-50 p-4"
+          className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-4"
         >
           <legend className="px-1 text-sm font-medium text-gray-900">
             {fileWithPrompts.file.name}

@@ -144,7 +144,7 @@ export default function AudioFilesPanel() {
                         className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     >
                         <option value="all">すべて</option>
-                        <option value="default_all">デフォルトプロンプト（全種類）</option>
+                        <option value="default_all">テンプレート由来のプロンプト（全種類）</option>
                         {templateNames.map((name) => (
                             <option key={name} value={name}>
                                 {name}

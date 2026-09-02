@@ -37,7 +37,7 @@ export function PdfDocumentHeader({
                         <dt>使用モデル</dt>
                         <dd>
                             {getGeminiModelLabel(document.generatedByModel)}
-                            {document.modelSelection === 'default' && '（デフォルト選択）'}
+                            {document.modelSelection === 'default' && '（標準を選択）'}
                             {document.generatedByThinkingLevel &&
                                 `・思考: ${getThinkingLevelLabel(document.generatedByThinkingLevel)}`}
                         </dd>
