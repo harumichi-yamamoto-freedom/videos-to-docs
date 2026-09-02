@@ -33,7 +33,7 @@ const DEFAULT_THINKING_LEVEL: GeminiThinkingLevel = 'default';
 const THINKING_LEVEL_IDS = new Set<string>(THINKING_LEVELS.map(level => level.id));
 
 // 思考レベル指定に対応するモデル世代。対応モデルが増えたら prefix を追加する。
-const THINKING_LEVEL_MODEL_PREFIXES = ['gemini-3.7-'] as const;
+const THINKING_LEVEL_MODEL_PREFIXES = ['gemini-3.7-', 'gemini-3.8-'] as const;
 
 /**
  * Firestore/UI で扱う思考レベルを canonical な保存表現へ揃える。

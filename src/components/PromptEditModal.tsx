@@ -152,7 +152,8 @@ const PromptModelField: React.FC<PromptModelFieldProps> = ({
 
     return (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="space-y-2">
+            {/* 比較表を開いている間は 2 列ぶち抜き（:has で状態を持たずに判定・左列だけだと 6 列中 2 列しか見えない） */}
+            <div className="space-y-2 md:has-[[aria-expanded=true]]:col-span-2">
                 <span className="block text-sm font-semibold text-gray-700">
                     使用するGeminiモデル
                 </span>

@@ -66,3 +66,23 @@ describe('ModelComboboxSelect', () => {
         expect(markup).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"/);
     });
 });
+
+describe('ModelComparisonTable: 3.8 Flash と表幅 (2026-09-03)', () => {
+    it('3.8 Flash にもプロモ期限が付く（3.7・3.8・おまかせ→3.7 の 3 行 × mobile/desktop = 6 回）', () => {
+        const markup = renderToStaticMarkup(
+            <ModelComparisonTable selectedModel="gemini-3.8-flash" />,
+        );
+        expect(markup).toContain('Gemini 3.8 Flash');
+        const promoRows = ['gemini-3.7-flash', 'gemini-3.8-flash', 'default'].length;
+        expect(markup.match(/期限2026\/12\/31/g)).toHaveLength(promoRows * 2);
+    });
+
+    it('デスクトップ表の最小幅は 48rem（モーダル全幅 ≈844px に収まる）で、おすすめ列は min-w-48', () => {
+        const markup = renderToStaticMarkup(
+            <ModelComparisonTable selectedModel="default" />,
+        );
+        expect(markup).toContain('min-w-[48rem]');
+        expect(markup).not.toContain('min-w-[56rem]');
+        expect(markup).not.toContain('min-w-80');
+    });
+});

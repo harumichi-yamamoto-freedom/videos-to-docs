@@ -365,7 +365,8 @@ export const PromptCreateModal: React.FC<PromptCreateModalProps> = ({
                             </div>
 
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                <div>
+                                {/* 比較表を開いている間は 2 列ぶち抜き（:has で状態を持たずに判定・左列だけだと 6 列中 2 列しか見えない） */}
+                                <div className="md:has-[[aria-expanded=true]]:col-span-2">
                                     <span className="mb-2 block text-sm font-medium text-gray-700">
                                         使用するGeminiモデル
                                     </span>

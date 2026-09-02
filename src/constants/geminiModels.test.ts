@@ -6,6 +6,7 @@ import {
     canonicalizeGeminiModel,
     getGeminiModelLabel,
     getGeminiPricingLabelShort,
+    hasIntroductoryPricing,
     resolveGeminiModel,
 } from './geminiModels';
 
@@ -448,5 +449,49 @@ describe('reducePromptEditSession', () => {
 
         expect(backToSupported.draft.thinkingLevel).toBe('high');
         expect(hasPromptEditChanges(backToSupported)).toBe(false);
+    });
+});
+
+describe('Gemini 3.8 Flash の追加と★の再基準化 (2026-09-03)', () => {
+    const stars = (value: string) => {
+        const option = GEMINI_MODEL_OPTIONS.find(o => o.value === value);
+        if (!option?.benchmark) throw new Error(`benchmark not found: ${value}`);
+        return option.benchmark;
+    };
+
+    it('3.8 Flash が先頭の選択肢で、ラベルとプロモ価格を持つ', () => {
+        expect(GEMINI_MODEL_OPTIONS[0].value).toBe('gemini-3.8-flash');
+        expect(getGeminiModelLabel('gemini-3.8-flash')).toBe('Gemini 3.8 Flash');
+        expect(getGeminiPricingLabelShort('gemini-3.8-flash')).toBe('入力 $0.75 / 出力 $3.75');
+    });
+
+    it('プロモ価格の注記は 3.7 と 3.8 の両方に付き、他には付かない', () => {
+        expect(hasIntroductoryPricing('gemini-3.7-flash')).toBe(true);
+        expect(hasIntroductoryPricing('gemini-3.8-flash')).toBe(true);
+        expect(hasIntroductoryPricing('gemini-3.5-flash')).toBe(false);
+        expect(hasIntroductoryPricing(DEFAULT_GEMINI_MODEL)).toBe(true);
+    });
+
+    it('★は 3.8 Flash を最上位(5/5)として世代順に単調に下がる', () => {
+        expect(stars('gemini-3.8-flash')).toMatchObject({ recognitionQuality: 5, analysisQuality: 5 });
+        expect(stars('gemini-3.7-flash')).toMatchObject({ recognitionQuality: 5, analysisQuality: 4 });
+        expect(stars('gemini-3.5-flash')).toMatchObject({ recognitionQuality: 4, analysisQuality: 4 });
+        expect(stars('gemini-3.1-pro-preview').analysisQuality).toBe(3);
+        expect(stars('gemini-2.5-pro').analysisQuality).toBe(2);
+        expect(stars('gemini-2.5-flash-lite').analysisQuality).toBe(1);
+        const flashGenerations = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash'];
+        for (let i = 1; i < flashGenerations.length; i += 1) {
+            expect(stars(flashGenerations[i]).analysisQuality).toBeLessThanOrEqual(stars(flashGenerations[i - 1]).analysisQuality);
+            expect(stars(flashGenerations[i]).recognitionQuality).toBeLessThanOrEqual(stars(flashGenerations[i - 1]).recognitionQuality);
+        }
+        // 「差が見える」錠: 3 モデル以上が両軸とも 5/5 で並ぶ状態には戻さない
+        const topTies = GEMINI_MODEL_OPTIONS.filter(o => o.benchmark?.recognitionQuality === 5 && o.benchmark?.analysisQuality === 5);
+        expect(topTies.map(o => o.value)).toEqual(['gemini-3.8-flash']);
+    });
+
+    it('3.8 Flash の体感時間は 3.7 Flash と同じ★帯（同速度）', () => {
+        const s38 = stars('gemini-3.8-flash').estimatedSeconds;
+        const s37 = stars('gemini-3.7-flash').estimatedSeconds;
+        expect(Math.abs(s38 - s37)).toBeLessThanOrEqual(5);
     });
 });
