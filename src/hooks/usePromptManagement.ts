@@ -88,8 +88,13 @@ export const usePromptManagement = () => {
             const validIds = new Set(prompts.flatMap(prompt => (prompt.id ? [prompt.id] : [])));
             const nextIds = previousIds.filter(id => validIds.has(id));
 
-            if (nextIds.length === 0 && !selectionTouchedForAuthRef.current && prompts[0]?.id) {
-                return [prompts[0].id];
+            // 既定で選ぶのは管理テンプレート由来 (isDefault) の先頭だけ。
+            // 一覧は作成日時の新しい順なので、先頭 (prompts[0]) を選ぶと
+            // ゲストが最後に作った任意のプロンプトが全員の既定になってしまう。
+            // isDefault が 1 つも無ければ勝手に選ばず未選択のままにする。
+            const defaultPromptId = prompts.find(prompt => prompt.isDefault && prompt.id)?.id;
+            if (nextIds.length === 0 && !selectionTouchedForAuthRef.current && defaultPromptId) {
+                return [defaultPromptId];
             }
 
             return nextIds;

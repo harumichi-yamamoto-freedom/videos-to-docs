@@ -13,12 +13,14 @@ import {
     where,
     serverTimestamp,
     limit,
+    writeBatch,
 } from 'firebase/firestore';
 import { getCurrentUserId, getOwnerType } from './auth';
 import { logAudit } from './auditLog';
 import {
     validatePromptSize,
     getDefaultPrompts,
+    isEquivalentDefaultPrompt,
     type DefaultPromptTemplate,
 } from './adminSettings';
 import { updateUserStats } from './userManagement';
@@ -621,12 +623,16 @@ export async function deletePrompt(promptId: string): Promise<void> {
 /**
  * ゲストユーザーのデフォルトプロンプトを管理者設定と同期
  * 管理者がデフォルトプロンプトを更新したときに呼ばれる
- * 既存のゲストデフォルトプロンプトをすべて削除して、管理者設定から再作成する
- * これにより、複数のプロンプト、個数の変化、順序の変更、名前変更などすべてに対応
+ * 決定論的 ID (ownerId + テンプレート名) をキーに差分だけを 1 つの batch で書く:
+ * - テンプレートに無い既存 doc は削除
+ * - 既存 doc は内容が変わった時だけ上書き (createdAt と所有者は保持)
+ * - 無い doc は新規作成
+ * 全削除→再作成をしないので、途中で切れてもゲストのプロンプトが 0 件になる窓は無く、
+ * 変更の無かった doc の createdAt (一覧の並び) も動かない。
  */
 export async function syncGuestDefaultPrompts(): Promise<void> {
     try {
-        // 管理者設定のデフォルトプロンプトを取得
+        // adminSettings が直前に渡した保存済み snapshot を最初の await で消費する (順序を変えない)
         const defaultPromptTemplates = await getDefaultPrompts();
 
         // ゲストユーザーの既存のデフォルトプロンプトをすべて取得
@@ -636,27 +642,74 @@ export async function syncGuestDefaultPrompts(): Promise<void> {
             where('isDefault', '==', true)
         );
         const existingGuestDefaults = await getDocs(q);
+        const existingById = new Map(
+            existingGuestDefaults.docs.map(docSnapshot => [docSnapshot.id, docSnapshot]),
+        );
 
-        // 既存のゲストデフォルトプロンプトをすべて削除
-        const deletePromises = existingGuestDefaults.docs.map((docSnapshot) => {
-            return deleteDoc(doc(db, 'prompts', docSnapshot.id));
-        });
-        await Promise.all(deletePromises);
+        const batch = writeBatch(db);
+        const desiredIds = new Set<string>();
+        const counts = { created: 0, updated: 0, unchanged: 0, deleted: 0 };
 
-        if (existingGuestDefaults.docs.length > 0) {
-            promptsLogger.info('ゲストデフォルトプロンプトを削除', {
-                deletedCount: existingGuestDefaults.docs.length,
-            });
+        for (const template of defaultPromptTemplates) {
+            const docId = generateDefaultPromptId('GUEST', template.name);
+            if (desiredIds.has(docId)) {
+                // 同名テンプレートは同じ ID に畳まれる。管理画面が保存前に弾くが、二重書きを避けて先勝ちにする
+                promptsLogger.info('同名のテンプレートが重複しているためスキップ', { name: template.name });
+                continue;
+            }
+            desiredIds.add(docId);
+
+            const promptRef = doc(db, 'prompts', docId);
+            const fields = {
+                name: template.name,
+                content: template.content,
+                model: canonicalizeGeminiModel(template.model),
+                thinkingLevel: canonicalizeThinkingLevel(template.thinkingLevel),
+            };
+            const existing = existingById.get(docId);
+
+            if (!existing) {
+                batch.set(promptRef, {
+                    ...fields,
+                    isDefault: true,
+                    ownerType: 'guest',
+                    ownerId: 'GUEST',
+                    createdBy: 'GUEST',
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                });
+                counts.created += 1;
+                continue;
+            }
+
+            const data = existing.data();
+            const stored: DefaultPromptTemplate = {
+                name: data.name,
+                content: data.content,
+                model: data.model,
+                thinkingLevel: data.thinkingLevel,
+            };
+            if (isEquivalentDefaultPrompt(stored, fields)) {
+                counts.unchanged += 1;
+                continue;
+            }
+
+            // 内容だけ上書きし、createdAt と所有者フィールドは触らない
+            batch.set(promptRef, { ...fields, updatedAt: serverTimestamp() }, { merge: true });
+            counts.updated += 1;
         }
 
-        // 管理者設定のデフォルトプロンプトから新規作成
-        await ensureDefaultPromptsForOwner('GUEST', 'guest', 'GUEST', defaultPromptTemplates);
-
-        if (defaultPromptTemplates.length > 0) {
-            promptsLogger.info('ゲストデフォルトプロンプトを再作成', {
-                createdCount: defaultPromptTemplates.length,
-            });
+        for (const docSnapshot of existingGuestDefaults.docs) {
+            if (desiredIds.has(docSnapshot.id)) continue;
+            batch.delete(doc(db, 'prompts', docSnapshot.id));
+            counts.deleted += 1;
         }
+
+        if (counts.created + counts.updated + counts.deleted > 0) {
+            await batch.commit();
+        }
+
+        promptsLogger.info('ゲストデフォルトプロンプトを同期', counts);
     } catch (error) {
         promptsLogger.error('ゲストデフォルトプロンプトの同期に失敗', error);
         throw new Error('ゲストデフォルトプロンプトの同期に失敗しました');

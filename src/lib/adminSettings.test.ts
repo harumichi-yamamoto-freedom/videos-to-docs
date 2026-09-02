@@ -264,8 +264,9 @@ describe('adminSettings', () => {
             });
 
         expect(promptsObservedBySync).toEqual(savedPrompts);
-        // 同期用snapshotを一度だけ直接受け渡すため、fail-openのruntime readへ到達しない。
-        expect(mocks.getDoc).not.toHaveBeenCalled();
+        // 1 回だけの read は保存前の同期要否判定 (失敗→安全側で同期)。同期用snapshotは
+        // 直接受け渡すため、同期自体は fail-open の runtime read へ到達しない。
+        expect(mocks.getDoc).toHaveBeenCalledTimes(1);
     });
 
     it('再同期はpending化前の管理者readで確定したprompt snapshotを使用する', async () => {
@@ -539,6 +540,162 @@ describe('adminSettings', () => {
             defaultPrompts: [{ name: '議事録', content: '議事録を作成してください。' }],
         }, 'admin-1')).rejects.toThrow('管理者設定の更新に失敗しました');
 
+        expect(mocks.syncGuestDefaultPrompts).not.toHaveBeenCalled();
+    });
+});
+
+describe('adminSettings ゲスト同期の要否 (S2-5)', () => {
+    const storedPrompts = [
+        { name: '打ち合わせの流れ', content: '流れ', model: 'default', thinkingLevel: 'default' as const },
+        { name: '希望条件', content: '希望条件を整理', model: 'gemini-3.7-flash', thinkingLevel: 'high' as const },
+    ];
+
+    function arrangeStoredConfig(overrides: Record<string, unknown> = {}) {
+        mocks.getDoc.mockResolvedValue({
+            exists: () => true,
+            data: () => ({
+                maxPromptSize: 50000,
+                maxDocumentSize: 500000,
+                defaultPrompts: storedPrompts,
+                lastGuestSyncStatus: 'succeeded',
+                ...overrides,
+            }),
+        });
+    }
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mocks.getDoc.mockReset();
+        for (const key of Object.keys(mocks.persistedData)) delete mocks.persistedData[key];
+        // 同期完了 status の finalize transaction が setDoc で書いた operationId を読めるよう、
+        // 上の describe と同じく保存内容を persistedData へ通す
+        mocks.setDoc.mockReset().mockImplementation(async (
+            _reference: unknown,
+            data: Record<string, unknown>,
+        ) => {
+            Object.assign(mocks.persistedData, data);
+        });
+        mocks.syncGuestDefaultPrompts.mockReset().mockResolvedValue(undefined);
+        mocks.transactionGet.mockReset().mockImplementation(async () => ({
+            exists: () => true,
+            data: () => ({ ...mocks.persistedData }),
+        }));
+        mocks.transactionSet.mockReset().mockImplementation((
+            _reference: unknown,
+            data: Record<string, unknown>,
+        ) => {
+            Object.assign(mocks.persistedData, data);
+        });
+    });
+
+    it('保存前と同じdefaultPromptsの保存ではゲスト同期を要求しない', async () => {
+        arrangeStoredConfig();
+
+        const result = await updateAdminSettings({
+            maxPromptSize: 60000,
+            defaultPrompts: storedPrompts.map(prompt => ({ ...prompt })),
+        }, 'admin-1');
+
+        expect(result).toEqual({ settingsUpdated: true, guestPromptsSync: 'not-requested' });
+        expect(mocks.syncGuestDefaultPrompts).not.toHaveBeenCalled();
+        expect(mocks.setDoc).toHaveBeenCalledTimes(1);
+        const savedData = mocks.setDoc.mock.calls[0][1] as Record<string, unknown>;
+        expect(savedData).toEqual(expect.objectContaining({
+            maxPromptSize: 60000,
+            defaultPrompts: storedPrompts,
+            updatedBy: 'admin-1',
+        }));
+        expect(savedData).not.toHaveProperty('lastGuestSyncStatus');
+        expect(savedData).not.toHaveProperty('lastGuestSyncOperationId');
+        expect(mocks.transactionSet).not.toHaveBeenCalled();
+    });
+
+    it('model/thinkingLevel の未設定と既定値の違いだけなら同じとみなす', async () => {
+        arrangeStoredConfig({
+            defaultPrompts: [
+                { name: '打ち合わせの流れ', content: '流れ' },
+                { name: '希望条件', content: '希望条件を整理', model: 'gemini-3.7-flash', thinkingLevel: ' high ' },
+            ],
+        });
+
+        const result = await updateAdminSettings({ defaultPrompts: storedPrompts }, 'admin-1');
+
+        expect(result.guestPromptsSync).toBe('not-requested');
+        expect(mocks.syncGuestDefaultPrompts).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        {
+            change: '内容',
+            next: [{ ...storedPrompts[0], content: '新しい流れ' }, storedPrompts[1]],
+        },
+        {
+            change: '名前',
+            next: [{ ...storedPrompts[0], name: '商談の流れ' }, storedPrompts[1]],
+        },
+        {
+            change: 'モデル',
+            next: [{ ...storedPrompts[0], model: 'gemini-3.7-pro' }, storedPrompts[1]],
+        },
+        {
+            change: '思考レベル',
+            next: [{ ...storedPrompts[0], thinkingLevel: 'low' as const }, storedPrompts[1]],
+        },
+        {
+            change: '件数',
+            next: [storedPrompts[0]],
+        },
+    ])('defaultPromptsの$changeが変わった保存では同期する', async ({ next }) => {
+        arrangeStoredConfig();
+
+        const result = await updateAdminSettings({ defaultPrompts: next }, 'admin-1');
+
+        expect(result.guestPromptsSync).toBe('succeeded');
+        expect(mocks.syncGuestDefaultPrompts).toHaveBeenCalledTimes(1);
+        expect(mocks.setDoc.mock.calls[0][1]).toEqual(expect.objectContaining({
+            lastGuestSyncStatus: 'pending',
+        }));
+    });
+
+    it.each(['failed', 'pending'] as const)(
+        '前回のゲスト同期が%sのままなら同じdefaultPromptsでも同期する',
+        async unresolvedStatus => {
+            arrangeStoredConfig({ lastGuestSyncStatus: unresolvedStatus });
+
+            const result = await updateAdminSettings({ defaultPrompts: storedPrompts }, 'admin-1');
+
+            expect(result.guestPromptsSync).toBe('succeeded');
+            expect(mocks.syncGuestDefaultPrompts).toHaveBeenCalledTimes(1);
+        },
+    );
+
+    it.each([
+        {
+            scenario: 'configが未作成',
+            arrangeRead: () => mocks.getDoc.mockResolvedValue({ exists: () => false }),
+        },
+        {
+            scenario: 'defaultPromptsが未保存',
+            arrangeRead: () => arrangeStoredConfig({ defaultPrompts: undefined }),
+        },
+        {
+            scenario: '保存前の読み取りに失敗',
+            arrangeRead: () => mocks.getDoc.mockRejectedValue(new Error('unavailable')),
+        },
+    ])('$scenarioなら比較できないので安全側で同期する', async ({ arrangeRead }) => {
+        arrangeRead();
+
+        const result = await updateAdminSettings({ defaultPrompts: storedPrompts }, 'admin-1');
+
+        expect(result.guestPromptsSync).toBe('succeeded');
+        expect(mocks.syncGuestDefaultPrompts).toHaveBeenCalledTimes(1);
+    });
+
+    it('defaultPromptsを含まない保存は保存前の読み取りも同期もしない', async () => {
+        const result = await updateAdminSettings({ maxPromptSize: 60000 }, 'admin-1');
+
+        expect(result.guestPromptsSync).toBe('not-requested');
+        expect(mocks.getDoc).not.toHaveBeenCalled();
         expect(mocks.syncGuestDefaultPrompts).not.toHaveBeenCalled();
     });
 });
