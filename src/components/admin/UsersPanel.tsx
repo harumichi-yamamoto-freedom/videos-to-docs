@@ -11,6 +11,7 @@ const usersPanelLogger = createLogger('UsersPanel');
 export default function UsersPanel() {
     const [users, setUsers] = useState<UserProfile[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     useEffect(() => {
         loadUsers();
@@ -19,12 +20,13 @@ export default function UsersPanel() {
     const loadUsers = async () => {
         try {
             setLoading(true);
+            setLoadError(null);
             const data = await getAllUsers();
             setUsers(data);
             await logAudit('admin_user_view', 'users', 'all');
         } catch (error) {
             usersPanelLogger.error('ユーザー一覧の取得に失敗', error);
-            alert('ユーザー一覧の取得に失敗しました');
+            setLoadError('ユーザー一覧を取得できませんでした。通信状況を確認して、もう一度お試しください。');
         } finally {
             setLoading(false);
         }
@@ -46,6 +48,23 @@ export default function UsersPanel() {
                     更新
                 </button>
             </div>
+
+            {loadError && (
+                <div
+                    role="alert"
+                    className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+                >
+                    <p className="min-w-0 flex-1">{loadError}</p>
+                    <button
+                        type="button"
+                        onClick={loadUsers}
+                        disabled={loading}
+                        className="shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        再試行
+                    </button>
+                </div>
+            )}
 
             {loading ? (
                 <div className="text-center py-12">

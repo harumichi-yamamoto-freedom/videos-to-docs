@@ -30,10 +30,17 @@ export default function AudioFilesPanel() {
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
     const [showDownloadModal, setShowDownloadModal] = useState(false);
     const [downloading, setDownloading] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    // 失敗したダウンロードの指定を保持し、同じ内容・形式でやり直せるようにする。
+    const [failedDownload, setFailedDownload] = useState<{
+        content: DownloadContent;
+        format: DownloadFormat;
+    } | null>(null);
 
     const loadData = useCallback(async () => {
         try {
             setLoading(true);
+            setLoadError(null);
             const [docs, names] = await Promise.all([
                 getAllAudioTranscriptions(),
                 getDefaultTemplateNames(),
@@ -47,7 +54,7 @@ export default function AudioFilesPanel() {
             setFilteredGroups(filtered);
         } catch (error) {
             logger.error('データの読み込みに失敗', error);
-            alert('データの読み込みに失敗しました');
+            setLoadError('データを読み込めませんでした。通信状況を確認して、もう一度お試しください。');
         } finally {
             setLoading(false);
         }
@@ -106,6 +113,7 @@ export default function AudioFilesPanel() {
     const handleDownload = async (content: DownloadContent, format: DownloadFormat) => {
         setShowDownloadModal(false);
         setDownloading(true);
+        setFailedDownload(null);
 
         try {
             if (format === 'zip') {
@@ -115,7 +123,7 @@ export default function AudioFilesPanel() {
             }
         } catch (error) {
             logger.error('ダウンロードに失敗', error);
-            alert('ダウンロードに失敗しました');
+            setFailedDownload({ content, format });
         } finally {
             setDownloading(false);
         }
@@ -153,6 +161,49 @@ export default function AudioFilesPanel() {
                     </button>
                 </div>
             </div>
+
+            {loadError && (
+                <div
+                    role="alert"
+                    className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+                >
+                    <p className="min-w-0 flex-1">{loadError}</p>
+                    <button
+                        type="button"
+                        onClick={loadData}
+                        disabled={loading}
+                        className="shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        再試行
+                    </button>
+                </div>
+            )}
+
+            {failedDownload && (
+                <div
+                    role="alert"
+                    className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+                >
+                    <p className="min-w-0 flex-1">
+                        ダウンロードできませんでした。通信状況を確認して、もう一度お試しください。
+                    </p>
+                    <button
+                        type="button"
+                        onClick={() => handleDownload(failedDownload.content, failedDownload.format)}
+                        disabled={downloading || selectedPaths.size === 0}
+                        className="shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        もう一度試す
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setFailedDownload(null)}
+                        className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100"
+                    >
+                        閉じる
+                    </button>
+                </div>
+            )}
 
             {/* ツールバー */}
             <div className="flex items-center gap-4 mb-4 px-4 py-3 bg-gray-50 rounded-lg">

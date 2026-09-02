@@ -43,9 +43,11 @@ function setControlValue(
     control.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+/** 操作可能なボタンだけを掴む（確認パネル表示中の hidden+inert 側を除外）。 */
 function findButton(container: HTMLElement, name: string): HTMLButtonElement | null {
     return Array.from(container.querySelectorAll('button')).find(
-        candidate => candidate.textContent?.trim() === name,
+        candidate => candidate.textContent?.trim() === name
+            && !candidate.closest('[inert]'),
     ) ?? null;
 }
 
@@ -97,6 +99,10 @@ describe('AdminNotificationCreateModal', () => {
             root.unmount();
         });
         container.remove();
+        // 破棄確認もエラー表示もダイアログ内で完結する。ネイティブの
+        // confirm()/alert() へ退行したらどのテストでもここで落ちる。
+        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(alertSpy).not.toHaveBeenCalled();
         confirmSpy.mockRestore();
         alertSpy.mockRestore();
     });
@@ -180,34 +186,105 @@ describe('AdminNotificationCreateModal', () => {
         expect(onClose).not.toHaveBeenCalled();
     });
 
-    it('下書きが無いときEscで確認せずに閉じる', async () => {
+    it('下書きが無いときEscで確認パネルを出さずに閉じる', async () => {
         await render();
         await dispatchCancel();
 
-        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(container.textContent).not.toContain('入力内容を破棄しますか？');
         expect(onClose).toHaveBeenCalledTimes(1);
     });
 
-    it('下書きがあるときEscは確認を経由し、破棄しないなら閉じない', async () => {
+    it('下書きがあるときEscはダイアログ内の破棄確認パネルを出し、閉じない', async () => {
         await render();
         await fillDraft();
-        confirmSpy.mockReturnValue(false);
 
         await dispatchCancel();
 
-        expect(confirmSpy).toHaveBeenCalledTimes(1);
-        expect(confirmSpy).toHaveBeenCalledWith('入力内容が破棄されます。閉じますか？');
+        const dialog = getDialog();
+        expect(dialog.getAttribute('role')).toBe('alertdialog');
+        expect(container.textContent).toContain('入力内容を破棄しますか？');
+        expect(container.textContent).toContain('閉じると、入力したお知らせは失われます。');
         expect(onClose).not.toHaveBeenCalled();
+
+        // 確認パネルの安全な選択肢へ初期フォーカスが移る。
+        const keepButton = findButton(container, '入力を続ける');
+        expect(keepButton).not.toBeNull();
+        expect(document.activeElement).toBe(keepButton);
+
+        // 確認パネルが見えている間、背後のフォームは操作から外れる。
+        const hiddenForm = container.querySelector('[inert]');
+        expect(hiddenForm?.getAttribute('aria-hidden')).toBe('true');
     });
 
-    it('下書きがあるときEscで破棄を承諾すれば閉じる', async () => {
+    it('破棄確認で「入力を続ける」を選ぶとパネルが畳まれ、下書きが残る', async () => {
         await render();
         await fillDraft();
-        confirmSpy.mockReturnValue(true);
+        await dispatchCancel();
+
+        const keepButton = findButton(container, '入力を続ける');
+        await act(async () => {
+            keepButton!.click();
+        });
+
+        expect(getDialog().getAttribute('role')).toBe('dialog');
+        expect(container.textContent).not.toContain('入力内容を破棄しますか？');
+        expect(onClose).not.toHaveBeenCalled();
+        const input = container.querySelector<HTMLInputElement>('input[type="text"]');
+        expect(input?.value).toBe('障害のお知らせ');
+    });
+
+    it('破棄確認中のEscは確認だけを畳み、フォームへ戻す（閉じない）', async () => {
+        await render();
+        await fillDraft();
+        await dispatchCancel();
+        expect(container.textContent).toContain('入力内容を破棄しますか？');
 
         await dispatchCancel();
 
+        expect(container.textContent).not.toContain('入力内容を破棄しますか？');
+        expect(onClose).not.toHaveBeenCalled();
+        const input = container.querySelector<HTMLInputElement>('input[type="text"]');
+        expect(input?.value).toBe('障害のお知らせ');
+    });
+
+    it('破棄確認で破棄を選ぶと閉じる', async () => {
+        await render();
+        await fillDraft();
+        await dispatchCancel();
+
+        const discardButton = findButton(container, '入力内容を破棄して閉じる');
+        await act(async () => {
+            discardButton!.click();
+        });
+
         expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('作成失敗はダイアログ内のrole=alertで伝え、入力を保持して閉じない', async () => {
+        createSystemNotification.mockRejectedValueOnce(new Error('unavailable'));
+
+        await render();
+        await fillDraft();
+
+        const publishButton = findButton(container, '公開');
+        await act(async () => {
+            publishButton!.click();
+        });
+
+        const alert = container.querySelector('[role="alert"]');
+        expect(alert?.textContent).toContain('お知らせを作成できませんでした。');
+        expect(alert?.textContent).toContain('入力内容は保持されています。');
+        expect(onClose).not.toHaveBeenCalled();
+        expect(onCreated).not.toHaveBeenCalled();
+        const input = container.querySelector<HTMLInputElement>('input[type="text"]');
+        expect(input?.value).toBe('障害のお知らせ');
+        expect(logError).toHaveBeenCalledTimes(1);
+
+        // 入力し直すと古いエラーは消える。
+        await act(async () => {
+            setControlValue(input!, '復旧のお知らせ');
+        });
+        expect(container.querySelector('[role="alert"]')).toBeNull();
     });
 
     it('公開処理中はEscで閉じない', async () => {

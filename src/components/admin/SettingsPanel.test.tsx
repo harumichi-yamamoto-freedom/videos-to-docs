@@ -9,6 +9,8 @@ const harness = vi.hoisted(() => ({
     effect: null as EffectCallback | null,
     stateIndex: 0,
     states: [] as StateEntry[],
+    /** コンポーネントが各スロットへ渡した初期値の列。宣言順ずれの検出に使う。 */
+    observedInitials: [] as unknown[],
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -30,7 +32,22 @@ vi.mock('react', async importOriginal => {
             harness.effect = effect;
         }),
         useImperativeHandle: vi.fn(),
-        useState: vi.fn(() => harness.states[harness.stateIndex++]),
+        /* positional な偽 useState。スロット表(arrangePanelState)は宣言順に
+           完全依存するため、ずれたら黙って隣の値を返す前に大声で落とす:
+           - 表より多く呼ばれたら即エラー（宣言の追加漏れ）
+           - 各スロットへ渡された初期値を記録し、専用の順序カナリアで照合 */
+        useState: vi.fn((initialValue: unknown) => {
+            harness.observedInitials.push(initialValue);
+            const entry = harness.states[harness.stateIndex];
+            if (!entry) {
+                throw new Error(
+                    `fake useState のスロット ${harness.stateIndex} が未定義です。`
+                    + ' SettingsPanel の useState 宣言と arrangePanelState の表を同じ順で更新してください。',
+                );
+            }
+            harness.stateIndex += 1;
+            return entry;
+        }),
     };
 });
 
@@ -99,6 +116,7 @@ type PanelState = {
     feedback?: { kind: 'success' | 'warning' | 'error'; message: string } | null;
     guestSyncFailed?: boolean;
     syncingGuestPrompts?: boolean;
+    pendingDeletePromptIndex?: number | null;
 };
 
 function arrangePanelState(overrides: PanelState = {}) {
@@ -130,9 +148,11 @@ function arrangePanelState(overrides: PanelState = {}) {
         isModalOpen: vi.fn(),
         editingPromptIndex: vi.fn(),
         modalMode: vi.fn(),
+        pendingDeletePromptIndex: vi.fn(),
     };
 
     harness.stateIndex = 0;
+    harness.observedInitials = [];
     harness.states = [
         [values.settings, setters.settings],
         [values.defaultPrompts, setters.defaultPrompts],
@@ -147,6 +167,7 @@ function arrangePanelState(overrides: PanelState = {}) {
         [false, setters.isModalOpen],
         [null, setters.editingPromptIndex],
         ['create', setters.modalMode],
+        [overrides.pendingDeletePromptIndex ?? null, setters.pendingDeletePromptIndex],
     ];
 
     return setters;
@@ -158,7 +179,14 @@ function renderPanel(): React.ReactNode {
         ref: React.ForwardedRef<unknown>,
     ) => React.ReactNode;
 
-    return render({}, null);
+    const tree = render({}, null);
+    if (harness.stateIndex !== harness.states.length) {
+        throw new Error(
+            `useState の呼出し数 ${harness.stateIndex} がスロット表の ${harness.states.length} と不一致です。`
+            + ' SettingsPanel の useState 宣言と arrangePanelState の表を同じ順で更新してください。',
+        );
+    }
+    return tree;
 }
 
 function getText(node: React.ReactNode): string {
@@ -197,6 +225,29 @@ function findButton(
     return null;
 }
 
+function findRowDeleteButton(
+    node: React.ReactNode,
+): React.ReactElement<{ onClick: (e: React.MouseEvent) => void; title?: string }> | null {
+    if (!React.isValidElement<{ children?: React.ReactNode; title?: string }>(node)) {
+        return null;
+    }
+
+    if (node.type === 'button' && node.props.title === '削除') {
+        return node as React.ReactElement<{
+            onClick: (e: React.MouseEvent) => void;
+            title?: string;
+        }>;
+    }
+
+    for (const child of React.Children.toArray(node.props.children)) {
+        const button = findRowDeleteButton(child);
+
+        if (button) return button;
+    }
+
+    return null;
+}
+
 function countElements(node: React.ReactNode, type: string): number {
     if (!React.isValidElement<{ children?: React.ReactNode }>(node)) {
         return 0;
@@ -211,6 +262,11 @@ async function flushPromises(): Promise<void> {
     await Promise.resolve();
 }
 
+const nativeDialogs = vi.hoisted(() => ({
+    confirm: vi.fn(() => true),
+    alert: vi.fn(),
+}));
+
 describe('SettingsPanel', () => {
     beforeEach(() => {
         harness.effect = null;
@@ -220,9 +276,17 @@ describe('SettingsPanel', () => {
         mocks.retryGuestDefaultPromptsSync.mockReset();
         mocks.logAudit.mockReset();
         mocks.logAudit.mockResolvedValue(undefined);
+        nativeDialogs.confirm.mockClear();
+        nativeDialogs.alert.mockClear();
+        vi.stubGlobal('confirm', nativeDialogs.confirm);
+        vi.stubGlobal('alert', nativeDialogs.alert);
     });
 
     afterEach(() => {
+        // 確認も結果表示も画面内で完結する。ネイティブの confirm()/alert() へ
+        // 退行したらどのテストでもここで落ちる。
+        expect(nativeDialogs.confirm).not.toHaveBeenCalled();
+        expect(nativeDialogs.alert).not.toHaveBeenCalled();
         vi.unstubAllGlobals();
     });
 
@@ -454,5 +518,68 @@ describe('SettingsPanel', () => {
             kind: 'error',
             message: 'ゲストユーザーのデフォルトプロンプトを同期できませんでした。再試行してください。',
         });
+    });
+
+    it('スロット表はコンポーネントのuseState宣言順と同期している（順序カナリア）', () => {
+        arrangePanelState();
+        renderPanel();
+
+        // コンポーネントが各スロットへ渡した初期値の列。宣言の並べ替え・増減は
+        // ここで大声で落ち、arrangePanelState の表を同じ順で直すよう促す。
+        expect(harness.observedInitials).toEqual([
+            null,      // settings
+            [],        // defaultPrompts
+            null,      // originalSettings
+            [],        // originalPrompts
+            true,      // loading
+            false,     // saving
+            null,      // loadError
+            null,      // feedback
+            false,     // guestSyncFailed
+            false,     // syncingGuestPrompts
+            false,     // isModalOpen
+            null,      // editingPromptIndex
+            'create',  // modalMode
+            null,      // pendingDeletePromptIndex
+        ]);
+    });
+
+    it('行の削除ボタンは直接消さず、対象行の確認ダイアログを開く', () => {
+        const setters = arrangePanelState();
+        const tree = renderPanel();
+        const deleteButton = findRowDeleteButton(tree);
+        expect(deleteButton).not.toBeNull();
+        // 確認前はダイアログを描画しない。
+        expect(getText(tree)).not.toContain('を削除しますか？');
+
+        const stopPropagation = vi.fn();
+        deleteButton?.props.onClick({ stopPropagation } as unknown as React.MouseEvent);
+
+        expect(stopPropagation).toHaveBeenCalled();
+        expect(setters.pendingDeletePromptIndex).toHaveBeenCalledWith(0);
+        expect(setters.defaultPrompts).not.toHaveBeenCalled();
+    });
+
+    it('削除確認は対象名を含み、承諾でその行だけを一覧から除く', () => {
+        const setters = arrangePanelState({ pendingDeletePromptIndex: 0 });
+        const tree = renderPanel();
+
+        expect(getText(tree)).toContain('「議事録」を削除しますか？');
+        expect(getText(tree)).toContain('「設定を保存」を押すまでは確定されません。');
+
+        findButton(tree, '削除する')?.props.onClick();
+
+        expect(setters.defaultPrompts).toHaveBeenCalledWith([]);
+        expect(setters.pendingDeletePromptIndex).toHaveBeenCalledWith(null);
+    });
+
+    it('削除確認をキャンセルすると一覧は変わらない', () => {
+        const setters = arrangePanelState({ pendingDeletePromptIndex: 0 });
+        const tree = renderPanel();
+
+        findButton(tree, 'キャンセル')?.props.onClick();
+
+        expect(setters.defaultPrompts).not.toHaveBeenCalled();
+        expect(setters.pendingDeletePromptIndex).toHaveBeenCalledWith(null);
     });
 });

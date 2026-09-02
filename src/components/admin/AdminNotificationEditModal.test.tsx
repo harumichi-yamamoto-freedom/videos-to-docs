@@ -52,9 +52,15 @@ function setControlValue(
     control.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+/**
+ * 操作可能なボタンだけを掴む。確認パネル表示中は背後のフォームが
+ * hidden+inert で DOM に残るため、文言一致だけだと DOM 先頭の
+ * 不活性ボタン（例: 編集フッターのキャンセル）を掴んで検査が空振りする。
+ */
 function findButton(container: HTMLElement, name: string): HTMLButtonElement | null {
     return Array.from(container.querySelectorAll('button')).find(
-        candidate => candidate.textContent?.trim() === name,
+        candidate => candidate.textContent?.trim() === name
+            && !candidate.closest('[inert]'),
     ) ?? null;
 }
 
@@ -106,6 +112,10 @@ describe('AdminNotificationEditModal', () => {
             root.unmount();
         });
         container.remove();
+        // 確認も結果表示もダイアログ内で完結する。ネイティブの confirm()/alert()
+        // へ退行したらどのテストでもここで落ちる。
+        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(alertSpy).not.toHaveBeenCalled();
         confirmSpy.mockRestore();
         alertSpy.mockRestore();
     });
@@ -220,42 +230,203 @@ describe('AdminNotificationEditModal', () => {
 
         // 未編集なので破棄の確認は出ずにそのまま閉じられる。
         await dispatchCancel();
-        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(container.textContent).not.toContain('未保存の変更があります');
         expect(onClose).toHaveBeenCalledTimes(1);
     });
 
-    it('表示モードのEscは確認せずに閉じる', async () => {
+    it('表示モードのEscは確認パネルを出さずに閉じる', async () => {
         await render();
         await dispatchCancel();
 
-        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(container.textContent).not.toContain('未保存の変更があります');
         expect(onClose).toHaveBeenCalledTimes(1);
     });
 
-    it('編集モードで未保存の変更があるEscは確認を経由し、破棄しないなら閉じない', async () => {
+    it('編集モードで未保存の変更があるEscはダイアログ内の破棄確認を出し、閉じない', async () => {
         await render();
         await switchToEditMode();
         await editBody('本文を書き換えました。');
-        confirmSpy.mockReturnValue(false);
 
         await dispatchCancel();
 
-        expect(confirmSpy).toHaveBeenCalledTimes(1);
-        expect(confirmSpy).toHaveBeenCalledWith(
-            '保存されていない変更があります。変更を破棄して閉じますか？',
-        );
+        const dialog = getDialog();
+        expect(dialog.getAttribute('role')).toBe('alertdialog');
+        expect(container.textContent).toContain('未保存の変更があります');
+        expect(container.textContent).toContain('閉じると、保存していない変更は失われます。');
+        expect(onClose).not.toHaveBeenCalled();
+
+        // 安全な選択肢へ初期フォーカスが移り、背後の編集フォームは操作から外れる。
+        const keepButton = findButton(container, '編集を続ける');
+        expect(document.activeElement).toBe(keepButton);
+        expect(container.querySelector('[inert]')?.getAttribute('aria-hidden')).toBe('true');
+    });
+
+    it('破棄確認で「編集を続ける」を選ぶと編集内容が残ったまま戻る', async () => {
+        await render();
+        await switchToEditMode();
+        await editBody('本文を書き換えました。');
+        await dispatchCancel();
+
+        const keepButton = findButton(container, '編集を続ける');
+        await act(async () => {
+            keepButton!.click();
+        });
+
+        expect(getDialog().getAttribute('role')).toBe('dialog');
+        expect(onClose).not.toHaveBeenCalled();
+        expect(container.querySelector('textarea')?.value).toBe('本文を書き換えました。');
+    });
+
+    it('破棄確認中のEscは確認だけを畳み、編集フォームへ戻す（閉じない）', async () => {
+        await render();
+        await switchToEditMode();
+        await editBody('本文を書き換えました。');
+        await dispatchCancel();
+        expect(container.textContent).toContain('未保存の変更があります');
+
+        await dispatchCancel();
+
+        expect(container.textContent).not.toContain('未保存の変更があります');
+        expect(onClose).not.toHaveBeenCalled();
+        expect(container.querySelector('textarea')?.value).toBe('本文を書き換えました。');
+    });
+
+    it('破棄確認で破棄を選ぶと閉じる', async () => {
+        await render();
+        await switchToEditMode();
+        await editBody('本文を書き換えました。');
+        await dispatchCancel();
+
+        const discardButton = findButton(container, '変更を破棄して閉じる');
+        await act(async () => {
+            discardButton!.click();
+        });
+
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('削除はダイアログ内で対象名を含む確認を出し、承諾で削除して閉じる', async () => {
+        await render();
+
+        const deleteButton = findButton(container, '削除');
+        await act(async () => {
+            deleteButton!.click();
+        });
+
+        expect(deleteSystemNotification).not.toHaveBeenCalled();
+        expect(getDialog().getAttribute('role')).toBe('alertdialog');
+        expect(container.textContent).toContain('「メンテナンスのお知らせ」を削除しますか？');
+        expect(container.textContent).toContain('削除したお知らせは元に戻せません。');
+
+        const confirmButton = findButton(container, '削除する');
+        await act(async () => {
+            confirmButton!.click();
+        });
+
+        expect(deleteSystemNotification).toHaveBeenCalledWith(NOTIFICATION.id);
+        expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('削除確認をキャンセルすると削除せずに一覧表示へ戻る', async () => {
+        await render();
+
+        await act(async () => {
+            const deleteButton = findButton(container, '削除')!;
+            // 実ブラウザではクリックでフォーカスも移る。jsdom は click で
+            // フォーカスを動かさないため、明示して同じ状況を作る。
+            deleteButton.focus();
+            deleteButton.click();
+        });
+        await act(async () => {
+            findButton(container, 'キャンセル')!.click();
+        });
+
+        expect(deleteSystemNotification).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+        expect(getDialog().getAttribute('role')).toBe('dialog');
+        // フォーカスは確認を開いた削除ボタンへ戻る。
+        expect(document.activeElement).toBe(findButton(container, '削除'));
+    });
+
+    it('公開状態の変更を伴う保存はダイアログ内の確認を経由する', async () => {
+        await render();
+        await switchToEditMode();
+
+        const publishedCheckbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+        expect(publishedCheckbox?.checked).toBe(true);
+        await act(async () => {
+            publishedCheckbox!.click();
+        });
+
+        await act(async () => {
+            findButton(container, '保存')!.click();
+        });
+
+        expect(updateSystemNotification).not.toHaveBeenCalled();
+        expect(getDialog().getAttribute('role')).toBe('alertdialog');
+        expect(container.textContent).toContain('このお知らせを非公開（下書き）にしますか？');
+        expect(container.textContent).toContain('既に閲覧したユーザーの既読状態はそのまま残ります');
+
+        await act(async () => {
+            findButton(container, '非公開にして保存する')!.click();
+        });
+
+        expect(updateSystemNotification).toHaveBeenCalledWith(NOTIFICATION.id, {
+            title: NOTIFICATION.title,
+            body: NOTIFICATION.body,
+            severity: NOTIFICATION.severity,
+            published: false,
+        });
         expect(onClose).not.toHaveBeenCalled();
     });
 
-    it('編集モードで未保存の変更を破棄承諾すればEscで閉じる', async () => {
+    it('公開状態変更の確認をキャンセルすると保存せず、パネルを畳んで編集へ戻る', async () => {
         await render();
         await switchToEditMode();
-        await editBody('本文を書き換えました。');
-        confirmSpy.mockReturnValue(true);
+        await act(async () => {
+            container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
+        });
 
-        await dispatchCancel();
+        await act(async () => {
+            findButton(container, '保存')!.click();
+        });
+        expect(getDialog().getAttribute('role')).toBe('alertdialog');
 
-        expect(onClose).toHaveBeenCalledTimes(1);
+        const cancelButton = findButton(container, 'キャンセル');
+        // 掴んだのが確認パネル側のキャンセルであること（inert なフォーム側でないこと）。
+        expect(cancelButton?.closest('[inert]')).toBeNull();
+        await act(async () => {
+            cancelButton!.click();
+        });
+
+        expect(updateSystemNotification).not.toHaveBeenCalled();
+        expect(onClose).not.toHaveBeenCalled();
+        // パネルが実際に畳まれ、通常のダイアログへ復帰している。
+        expect(getDialog().getAttribute('role')).toBe('dialog');
+        expect(container.textContent).not.toContain('このお知らせを非公開（下書き）にしますか？');
+        expect(container.textContent).not.toContain('非公開にして保存する');
+        // 編集内容（非公開への変更）は保持されている。
+        expect(
+            container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked,
+        ).toBe(false);
+    });
+
+    it('更新失敗はダイアログ内のrole=alertで伝え、編集内容を保持して閉じない', async () => {
+        updateSystemNotification.mockRejectedValueOnce(new Error('unavailable'));
+
+        await render();
+        await switchToEditMode();
+        await editBody('書き換えた本文。');
+        await act(async () => {
+            findButton(container, '保存')!.click();
+        });
+
+        const alert = container.querySelector('[role="alert"]');
+        expect(alert?.textContent).toContain('お知らせを更新できませんでした。');
+        expect(alert?.textContent).toContain('編集内容は保持されています。');
+        expect(onClose).not.toHaveBeenCalled();
+        expect(container.querySelector('textarea')?.value).toBe('書き換えた本文。');
+        expect(logError).toHaveBeenCalledTimes(1);
     });
 
     it('保存処理中はEscで閉じない', async () => {

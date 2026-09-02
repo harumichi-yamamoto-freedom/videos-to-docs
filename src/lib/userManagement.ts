@@ -3,7 +3,7 @@
  */
 
 import { db } from './firebase';
-import { collection, doc, getDoc, setDoc, getDocs, query, orderBy, serverTimestamp, Timestamp, where, limit } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, getDocs, query, orderBy, runTransaction, serverTimestamp, Timestamp, where, limit } from 'firebase/firestore';
 import { createLogger } from './logger';
 
 const userManagementLogger = createLogger('userManagement');
@@ -202,23 +202,24 @@ export async function isSuperuser(uid: string): Promise<boolean> {
 
 /**
  * ユーザーの統計情報を更新
+ *
+ * 読み取り時点の絶対値を setDoc で書き戻すと、並行する別の更新（プロンプト作成と
+ * 文書保存の同時実行など）を巻き戻す。競合時に再試行されるトランザクションで
+ * 「現在値 + 増分」を適用し、二重減算などでカウンタが負に沈まないよう 0 で止める。
  */
 export async function updateUserStats(uid: string, incrementPrompts: number = 0, incrementDocuments: number = 0): Promise<void> {
     try {
         const userRef = doc(db, 'users', uid);
-        const userSnap = await getDoc(userRef);
+        await runTransaction(db, async (transaction) => {
+            const userSnap = await transaction.get(userRef);
+            if (!userSnap.exists()) return;
 
-        if (userSnap.exists()) {
             const data = userSnap.data();
-            await setDoc(
-                userRef,
-                {
-                    promptCount: (data.promptCount || 0) + incrementPrompts,
-                    documentCount: (data.documentCount || 0) + incrementDocuments,
-                },
-                { merge: true }
-            );
-        }
+            transaction.update(userRef, {
+                promptCount: Math.max(0, (data.promptCount || 0) + incrementPrompts),
+                documentCount: Math.max(0, (data.documentCount || 0) + incrementDocuments),
+            });
+        });
     } catch (error) {
         userManagementLogger.error('ユーザー統計情報の更新に失敗', error, {
             uid,
