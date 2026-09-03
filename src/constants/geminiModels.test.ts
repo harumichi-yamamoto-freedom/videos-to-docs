@@ -172,6 +172,25 @@ describe('geminiModels', () => {
                 expect(option.benchmark, `${option.value} に benchmark が必要`).toBeDefined();
             }
         });
+
+        // 実測 (2026-09-03): gemini-3-pro-preview は 404 "no longer available" を返す。
+        // 選べる状態にしておくと、選んだ利用者は必ず変換に失敗する。
+        it('提供終了したモデルは選択肢に出さない', () => {
+            for (const retired of ['gemini-3-pro-preview']) {
+                expect(GEMINI_MODEL_OPTIONS.some(o => o.value === retired)).toBe(false);
+            }
+        });
+
+        it('保存済みプロンプトに残った提供終了モデルは後継へ読み替える', () => {
+            // 読み替えないと、既存プロンプトが変換のたびに 404 になる
+            expect(resolveGeminiModel('gemini-3-pro-preview')).toBe('gemini-3.1-pro-preview');
+            // 読み替え先は実在する選択肢であること
+            expect(
+                GEMINI_MODEL_OPTIONS.some(o => o.value === resolveGeminiModel('gemini-3-pro-preview')),
+            ).toBe(true);
+            // 生きているモデルは素通し (読み替えが広がっていないこと)
+            expect(resolveGeminiModel('gemini-3.1-pro-preview')).toBe('gemini-3.1-pro-preview');
+        });
     });
 });
 

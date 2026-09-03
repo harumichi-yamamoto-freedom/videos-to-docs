@@ -23,7 +23,7 @@ export interface GeminiModelPricing {
 //   全モデルを同じ物差しで並べるため Artificial Analysis Intelligence Index（推論あり版・2026-09-03 取得）を帯で★化:
 //     ≥58 → ★5 / 50〜57 → ★4 / 40〜49 → ★3 / 25〜39 → ★2 / <25 → ★1
 //   実測値: 3.8 Flash=59 / 3.7 Flash=56 / 3.5 Flash=52 / 3.5 Flash Lite=37 / 3.1 Pro=48 / 2.5 Pro=26 / 2.5 Flash Lite=7
-//   （3 Pro は同サイトから削除済みのため 3.1 Pro と同帯、2.5 Flash は推論版の掲載が無く 2.5 Pro と同帯に置く）
+//   （2.5 Flash は推論版の掲載が無く 2.5 Pro と同帯に置く）
 //   補助指標（同一モデルカード表）: DeepSWE 3.8=73.7 / 3.7=65.3、HLE-Verified 3.8=54.9 / 3.7=53.6、OSWorld-2.0 3.8=59.0 / 3.7=50.6。
 //   ⚠ この指標はコーディング/エージェント課題の比重が大きく、「音声→議事録」の品質そのものではない。
 //
@@ -69,11 +69,24 @@ export function canonicalizeGeminiModel(model?: string | null): string {
     return model;
 }
 
+/**
+ * 提供が終了したモデル → 後継モデル。
+ *
+ * gemini-3-pro-preview は 2026-09-03 時点で 404 を返す
+ * （"This model models/gemini-3-pro-preview is no longer available. Please update your code to
+ *   use models/gemini-3.1-pro-preview"）。選択肢からは外したが、既存プロンプトに保存済みの値が
+ * 残っていると変換のたびに 404 になるため、呼び出し時に後継へ読み替える。
+ */
+const RETIRED_GEMINI_MODELS = new Map<string, string>([
+    ['gemini-3-pro-preview', 'gemini-3.1-pro-preview'],
+]);
+
 export function resolveGeminiModel(model?: string | null): string {
     const canonicalModel = canonicalizeGeminiModel(model);
-    return canonicalModel === GEMINI_DEFAULT_MODEL_SENTINEL
-        ? DEFAULT_GEMINI_MODEL
-        : canonicalModel;
+    if (canonicalModel === GEMINI_DEFAULT_MODEL_SENTINEL) {
+        return DEFAULT_GEMINI_MODEL;
+    }
+    return RETIRED_GEMINI_MODELS.get(canonicalModel) ?? canonicalModel;
 }
 
 // 配列順 = ドロップダウン・比較表での表示順。新しい世代のモデルを上に並べる。
@@ -164,27 +177,6 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             analysisQuality: 3,
             estimatedSeconds: 70,
             recommendedFor: '深い推論が要る専門的な解析（現行Flashより低速・高価格）',
-        },
-    },
-    {
-        value: 'gemini-3-pro-preview',
-        label: 'Gemini 3 Pro (Preview)',
-        description: '強力な推論・エージェント機能を持つGemini 3世代フラッグシップ（プレビュー版）',
-        pricing: {
-            inputPerMTok: 2.0,
-            outputPerMTok: 12.0,
-            longContext: {
-                inputPerMTok: 4.0,
-                outputPerMTok: 18.0,
-                thresholdTokens: 200_000,
-            },
-        },
-        benchmark: {
-            // Artificial Analysis に掲載無し → 3.1 Pro と同帯 ★3（速度は据え置き）
-            recognitionQuality: 4,
-            analysisQuality: 3,
-            estimatedSeconds: 85,
-            recommendedFor: '複雑な構造化文書・難しい要約',
         },
     },
     {
