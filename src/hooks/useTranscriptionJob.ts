@@ -17,9 +17,7 @@
  * 置いてあり、テストは React を描画せずにここへ直接当てる。
  */
 import { useCallback, useRef, useState } from 'react';
-import { deleteObject, ref } from 'firebase/storage';
-import { storage } from '@/lib/firebase';
-import { uploadAudioToStorage } from '@/lib/storage';
+import { uploadAudioToStorage, deleteAudioFromStorage } from '@/lib/storage';
 import { createLogger } from '@/lib/logger';
 import {
     TRANSCRIBE_CHUNK_API_PATH,
@@ -746,7 +744,7 @@ export const defaultUploadChunk = (blob: Blob, fileName: string): Promise<string
 
 /** チャンク音声を消す */
 export const defaultDeleteChunk = async (storagePath: string): Promise<void> => {
-    await deleteObject(ref(storage, storagePath));
+    await deleteAudioFromStorage(storagePath);
 };
 
 /** `/api/transcribe/chunk` を叩く */
