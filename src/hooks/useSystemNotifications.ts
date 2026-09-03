@@ -8,8 +8,34 @@ import {
     subscribeToPublishedNotifications,
 } from '@/lib/systemNotifications';
 
-const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
-const MAX_BANNER_ITEMS_AUTHED = 5;
+/** ホーム最上部バナーに出す「直近」の窓。最新 1 件はこの窓に関係なく必ず出す。 */
+export const RECENT_BANNER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** 直近 1 週間に大量投入された場合の表示上限（画面を埋め尽くさないための保険）。 */
+export const MAX_BANNER_ITEMS = 10;
+
+/**
+ * バナーに出す通知 = 「一番新しいお知らせ 1 件」+「直近 1 週間のお知らせ全件」（閉じたものは除く・新しい順）。
+ * 最新 1 件は公開日に関係なく出す（お知らせが久しく無くても最後の 1 件は残す）。
+ * 純関数にして時刻を引数で受け、テストと hook の両方から同じ判定を使う。
+ */
+export function selectBannerNotifications(
+    notifications: readonly SystemNotification[],
+    dismissedIds: readonly string[],
+    now: number,
+): SystemNotification[] {
+    const dismissed = new Set(dismissedIds);
+    const visible = notifications
+        .filter(n => !dismissed.has(n.id))
+        .slice()
+        .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
+    if (visible.length === 0) return [];
+
+    const cutoff = now - RECENT_BANNER_WINDOW_MS;
+    const recent = visible.filter(n => n.publishedAt.getTime() >= cutoff);
+    const latest = visible[0];
+    const picked = recent.some(n => n.id === latest.id) ? recent : [latest, ...recent];
+    return picked.slice(0, MAX_BANNER_ITEMS);
+}
 
 export interface UseSystemNotificationsResult {
     notifications: SystemNotification[];
@@ -19,7 +45,7 @@ export interface UseSystemNotificationsResult {
     stale: boolean;
     retrying: boolean;
     retry: () => void;
-    /** ホーム最上部バナーに出す通知（dismiss 済み除外）。未認証時は1ヶ月以内最新1件のみ */
+    /** ホーム最上部バナーに出す通知 = 最新 1 件 + 直近 1 週間（dismiss 済み除外・未認証は dismiss 無し） */
     bannerNotifications: SystemNotification[];
 }
 
@@ -37,7 +63,7 @@ export function useSystemNotifications(): UseSystemNotificationsResult {
     const [dismissalsAttempt, setDismissalsAttempt] = useState(0);
     const notificationsAttemptRef = useRef(0);
     const dismissalsAttemptRef = useRef(0);
-    // 1ヶ月以内判定の基準時刻。マウント時に固定して useMemo 内で純粋に扱えるようにする。
+    // 「直近 1 週間」判定の基準時刻。マウント時に固定して useMemo 内で純粋に扱えるようにする。
     const [mountedAt] = useState(() => Date.now());
 
     // user 切替時に dismiss 状態をリセット（Adjusting state during render パターン）。
@@ -114,17 +140,11 @@ export function useSystemNotifications(): UseSystemNotificationsResult {
         }
     }, [currentUid, dismissalsError, notificationsError]);
 
-    const bannerNotifications = useMemo<SystemNotification[]>(() => {
-        if (user?.uid) {
-            const dismissed = new Set(dismissedIds);
-            return notifications
-                .filter(n => !dismissed.has(n.id))
-                .slice(0, MAX_BANNER_ITEMS_AUTHED);
-        }
-        const cutoff = mountedAt - ONE_MONTH_MS;
-        const latest = notifications.find(n => n.publishedAt.getTime() >= cutoff);
-        return latest ? [latest] : [];
-    }, [user?.uid, notifications, dismissedIds, mountedAt]);
+    const bannerNotifications = useMemo<SystemNotification[]>(
+        // 未認証には dismiss の概念が無いので除外リストは空。
+        () => selectBannerNotifications(notifications, user?.uid ? dismissedIds : [], mountedAt),
+        [user?.uid, notifications, dismissedIds, mountedAt],
+    );
 
     // 未認証時は dismiss の概念がないのでロード待ちにしない。
     const effectiveDismissalsLoaded = user?.uid ? dismissalsLoaded : true;
