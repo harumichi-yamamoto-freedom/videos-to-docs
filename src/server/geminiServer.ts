@@ -71,7 +71,7 @@ const AUDIO_DEFAULT_PROMPT = `
 export const defaultPromptFor = (mimeType: string): string =>
     mimeType.startsWith('video/') ? VIDEO_DEFAULT_PROMPT : AUDIO_DEFAULT_PROMPT;
 
-const NOT_CONFIGURED_MESSAGE = 'サーバに Gemini API キーが設定されていません。管理者に連絡してください。';
+const NOT_CONFIGURED_MESSAGE = 'サーバの設定が完了していません (Gemini API キー)。管理者に連絡してください。';
 
 export function getGeminiApiKey(): string {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -102,7 +102,7 @@ export function classifyGeminiError(error: unknown, targetModel: string): Genera
     }
     if (raw.includes('API_KEY_INVALID') || raw.includes('API key not valid') || raw.includes('API key expired')) {
         return new GenerateApiError('not_configured',
-            'サーバの Gemini API キーが無効です。管理者に連絡してください。', { cause: error });
+            'サーバの設定が完了していません (Gemini API キーが無効)。管理者に連絡してください。', { cause: error });
     }
     if (raw.includes('PERMISSION_DENIED')) {
         return new GenerateApiError('upstream_error',
