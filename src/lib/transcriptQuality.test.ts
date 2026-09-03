@@ -490,3 +490,53 @@ describe('レポートの形', () => {
         expect(report.failedGates).toEqual(['G1', 'G3', 'G4', 'G5', 'G7', 'G8']);
     });
 });
+
+describe('🔴 G8 は両側 — 時刻が音声長を超える暴走も落とす', () => {
+    // 実測 (2026-09-03): 30分(1,800秒)の音声で最終注釈が 70,710秒 / 102,081秒 になる走があった。
+    // 前者は status: completed・反復なし・ユニーク率0.90・話者4名で、G1〜G7 をすべて通過する。
+    const runaway = (lastEndSec: number, audioSec = 1800): ChunkResult => ({
+        status: 'completed',
+        text: 'こんにちは。本日はよろしくお願いします。担当の間宮です。',
+        annotations: [
+            { text: 'こんにちは', startOffsetSec: 0, endOffsetSec: 1, speaker: 'spk:0' },
+            { text: 'お願いします', startOffsetSec: lastEndSec - 1, endOffsetSec: lastEndSec, speaker: 'spk:1' },
+        ],
+        audioSec,
+        speechSec: 1200,
+    });
+
+    it('実測された暴走 (39倍) を G8 が落とす', () => {
+        const report = evaluateChunkQuality(runaway(70709.9), {
+            diarizationEnabled: true, timestampsEnabled: true,
+        });
+        expect(report.failedGates).toContain('G8');
+        expect(report.passed).toBe(false);
+    });
+
+    it('実測された暴走 (57倍) を G8 が落とす', () => {
+        const report = evaluateChunkQuality(runaway(102080.9), {
+            diarizationEnabled: true, timestampsEnabled: true,
+        });
+        expect(report.failedGates).toContain('G8');
+    });
+
+    it('🔴 下側だけを見ていたら通り抜けることの証人 — 他のゲートは1つも落ちない', () => {
+        const report = evaluateChunkQuality(runaway(70709.9), {
+            diarizationEnabled: true, timestampsEnabled: true,
+        });
+        // G8 以外は「正常」と言っている。片側検定だとこの走は合格になっていた。
+        expect(report.failedGates).toEqual(['G8']);
+    });
+
+    it('境界: 1.05 ちょうどは通り、それを超えると落ちる', () => {
+        const ok = evaluateChunkQuality(runaway(1890, 1800), { timestampsEnabled: true });
+        expect(ok.failedGates).not.toContain('G8');
+        const ng = evaluateChunkQuality(runaway(1890.1, 1800), { timestampsEnabled: true });
+        expect(ng.failedGates).toContain('G8');
+    });
+
+    it('末尾がわずかに音声長を超えるのは許す (境界の丸め)', () => {
+        const report = evaluateChunkQuality(runaway(1800.5, 1800), { timestampsEnabled: true });
+        expect(report.failedGates).not.toContain('G8');
+    });
+});

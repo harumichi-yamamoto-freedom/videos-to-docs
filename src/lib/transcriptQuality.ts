@@ -110,6 +110,20 @@ export const MIN_CHARS_PER_SPEECH_SEC = 1.5;
  */
 export const MIN_COVERAGE_RATIO = 0.9;
 
+/**
+ * G8 の上側。最終注釈時刻が音声長のこの倍率を超えたら「時刻が暴走している」。
+ *
+ * 🔴 実測 (2026-09-03・較正リグ): 30 分 (1,800 秒) の音声に対し、
+ * 最終注釈が **70,710 秒 (19.6 時間)** / **102,081 秒 (28 時間)** になる走があった。
+ * 前者は `status: completed`・反復なし (最長連続 2)・ユニーク率 0.90・話者 4 名で、
+ * **G1〜G7 をすべて通過し、下側だけを見る G8 も通過する**。
+ * カバレッジを片側でしか見ないと、この失敗様式は誰も捕まえられない。
+ *
+ * 上限に 1.05 の余裕を持たせているのは、末尾の注釈が音声長をわずかに超えることがあるため
+ * (境界の丸め)。実測の暴走は 39 倍・57 倍なので、この余裕では取り逃がさない。
+ */
+export const MAX_COVERAGE_RATIO = 1.05;
+
 /** G7: 商談は最低この人数の話者が居るはず */
 export const MIN_SPEAKERS = 2;
 
@@ -122,6 +136,8 @@ export interface QualityGateOptions {
     maxCompressionRatio?: number;
     minCharsPerSpeechSec?: number;
     minCoverageRatio?: number;
+    /** G8 の上側。既定 1.05。時刻が音声長を超える暴走を捕まえる */
+    maxCoverageRatio?: number;
     minSpeakers?: number;
     /**
      * 話者分離が有効か。G7 はこれが true のときだけ判定する。
@@ -287,6 +303,7 @@ export const evaluateChunkQuality = (
     const outputTokenLimit = options.outputTokenLimit ?? chunk.outputTokenLimit ?? DEFAULT_OUTPUT_TOKEN_LIMIT;
     const outputTokenLimitRatio = options.outputTokenLimitRatio ?? OUTPUT_TOKEN_LIMIT_RATIO;
     const maxConsecutive = options.maxConsecutiveUnits ?? MAX_CONSECUTIVE_UNITS;
+    const maxCoverage = options.maxCoverageRatio ?? MAX_COVERAGE_RATIO;
     const minUniqueRatio = options.minUniqueUnitRatio ?? MIN_UNIQUE_UNIT_RATIO;
     const minUnitsForUnique = options.minUnitsForUniqueRatio ?? MIN_UNITS_FOR_UNIQUE_RATIO;
     const maxRatio = options.maxCompressionRatio ?? MAX_COMPRESSION_RATIO;
@@ -422,6 +439,16 @@ export const evaluateChunkQuality = (
                 reason: `最終注釈 ${metrics.lastAnnotationEndSec}s / 音声長 ${chunk.audioSec}s = ${metrics.coverageRatio.toFixed(3)} — 途中で打ち切られている`,
                 observed: metrics.coverageRatio,
                 threshold: minCoverage,
+            });
+        } else if (metrics.coverageRatio > maxCoverage) {
+            // 🔴 上側。時刻が音声長を大きく超える走が実在する (定数のコメント参照)。
+            //    本文も構造も正常に見えるので、ここで落とさないと誰も捕まえられない。
+            add({
+                gate: 'G8',
+                severity: 'fail',
+                reason: `最終注釈 ${metrics.lastAnnotationEndSec}s / 音声長 ${chunk.audioSec}s = ${metrics.coverageRatio.toFixed(3)} — 時刻が音声の長さを超えている`,
+                observed: metrics.coverageRatio,
+                threshold: maxCoverage,
             });
         }
     }
