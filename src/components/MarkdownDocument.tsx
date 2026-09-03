@@ -66,17 +66,31 @@ const markdownComponents: Components = {
 export type MarkdownDocumentProps = {
     markdown: string;
     className?: string;
+    /**
+     * 既定の描画を要素単位で差し替える。
+     *
+     * 文字起こし文書だけが `a` / `p` / `strong` を上書きして、時刻リンク・話者ラベルを
+     * 操作可能にする (`createTranscriptMarkdownComponents`)。
+     * 🔴 **渡さなければ既定のまま**で、他の文書の見た目は 1px も変わらない。
+     */
+    components?: Components;
 };
 
 export const MarkdownDocument = React.memo(function MarkdownDocument({
     markdown,
     className,
+    components,
 }: MarkdownDocumentProps): React.ReactElement {
+    // 上書きは要素単位。渡された要素だけが差し替わり、残りは既定のまま。
+    const merged = React.useMemo<Components>(
+        () => (components ? { ...markdownComponents, ...components } : markdownComponents),
+        [components],
+    );
     return (
         <div className={className}>
             <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
-                components={markdownComponents}
+                components={merged}
             >
                 {markdown}
             </ReactMarkdown>
