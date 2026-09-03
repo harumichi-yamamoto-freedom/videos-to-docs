@@ -7,6 +7,12 @@
  *
  * ここに置くのは副作用のない純関数だけ。API 呼び出し・再試行の制御は上位層 (設計 §4.3) の仕事。
  * 判定に使った実測値も一緒に返す — 再試行の判断とログに要るため。
+ *
+ * 🔴 **これらの検査は、リクエストが正しく組まれていることを前提とする。呼び出し側は preflight で
+ * 設定が効いていることを assert すること。** `diarization_mode` と `timestamp_granularities` は
+ * API 側で値が検証されず、綴りを間違えても 400 にならず「話者ラベルが全部 null」「注釈 0 件」が 200 で返る (実測)。
+ * そのため G7 (話者が 1 種類のみ) と G8 (カバレッジ) が落ちたとき、原因が「モデルの失敗」なのか
+ * 「呼び出し側の綴り間違い」なのかを、このモジュールだけでは区別できない。
  */
 import { deflateSync } from 'node:zlib';
 
@@ -30,7 +36,14 @@ export interface ChunkResult {
     audioSec: number;
     /** VAD (silencedetect / Silero VAD) で測った発話秒数 */
     speechSec: number;
-    /** 出力トークン数 (取れれば) */
+    /**
+     * 出力トークン数。
+     * 🔴 `usage.total_output_tokens` を使ってはいけない — **出力上限に到達した崩壊走でも常に 0 が返る** (実測)。
+     * これを読むと G1 のトークン条件が永久に発火せず、静かに無効な検査になる。
+     * 正しい出所は `usage.model_invocation_token_counts[].candidates_tokens_details[]` のうち
+     * `modality === 'text'` の `tokenCount` の**合計** (要素が複数あり得る)。
+     * 取れなかった場合は undefined を渡すこと (0 と undefined はどちらも「判定不能」として扱われ、合格にはならない)。
+     */
     outputTokens?: number;
     /** 出力トークン上限 (既定 32,768) */
     outputTokenLimit?: number;
@@ -49,10 +62,12 @@ export const OUTPUT_TOKEN_LIMIT_RATIO = 0.98;
 
 /**
  * G3: 同一ユニットがこの回数以上連続したら不合格。
- * 実測: 正常の最長連続は 2 / 崩壊の最小は 2,251 (1,125 倍の間隔)。較正の暫定採用値は 20 だが、
- * 国内の実装事例の値 3 まで攻めても正常 4 件 (最長 2) は通る。正常コーパスを増やすときに再確認すること。
+ * 🔴 実測: **正常の最長連続は 6** (設計 §1.8 の「話者分離＋単語タイムスタンプ」走: completed / 1,023 文字 /
+ * 圧縮率 2.48 / 最長連続 6 = 正常判定) / 崩壊の最小は 2,251。分離比は約 375 倍で、20 は両側に十分な余裕がある。
+ * 🔴 国内の実装事例の値 3 は持ち込めない — あちらは**句読点を除去してフレーズ単位で完全一致を取る別の定義**で、
+ * `。` `．` `、` と改行で割るわれわれの定義では正常サンプル (最長連続 6) が落ちる。
  */
-export const MAX_CONSECUTIVE_UNITS = 3;
+export const MAX_CONSECUTIVE_UNITS = 20;
 
 /**
  * G4: ユニーク率がこれ未満なら不合格。実測: 正常 0.893〜1.000 / 崩壊 0.000〜0.006 (149 倍の間隔)。
@@ -72,18 +87,28 @@ export const MIN_UNITS_FOR_UNIQUE_RATIO = 40;
 export const MAX_COMPRESSION_RATIO = 8.0;
 
 /**
- * G6: 文字数 ÷ 発話秒数がこれ未満なら「黙った過少出力」。実測: 正常 4〜5.5 文字/秒、崩壊 0.03〜0.7。
+ * G6: 文字数 ÷ 発話秒数がこれ未満なら「黙った過少出力」の疑い。実測: 正常 4〜5.5 文字/秒、崩壊 0.03〜0.7。
  * 🔴 分母は音声長ではなく発話秒数。商談録音には移動・雑談・無音が実際に含まれ、
  * 音声長を分母にすると正常な静かな区間を誤検出する。
+ *
+ * 🔴 **G6 は `warn` であって `fail` ではない — チャンクを不合格にしない。**
+ * 疎な 10 分区間を `silencedetect` (ノイズフロア −45.2 dB / 無音率 76% / 発話 143.5 秒) で割り直すと
+ * 123 文字 = 0.86 文字/秒で閾値を下回るが、これが「モデルの取りこぼし」なのか
+ * 「silencedetect が移動音・衣擦れを発話と数えた」のかは正解データが無く判別できていない。
+ * そして **G6 だけが捕まえる確認済みの真陽性がまだ 1 件も無い** (実測した過少出力の実例は
+ * G2 が捕まえるか、キャッシュ由来の artifact だった)。
+ * 真陽性が無く偽陽性の疑いだけがあるゲートを不合格判定に使わない。値は計算してレポートに載せるだけにする。
  */
 export const MIN_CHARS_PER_SPEECH_SEC = 1.5;
 
 /**
  * G8: 最終注釈時刻 ÷ 音声長がこれ未満なら「カバレッジ不足」。
- * 🔴 実測: `completed` を返しながら 30 分中 20.0 分までしか起こさない走が 2/2。
+ * 🔴 実測: `completed` を返しながら 30 分中 20.0 分までしか起こさない走が 2/2 (カバレッジ 67% / 74%)。
  * G1〜G7 のどれも捕まえられない (status は completed・本文の構造は正常) ので、G1 では代替できない。
+ * 🔴 閾値は 0.90。**正常と判定した 30 分の走のカバレッジが 93.8%** (設計 §3.3 の長さ実測表) なので、
+ * 0.95 に置くとこの正常サンプルが落ちる。正常の最小 93.8% と不合格の実例 74% の間に置く。
  */
-export const MIN_COVERAGE_RATIO = 0.95;
+export const MIN_COVERAGE_RATIO = 0.9;
 
 /** G7: 商談は最低この人数の話者が居るはず */
 export const MIN_SPEAKERS = 2;
@@ -112,8 +137,19 @@ export interface QualityGateOptions {
     timestampsEnabled?: boolean;
 }
 
-export interface QualityGateFailure {
+/**
+ * 所見の重さ。
+ * - `fail`: チャンクを不合格にする。再試行 (設計 §4.3) の対象。
+ * - `warn`: 記録するがチャンクは不合格にしない。真陽性が未確認で偽陽性の疑いがある検査 (現状 G6 だけ)。
+ * - `indeterminate`: 🔴 **検査を走らせられなかった**。合格ではない。
+ *   「成功時に無言の検査層は、動いたのか走らなかったのかが区別できない」を避けるため、
+ *   走らなかったことが必ず結果に現れるようにする。
+ */
+export type QualitySeverity = 'fail' | 'warn' | 'indeterminate';
+
+export interface QualityGateFinding {
     gate: QualityGateId;
+    severity: QualitySeverity;
     /** 人が読む理由 (ログ・失敗表示用) */
     reason: string;
     /** 判定に使った実測値。測れなかったなら null */
@@ -145,10 +181,20 @@ export interface TranscriptQualityMetrics {
 }
 
 export interface TranscriptQualityReport {
+    /** `fail` が 1 つも無ければ true。`warn` と `indeterminate` は合否に影響しない */
     passed: boolean;
-    /** 落ちたゲートの ID (G1→G8 の順) */
+    /** 不合格になったゲートの ID (G1→G8 の順) */
     failedGates: QualityGateId[];
-    failures: QualityGateFailure[];
+    /** 警告だけのゲート (チャンクは不合格にしない) */
+    warnedGates: QualityGateId[];
+    /** 🔴 走らせられなかった検査。合格とは別物なので、ログでも合格に丸めないこと */
+    indeterminateGates: QualityGateId[];
+    /** 全所見 (fail / warn / indeterminate) を G1→G8 の順で */
+    findings: QualityGateFinding[];
+    /** findings のうち fail のものだけ */
+    failures: QualityGateFinding[];
+    /** findings のうち warn のものだけ */
+    warnings: QualityGateFinding[];
     metrics: TranscriptQualityMetrics;
 }
 
@@ -252,20 +298,36 @@ export const evaluateChunkQuality = (
     const timestampsEnabled = options.timestampsEnabled ?? chunk.annotations.length > 0;
 
     const metrics = measureChunk(chunk, { ...options, outputTokenLimit });
-    const failures: QualityGateFailure[] = [];
+    const findings: QualityGateFinding[] = [];
+    const add = (finding: QualityGateFinding) => findings.push(finding);
 
     // G1: 出力上限到達。status は最優先で見るが、これだけでは足りない (崩壊の 3 種類が completed を返す)
     const tokenCeiling = outputTokenLimit * outputTokenLimitRatio;
     if (chunk.status !== 'completed') {
-        failures.push({
+        add({
             gate: 'G1',
+            severity: 'fail',
             reason: `status が completed ではない (${chunk.status}) — 出力上限で打ち切られた可能性`,
             observed: chunk.status,
             threshold: 'completed',
         });
-    } else if (chunk.outputTokens !== undefined && chunk.outputTokens >= tokenCeiling) {
-        failures.push({
+    }
+    // 🔴 トークン側は status と独立に見る。取れなかったら「判定不能」であって「合格」ではない —
+    // total_output_tokens は上限到達の崩壊走でも 0 を返すので、0 / undefined を黙って合格に丸めると検査が静かに死ぬ。
+    if (chunk.outputTokens === undefined || chunk.outputTokens === 0) {
+        add({
             gate: 'G1',
+            severity: 'indeterminate',
+            reason:
+                '出力トークン数を取得できなかった (undefined または 0) — 上限到達の検査を走らせていない。' +
+                'usage.model_invocation_token_counts[].candidates_tokens_details[] の modality === "text" の合計を渡すこと',
+            observed: chunk.outputTokens ?? null,
+            threshold: tokenCeiling,
+        });
+    } else if (chunk.outputTokens >= tokenCeiling) {
+        add({
+            gate: 'G1',
+            severity: 'fail',
             reason: `出力トークンが上限 ${outputTokenLimit} の ${outputTokenLimitRatio} に到達 — 反復確定`,
             observed: chunk.outputTokens,
             threshold: tokenCeiling,
@@ -274,13 +336,14 @@ export const evaluateChunkQuality = (
 
     // G2: 空。20 分チャンクで 0 文字・status completed・エラーなしの実例がある
     if (chunk.text.length === 0) {
-        failures.push({ gate: 'G2', reason: '本文が 0 文字', observed: 0, threshold: '> 0' });
+        add({ gate: 'G2', severity: 'fail', reason: '本文が 0 文字', observed: 0, threshold: '> 0' });
     }
 
     // G3: 最長連続ユニット (主検査)。実発話と交互に出る反復は捕まえられないので G4 と対で使う
     if (metrics.maxConsecutiveUnits >= maxConsecutive) {
-        failures.push({
+        add({
             gate: 'G3',
+            severity: 'fail',
             reason: `同一ユニットが ${metrics.maxConsecutiveUnits} 回連続 — 反復崩壊`,
             observed: metrics.maxConsecutiveUnits,
             threshold: maxConsecutive,
@@ -289,8 +352,9 @@ export const evaluateChunkQuality = (
 
     // G4: ユニーク率。連続していない反復 (実発話と交互に出る型) はここでしか捕まらない
     if (metrics.unitCount >= minUnitsForUnique && metrics.uniqueUnitRatio !== null && metrics.uniqueUnitRatio < minUniqueRatio) {
-        failures.push({
+        add({
             gate: 'G4',
+            severity: 'fail',
             reason: `ユニーク率 ${metrics.uniqueUnitRatio.toFixed(3)} (${metrics.uniqueUnitCount}/${metrics.unitCount}) — 反復崩壊`,
             observed: metrics.uniqueUnitRatio,
             threshold: minUniqueRatio,
@@ -299,19 +363,29 @@ export const evaluateChunkQuality = (
 
     // G5: 圧縮率 (副検査)。読点区切りの反復のように G3 が見逃した実例を実際に捕まえた
     if (metrics.compressionRatio !== null && metrics.compressionRatio > maxRatio) {
-        failures.push({
+        add({
             gate: 'G5',
+            severity: 'fail',
             reason: `圧縮率 ${metrics.compressionRatio.toFixed(2)} — 反復崩壊`,
             observed: metrics.compressionRatio,
             threshold: maxRatio,
         });
     }
 
-    // G6: 過少出力。分母は音声長ではなく発話秒数
-    if (metrics.charsPerSpeechSec !== null && metrics.charsPerSpeechSec < minCharsPerSec) {
-        failures.push({
+    // G6: 過少出力。分母は音声長ではなく発話秒数。🔴 warn 止まり — チャンクを不合格にしない (定数のコメント参照)
+    if (metrics.charsPerSpeechSec === null) {
+        add({
             gate: 'G6',
-            reason: `発話 1 秒あたり ${metrics.charsPerSpeechSec.toFixed(2)} 文字 — 黙った過少出力`,
+            severity: 'indeterminate',
+            reason: `発話秒数が ${chunk.speechSec} — 過少出力を測れない (VAD の値を渡すこと)`,
+            observed: null,
+            threshold: minCharsPerSec,
+        });
+    } else if (metrics.charsPerSpeechSec < minCharsPerSec) {
+        add({
+            gate: 'G6',
+            severity: 'warn',
+            reason: `発話 1 秒あたり ${metrics.charsPerSpeechSec.toFixed(2)} 文字 — 過少出力の疑い (警告のみ・不合格にはしない)`,
             observed: metrics.charsPerSpeechSec,
             threshold: minCharsPerSec,
         });
@@ -319,8 +393,9 @@ export const evaluateChunkQuality = (
 
     // G7: 話者の妥当性。商談は最低 2 話者。話者分離が有効なときだけ判定する
     if (diarizationEnabled && metrics.speakerCount < minSpeakers) {
-        failures.push({
+        add({
             gate: 'G7',
+            severity: 'fail',
             reason: `話者分離が有効なのに話者が ${metrics.speakerCount} 種類 — 商談として不自然`,
             observed: metrics.speakerCount,
             threshold: minSpeakers,
@@ -330,8 +405,9 @@ export const evaluateChunkQuality = (
     // G8: カバレッジ。🔴 G1 では代替できない — 実測したカバレッジ不足の走はいずれも status: completed
     if (timestampsEnabled) {
         if (metrics.coverageRatio === null) {
-            failures.push({
+            add({
                 gate: 'G8',
+                severity: 'fail',
                 reason:
                     chunk.annotations.length === 0
                         ? '単語タイムスタンプが有効なのに注釈が 0 本 — カバレッジを測れない'
@@ -340,8 +416,9 @@ export const evaluateChunkQuality = (
                 threshold: minCoverage,
             });
         } else if (metrics.coverageRatio < minCoverage) {
-            failures.push({
+            add({
                 gate: 'G8',
+                severity: 'fail',
                 reason: `最終注釈 ${metrics.lastAnnotationEndSec}s / 音声長 ${chunk.audioSec}s = ${metrics.coverageRatio.toFixed(3)} — 途中で打ち切られている`,
                 observed: metrics.coverageRatio,
                 threshold: minCoverage,
@@ -349,10 +426,18 @@ export const evaluateChunkQuality = (
         }
     }
 
+    const bySeverity = (severity: QualitySeverity) => findings.filter((finding) => finding.severity === severity);
+    const failures = bySeverity('fail');
+    const warnings = bySeverity('warn');
+
     return {
         passed: failures.length === 0,
-        failedGates: failures.map((failure) => failure.gate),
+        failedGates: failures.map((finding) => finding.gate),
+        warnedGates: warnings.map((finding) => finding.gate),
+        indeterminateGates: bySeverity('indeterminate').map((finding) => finding.gate),
+        findings,
         failures,
+        warnings,
         metrics,
     };
 };

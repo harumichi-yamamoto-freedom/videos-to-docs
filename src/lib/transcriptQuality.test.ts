@@ -25,6 +25,12 @@ import {
 /** 実データで観測された正常な日本語文字起こしの圧縮率の域 (較正 2026-09-03) */
 const REAL_NORMAL_COMPRESSION_RANGE = { min: 2.7, max: 3.2 };
 
+/** 🔴 実データで正常と判定した走の最長連続ユニット (設計 §1.8: 話者分離＋単語タイムスタンプ / 1,023文字 / 圧縮率 2.48) */
+const REAL_NORMAL_MAX_CONSECUTIVE = 6;
+
+/** 🔴 実データで正常と判定した 30 分の走のカバレッジ (設計 §3.3 の長さ実測表) */
+const REAL_NORMAL_MIN_COVERAGE = 0.938;
+
 /** 発話 1 秒あたり 4.5 文字 (実データの正常域 4〜5.5 の中央) になる発話秒数を当てて、G6 を無関係にする */
 const gateChunk = (text: string, overrides: Partial<ChunkResult> = {}): ChunkResult =>
     makeChunk(text, { audioSec: 600, speechSec: Math.max(1, text.length / 4.5), ...overrides });
@@ -106,17 +112,28 @@ describe('正常ケース (陰性統制): 合成の商談テキストは G1〜G8
     for (const { name, chunk } of NORMAL_CHUNKS) {
         it(`${name} は 1 つも落ちない`, () => {
             const report = evaluateChunkQuality(chunk);
-            expect(report.failures.map((failure) => `${failure.gate}: ${failure.reason}`)).toEqual([]);
+            expect(report.failures.map((finding) => `${finding.gate}: ${finding.reason}`)).toEqual([]);
+            expect(report.warnedGates).toEqual([]);
             expect(report.passed).toBe(true);
+            // 🔴 outputTokens を渡していないので G1 のトークン条件は「判定不能」として結果に現れる (合格に丸めない)
+            expect(report.indeterminateGates).toEqual(['G1']);
         });
     }
 
-    it('正常本文の実測値が、実データの正常域と同じ側に居る (最長連続 ≦ 2・ユニーク率 ≧ 0.6)', () => {
+    it('正常本文の実測値が、実データの正常域と同じ側に居る (最長連続 ≦ 6・ユニーク率 ≧ 0.6)', () => {
         for (const { name, chunk } of NORMAL_CHUNKS) {
             const { metrics } = evaluateChunkQuality(chunk);
-            expect(metrics.maxConsecutiveUnits, name).toBeLessThanOrEqual(2);
+            // 実データの正常最長連続は 6 (設計 §1.8 の構成B の走)。合成 fixture はそれより内側に居る
+            expect(metrics.maxConsecutiveUnits, name).toBeLessThanOrEqual(REAL_NORMAL_MAX_CONSECUTIVE);
             expect(metrics.uniqueUnitRatio ?? 0, name).toBeGreaterThan(0.6);
-            expect(metrics.charsPerSpeechSec ?? 0, name).toBeGreaterThan(4);
+        }
+    });
+
+    it('🔴 正常 fixture は 4〜5.5 文字/発話秒 の帯だけ — 判定保留の 0.86 文字/秒 帯を混ぜない', () => {
+        for (const { name, chunk } of NORMAL_CHUNKS) {
+            const { metrics } = evaluateChunkQuality(chunk);
+            expect(metrics.charsPerSpeechSec ?? 0, name).toBeGreaterThanOrEqual(4);
+            expect(metrics.charsPerSpeechSec ?? 0, name).toBeLessThanOrEqual(5.5);
         }
     });
 
@@ -196,13 +213,15 @@ describe('崩壊ケース: すべて捕捉される', () => {
         expect(report.metrics.coverageRatio ?? 0).toBeCloseTo(0.67, 6);
     });
 
-    it('過少出力 (文字数はあるが発話秒数に対して 1.5 未満) は G6 だけが捕まえる', () => {
+    it('🔴 過少出力は warn 止まり — 記録はするがチャンクは不合格にしない', () => {
         const report = evaluateChunkQuality(
             makeChunk(NORMAL_WRITTEN_STYLE, { audioSec: 1200, speechSec: 1000 }),
         );
-        expect(report.passed).toBe(false);
-        expect(report.failedGates).toEqual(['G6']);
         expect(report.metrics.charsPerSpeechSec ?? 0).toBeCloseTo(1.115, 6);
+        expect(report.warnedGates).toEqual(['G6']);
+        expect(report.failedGates).toEqual([]);
+        expect(report.passed).toBe(true);
+        expect(report.findings.find((item) => item.gate === 'G6')?.severity).toBe('warn');
     });
 
     it('🔴 「文字数が多い＝正常」ではない: 崩壊本文は正常本文より長くても落ちる', () => {
@@ -223,26 +242,58 @@ describe('G1 (出力上限到達) の境界', () => {
         expect(gatesOf(gateChunk(NORMAL_LONG_TRANSCRIPT, { outputTokens: 32112 }))).not.toContain('G1');
     });
 
-    it('outputTokens が取れないチャンクでは G1 のトークン判定をしない (status だけ見る)', () => {
-        const report = evaluateChunkQuality(gateChunk(NORMAL_LONG_TRANSCRIPT));
-        expect(report.metrics.outputTokenRatio).toBeNull();
-        expect(report.failedGates).not.toContain('G1');
+    it('🔴 outputTokens が取れないときは「判定不能」— 合格に丸めない', () => {
+        for (const outputTokens of [undefined, 0]) {
+            const report = evaluateChunkQuality(gateChunk(NORMAL_LONG_TRANSCRIPT, { outputTokens }));
+            expect(report.indeterminateGates, String(outputTokens)).toContain('G1');
+            expect(report.failedGates, String(outputTokens)).not.toContain('G1');
+            const finding = report.findings.find((item) => item.gate === 'G1');
+            expect(finding?.severity).toBe('indeterminate');
+            expect(finding?.reason).toContain('model_invocation_token_counts');
+        }
+    });
+
+    it('🔴 total_output_tokens は常に 0 を返す — 0 を渡しても検査が「通った」ことにはならない', () => {
+        const report = evaluateChunkQuality(gateChunk(NORMAL_LONG_TRANSCRIPT, { outputTokens: 0 }));
+        expect(report.metrics.outputTokenRatio).toBe(0);
+        expect(report.indeterminateGates).toContain('G1');
+    });
+
+    it('outputTokens が undefined でも status だけで正しく落とせる', () => {
+        const report = evaluateChunkQuality(
+            gateChunk(NORMAL_LONG_TRANSCRIPT, { status: 'incomplete', outputTokens: undefined }),
+        );
+        expect(report.failedGates).toContain('G1');
+        expect(report.passed).toBe(false);
+        // 落ちた理由は status であり、トークン側は走っていないことも同時に現れる
+        expect(report.findings.filter((item) => item.gate === 'G1').map((item) => item.severity)).toEqual([
+            'fail',
+            'indeterminate',
+        ]);
     });
 });
 
 describe('G3 (最長連続ユニット) の境界', () => {
     const base = NORMAL_LONG_TRANSCRIPT;
+    const withRun = (count: number) => `${base}\n${'そうですね。'.repeat(count)}`;
 
-    it('3 回連続で落ち、2 回連続では落ちない', () => {
-        const twice = `${base}\nそうですね。そうですね。`;
-        const thrice = `${base}\nそうですね。そうですね。そうですね。`;
-        expect(gatesOf(gateChunk(twice))).not.toContain('G3');
-        expect(gatesOf(gateChunk(thrice))).toContain('G3');
-        expect(evaluateChunkQuality(gateChunk(thrice)).metrics.maxConsecutiveUnits).toBe(3);
+    it('20 回連続で落ち、19 回連続では落ちない', () => {
+        expect(evaluateChunkQuality(gateChunk(withRun(20))).metrics.maxConsecutiveUnits).toBe(20);
+        expect(evaluateChunkQuality(gateChunk(withRun(19))).metrics.maxConsecutiveUnits).toBe(19);
+        expect(gatesOf(gateChunk(withRun(20)))).toContain('G3');
+        expect(gatesOf(gateChunk(withRun(19)))).not.toContain('G3');
     });
 
-    it('読点で連続していても数える (「ここ、ここ、ここ、」で 3)', () => {
-        expect(gatesOf(gateChunk(`${base}\nここ、ここ、ここ、`))).toContain('G3');
+    it('🔴 実データの正常サンプル (最長連続 6) は落ちない — 閾値 3 だとこれが偽陽性になる', () => {
+        const chunk = gateChunk(withRun(REAL_NORMAL_MAX_CONSECUTIVE));
+        expect(evaluateChunkQuality(chunk).metrics.maxConsecutiveUnits).toBe(6);
+        expect(gatesOf(chunk)).not.toContain('G3');
+        expect(gatesOf(chunk, { maxConsecutiveUnits: 3 })).toContain('G3');
+    });
+
+    it('読点で連続していても数える (「ここ、」×20 で落ちる)', () => {
+        expect(gatesOf(gateChunk(`${base}\n${'ここ、'.repeat(20)}`))).toContain('G3');
+        expect(gatesOf(gateChunk(`${base}\n${'ここ、'.repeat(19)}`))).not.toContain('G3');
     });
 });
 
@@ -292,13 +343,27 @@ describe('G5 (圧縮率) の境界', () => {
     });
 });
 
-describe('G6 (過少出力) の境界', () => {
+describe('G6 (過少出力・警告のみ) の境界', () => {
     const text = NORMAL_LONG_TRANSCRIPT.slice(0, 900);
+    const warnsOf = (chunk: ChunkResult) => evaluateChunkQuality(chunk).warnedGates;
 
-    it('ちょうど 1.5 文字/秒では落ちず、それを下回ると落ちる', () => {
+    it('ちょうど 1.5 文字/秒では警告せず、それを下回ると警告する (どちらも不合格にはしない)', () => {
         expect(text).toHaveLength(900);
-        expect(gatesOf(makeChunk(text, { audioSec: 1200, speechSec: 600 }))).not.toContain('G6');
-        expect(gatesOf(makeChunk(text, { audioSec: 1200, speechSec: 601 }))).toContain('G6');
+        const at = makeChunk(text, { audioSec: 1200, speechSec: 600 });
+        const below = makeChunk(text, { audioSec: 1200, speechSec: 601 });
+        expect(warnsOf(at)).not.toContain('G6');
+        expect(warnsOf(below)).toContain('G6');
+        expect(evaluateChunkQuality(below).failedGates).not.toContain('G6');
+        expect(evaluateChunkQuality(below).passed).toBe(true);
+    });
+
+    it('🔴 どんなに低くても fail にはしない — 真陽性が未確認のゲートで出荷を止めない', () => {
+        // 疎な 10 分区間の実測: 発話 143.5 秒 / 123 文字 = 0.86 文字/秒。正常とも異常とも判定できていない帯。
+        const chunk = makeChunk('あ。'.repeat(62), { audioSec: 600, speechSec: 143.5 });
+        const report = evaluateChunkQuality(chunk);
+        expect(report.metrics.charsPerSpeechSec ?? 0).toBeCloseTo(0.86, 2);
+        expect(report.warnedGates).toContain('G6');
+        expect(report.failedGates).not.toContain('G6');
     });
 
     it('🔴 分母は音声長ではなく発話秒数 — 無音の多い正常チャンクを誤検出しない', () => {
@@ -306,12 +371,14 @@ describe('G6 (過少出力) の境界', () => {
         const chunk = makeChunk(NORMAL_WRITTEN_STYLE, { audioSec: 1200, speechSec: 240 });
         expect(NORMAL_WRITTEN_STYLE.length / 1200).toBeLessThan(1.5);
         expect(evaluateChunkQuality(chunk).metrics.charsPerSpeechSec ?? 0).toBeGreaterThan(4);
-        expect(gatesOf(chunk)).not.toContain('G6');
+        expect(warnsOf(chunk)).not.toContain('G6');
     });
 
-    it('発話秒数が 0 なら判定しない (測れないものを落とさない)', () => {
+    it('発話秒数が 0 なら「判定不能」— 警告にも合格にもしない', () => {
         const report = evaluateChunkQuality(makeChunk(NORMAL_WRITTEN_STYLE, { audioSec: 300, speechSec: 0 }));
         expect(report.metrics.charsPerSpeechSec).toBeNull();
+        expect(report.indeterminateGates).toContain('G6');
+        expect(report.warnedGates).not.toContain('G6');
         expect(report.failedGates).not.toContain('G6');
     });
 });
@@ -350,20 +417,32 @@ describe('G7 (話者の妥当性)', () => {
 describe('G8 (カバレッジ) の境界', () => {
     const audioSec = 1000;
 
-    it('ちょうど 0.95 では落ちず、それを下回ると落ちる', () => {
-        const at = makeChunk(NORMAL_LONG_TRANSCRIPT, {
+    const withCoverage = (endOffsetSec: number) =>
+        makeChunk(NORMAL_LONG_TRANSCRIPT, {
             audioSec,
             speechSec: 740,
-            annotations: [{ text: '末', startOffsetSec: 940, endOffsetSec: 950, speaker: 'spk:0' }],
+            annotations: [
+                { text: '頭', startOffsetSec: 0, endOffsetSec: 1, speaker: 'spk:0' },
+                { text: '末', startOffsetSec: endOffsetSec - 1, endOffsetSec, speaker: 'spk:1' },
+            ],
         });
-        const below = makeChunk(NORMAL_LONG_TRANSCRIPT, {
-            audioSec,
-            speechSec: 740,
-            annotations: [{ text: '末', startOffsetSec: 940, endOffsetSec: 949, speaker: 'spk:0' }],
-        });
-        expect(evaluateChunkQuality(at).metrics.coverageRatio).toBe(0.95);
-        expect(gatesOf(at)).not.toContain('G8');
-        expect(gatesOf(below)).toContain('G8');
+
+    it('ちょうど 0.90 では落ちず、それを下回ると落ちる', () => {
+        expect(evaluateChunkQuality(withCoverage(900)).metrics.coverageRatio).toBe(0.9);
+        expect(gatesOf(withCoverage(900))).not.toContain('G8');
+        expect(gatesOf(withCoverage(899))).toContain('G8');
+    });
+
+    it('🔴 実データの正常サンプル (カバレッジ 93.8%) は落ちない — 閾値 0.95 だとこれが偽陽性になる', () => {
+        const chunk = withCoverage(audioSec * REAL_NORMAL_MIN_COVERAGE);
+        expect(evaluateChunkQuality(chunk).metrics.coverageRatio).toBeCloseTo(0.938, 6);
+        expect(gatesOf(chunk)).not.toContain('G8');
+        expect(gatesOf(chunk, { minCoverageRatio: 0.95 })).toContain('G8');
+    });
+
+    it('不合格の実例 (74% / 67%) は落ちる', () => {
+        expect(gatesOf(withCoverage(audioSec * 0.74))).toContain('G8');
+        expect(gatesOf(withCoverage(audioSec * 0.67))).toContain('G8');
     });
 
     it('🔴 G1 では代替できない — カバレッジ不足の実例は status: completed を返す', () => {
