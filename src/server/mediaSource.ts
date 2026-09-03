@@ -56,7 +56,7 @@ export interface FetchedMedia extends MediaObjectInfo {
 }
 
 const NOT_FOUND_MESSAGE =
-    'アップロードした音声ファイルが見つかりませんでした。ファイルを選び直して、もう一度変換してください。';
+    'ファイルが見つかりません。アップロードをやり直して、もう一度変換してください。';
 const TOO_LARGE_MESSAGE =
     `ファイルが大きすぎます (上限 ${Math.floor(GENERATE_MAX_MEDIA_BYTES / 1024 / 1024)}MB)。ビットレートを下げるか、ファイルを分割してから再試行してください。`;
 

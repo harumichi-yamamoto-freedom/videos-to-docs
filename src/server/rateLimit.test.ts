@@ -130,8 +130,11 @@ describe('consumeRateLimit / enforceRateLimit (transaction)', () => {
         await expect(consumeRateLimit('uid-1', { nowMs: now })).resolves.toMatchObject({ allowed: true, count: 1 });
         await expect(consumeRateLimit('uid-1', { nowMs: now + 1 })).resolves.toMatchObject({ allowed: true, count: 2 });
         expect(doubles.rateDocs.get('rateLimits/uid-1')).toEqual({ windowStartMs: now, count: 2, limit: 2, updatedAt: 'SERVER_TS' });
-        await expect(enforceRateLimit({ kind: 'user', uid: 'uid-1' }, '1.1.1.1', { nowMs: now + 2 }))
-            .rejects.toMatchObject({ code: 'rate_limited', status: 429, retryAfterSec: 3600 });
+        const rejected = await enforceRateLimit({ kind: 'user', uid: 'uid-1' }, '1.1.1.1', { nowMs: now + 2 }).catch(e => e);
+        expect(rejected).toMatchObject({ code: 'rate_limited', status: 429, retryAfterSec: 3600 });
+        // 待ち時間は message に書かない (クライアントが retryAfterSec から付加する)
+        expect(rejected.message).toBe('時間あたりの上限に達しました。しばらく待ってから再度お試しください。');
+        expect(rejected.message).not.toMatch(/[0-9０-９]/);
         // 拒否時は書かない
         expect(doubles.rateDocs.get('rateLimits/uid-1')?.count).toBe(2);
     });

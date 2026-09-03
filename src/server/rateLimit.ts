@@ -148,10 +148,8 @@ export async function consumeRateLimit(
     return decision;
 }
 
-const rateLimitedMessage = (limit: number, retryAfterSec: number): string => {
-    const minutes = Math.max(1, Math.ceil(retryAfterSec / 60));
-    return `1 時間あたりの変換回数の上限 (${limit} 件) に達しました。約 ${minutes} 分後に再試行してください。`;
-};
+/** 待ち時間は本文に書かない (クライアントが retryAfterSec から「約N秒後」を付加するため二重になる) */
+const RATE_LIMITED_MESSAGE = '時間あたりの上限に達しました。しばらく待ってから再度お試しください。';
 
 /** ルート用: 主体と IP から subject を作り、超過なら 429 の GenerateApiError を投げる */
 export async function enforceRateLimit(
@@ -162,7 +160,7 @@ export async function enforceRateLimit(
     const decision = await consumeRateLimit(rateLimitSubjectFor(subject, ip), options);
     if (!decision.allowed) {
         const retryAfterSec = decision.retryAfterSec ?? Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
-        throw new GenerateApiError('rate_limited', rateLimitedMessage(decision.limit, retryAfterSec), { retryAfterSec });
+        throw new GenerateApiError('rate_limited', RATE_LIMITED_MESSAGE, { retryAfterSec });
     }
     return decision;
 }

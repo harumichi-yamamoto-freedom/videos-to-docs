@@ -31,8 +31,9 @@ describe('parseServiceAccountJson', () => {
         expect(parseServiceAccountJson(Buffer.from(JSON.stringify(SA)).toString('base64'))).toEqual(SA);
         expect(parseServiceAccountJson(`  ${JSON.stringify(SA)}\n`)).toEqual(SA);
     });
-    it('どちらでも無ければ投げる', () => {
-        expect(() => parseServiceAccountJson('not json')).toThrow();
+    it('判別は先頭の `{`: `{` 始まりは JSON としてのみ解釈 (base64 へは落ちない)', () => {
+        expect(() => parseServiceAccountJson('{broken')).toThrow(/JSON として解釈できません/);
+        expect(() => parseServiceAccountJson('not base64 json')).toThrow(/base64/);
         expect(() => parseServiceAccountJson('')).toThrow();
         expect(() => parseServiceAccountJson('[1,2]')).toThrow();
     });

@@ -21,31 +21,32 @@ const logger = createLogger('firebaseAdmin');
 export const ADMIN_APP_NAME = 'videos-to-docs-server';
 
 const NOT_CONFIGURED_MESSAGE =
-    'サーバの Firebase 管理資格情報が設定されていません。管理者に連絡してください。';
+    'サーバの設定が完了していません (Firebase 管理資格情報)。管理者に連絡してください。';
 
 let cachedApp: App | null = null;
 
-/** JSON 文字列 → 失敗なら base64 → JSON の順に解釈する */
+/** 判別は運用文書 (docs/api-generate.md) と同じ: 値が `{` で始まれば JSON 文字列、それ以外は base64 とみなして decode */
 export function parseServiceAccountJson(raw: string): Record<string, unknown> {
     const trimmed = raw.trim();
     if (!trimmed) {
         throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON が空です');
     }
-    const tryParse = (text: string): Record<string, unknown> | null => {
-        try {
-            const value = JSON.parse(text) as unknown;
-            return value && typeof value === 'object' && !Array.isArray(value)
-                ? (value as Record<string, unknown>)
-                : null;
-        } catch {
-            return null;
-        }
-    };
-    const direct = tryParse(trimmed);
-    if (direct) return direct;
-    const decoded = tryParse(Buffer.from(trimmed, 'base64').toString('utf8'));
-    if (decoded) return decoded;
-    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON を JSON としても base64 としても解釈できません');
+    const text = trimmed.startsWith('{') ? trimmed : Buffer.from(trimmed, 'base64').toString('utf8');
+    let value: unknown;
+    try {
+        value = JSON.parse(text);
+    } catch (error) {
+        throw new Error(
+            trimmed.startsWith('{')
+                ? 'FIREBASE_SERVICE_ACCOUNT_JSON を JSON として解釈できません'
+                : 'FIREBASE_SERVICE_ACCOUNT_JSON を base64 → JSON として解釈できません',
+            { cause: error },
+        );
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON がオブジェクトではありません');
+    }
+    return value as Record<string, unknown>;
 }
 
 function buildCredential(): Credential {
