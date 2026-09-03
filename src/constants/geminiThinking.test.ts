@@ -104,3 +104,23 @@ describe('geminiThinking', () => {
         });
     });
 });
+
+describe('Gemini 3.8 系の思考レベル対応 (2026-09-03)', () => {
+    it.each([
+        ['default', 'MEDIUM'],
+        ['low', 'LOW'],
+        ['medium', 'MEDIUM'],
+        ['high', 'HIGH'],
+    ])('Gemini 3.8 系では %s を %s に解決する', (level, expected) => {
+        expect(resolveThinkingLevelForModel(level, 'gemini-3.8-flash')).toBe(expected);
+    });
+
+    it('前方一致により将来の Gemini 3.8 系モデルにも適用する', () => {
+        expect(resolveThinkingLevelForModel('high', 'gemini-3.8-flash-preview')).toBe('HIGH');
+    });
+
+    it('3.8 と紛らわしい非対応 ID では undefined を返す', () => {
+        expect(resolveThinkingLevelForModel('high', 'gemini-3.8')).toBeUndefined();
+        expect(resolveThinkingLevelForModel('high', 'gemini-3.80-flash')).toBeUndefined();
+    });
+});

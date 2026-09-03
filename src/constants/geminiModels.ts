@@ -9,27 +9,31 @@ export interface GeminiModelPricing {
 }
 
 // 各モデルのベンチマーク評価。当サービス（音声/動画 → 文書）で重要な軸に絞っている。
+// ★は「現時点の最上位モデルを5とした相対評価」。新世代が出たら全体を再基準化する（最終再基準化: 2026-09-03、3.8 Flash 公開時）。
 //
 // recognitionQuality（動画・音声の認識力）: ★1〜5
-//   公式ベンチマークから相対順位を決定。
-//   - FLEURS WER（多言語音声書き起こし精度）
-//   - Video-MME（動画理解の総合スコア）
-//   - MMMU-Pro（マルチモーダル理解の補完指標）
-//   出典: Gemini 2.5 技術レポート (arxiv:2507.06261)、各モデル公式モデルカード。
+//   Gemini 3 系は公式に音声ベンチを公開していないため、モデルカード（同一手法・同一表内）の
+//   動画/図表理解で相対順位を決める。3.8 Flash は 3.7 Flash ベースで音声経路は同一。
+//   - LVBench（長尺動画理解）: 3.8=87.1 / 3.7=85.4 / 3.6=84.2（3.5 は未掲載）
+//   - CharXiv Reasoning（図表からの情報統合）: 3.8=86.2 / 3.7=84.5 / 3.6=85.2 / 3.5=84.2
+//   出典: Gemini 3.8 / 3.7 / 3.6 Flash Model Card（deepmind.google/models/model-cards）。
+//   2.5 系は Gemini 2.5 技術レポート (arxiv:2507.06261) の FLEURS / Video-MME による従来評価を据え置き。
 //
 // analysisQuality（分析・出力品質）: ★1〜5
-//   プロンプト指示への追従と推論能力を相対評価。
-//   - IFEval（指示追従の遵守度）
-//   - MMMU-Pro（マルチモーダル推論）
-//   - GPQA Diamond（難問理解）
-//   出典: Artificial Analysis、各モデル公式モデルカード。
+//   全モデルを同じ物差しで並べるため Artificial Analysis Intelligence Index（推論あり版・2026-09-03 取得）を帯で★化:
+//     ≥58 → ★5 / 50〜57 → ★4 / 40〜49 → ★3 / 25〜39 → ★2 / <25 → ★1
+//   実測値: 3.8 Flash=59 / 3.7 Flash=56 / 3.5 Flash=52 / 3.5 Flash Lite=37 / 3.1 Pro=48 / 2.5 Pro=26 / 2.5 Flash Lite=7
+//   （3 Pro は同サイトから削除済みのため 3.1 Pro と同帯、2.5 Flash は推論版の掲載が無く 2.5 Pro と同帯に置く）
+//   補助指標（同一モデルカード表）: DeepSWE 3.8=73.7 / 3.7=65.3、HLE-Verified 3.8=54.9 / 3.7=53.6、OSWorld-2.0 3.8=59.0 / 3.7=50.6。
+//   ⚠ この指標はコーディング/エージェント課題の比重が大きく、「音声→議事録」の品質そのものではない。
 //
 // estimatedSeconds（速度の素データ）: 「2時間音声 → A4 1〜2枚」の体感処理時間（秒）
 //   計算式: 入力処理時間 + 思考時間（推論モデルのみ） + 出力tokens ÷ 出力tok/s
 //   - 入力: 音声 32 tokens/sec × 7,200秒 = 230,400 tokens（Gemini API 公式レート）
 //   - 出力: 約 3,000 tokens 想定（A4 1〜2枚相当）
 //   - 出力 tok/s: Artificial Analysis 実測（Flash 系 ≈199 / Pro 系 ≈120-150）
-//   - 思考時間: 推論モデルは TTFT 実測（3.5 Flash ≈22.8s）から逆算
+//   - 思考時間: Artificial Analysis の TTFT 実測（2026-09-03: 3.8 Flash 13.3s / 3.7 Flash 11.4s / 3.5 Flash 13.9s /
+//     3.5 Flash Lite 7.6s / 3.1 Pro 22.2s / 2.5 Pro 24.8s）を採用。入力処理は 18s で固定（3.7 Flash の実測 40s から逆算）。
 //   表示時は ModelComparisonTable 内の speedRatingFromSeconds で★に変換。
 export interface GeminiModelBenchmark {
     recognitionQuality: 1 | 2 | 3 | 4 | 5;
@@ -46,7 +50,7 @@ export interface GeminiModelOption {
     benchmark?: GeminiModelBenchmark;
 }
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 export const GEMINI_DEFAULT_MODEL_SENTINEL = 'default';
 
 /**
@@ -75,10 +79,10 @@ export function resolveGeminiModel(model?: string | null): string {
 // 配列順 = ドロップダウン・比較表での表示順。新しい世代のモデルを上に並べる。
 export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
     {
-        value: 'gemini-3.7-flash',
-        label: 'Gemini 3.7 Flash',
-        description: 'Google推奨の現行フラッグシップFlash（2026-08 GA）。動画・音声・PDF入力対応、1Mコンテキスト。3.5 Flashより高速・低価格',
-        // ⚠️ プロモ価格: 2026-12-31まで。2027-01-01から入力$1.50/出力$7.50に倍額（公式料金表に明記）。
+        value: 'gemini-3.8-flash',
+        label: 'Gemini 3.8 Flash',
+        description: 'Google最新のFlash（2026-09-02 GA、3.7 Flashベース）。動画・音声・PDF入力対応、1Mコンテキスト。3.7と同価格・同速度で分析・エージェント性能が向上',
+        // ⚠️ プロモ価格: 3.7 Flash と同じく 2026-12-31 まで。2027-01-01 から入力$1.50/出力$7.50に倍額（公式料金表・モデルカードに明記）。
         pricing: {
             inputPerMTok: 0.75,
             outputPerMTok: 3.75,
@@ -86,9 +90,27 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
         benchmark: {
             recognitionQuality: 5,
             analysisQuality: 5,
-            // 出力 ≈287-308 tok/s（Artificial Analysis実測）。⚠️思考は既定ON・レベルmedium（OFF不可・公式docs確認済2026-09-01）のため実測待ち時間には思考分が含まれる
+            // 出力 ≈302 tok/s・TTFT 13.3s（Artificial Analysis 2026-09-03）。思考レベルは low/medium/high（minimal 不可・公式 docs）。
+            estimatedSeconds: 41,
+            recommendedFor: '動画・音声→文書の総合おすすめ。現行の既定モデル（おまかせ）',
+        },
+    },
+    {
+        value: 'gemini-3.7-flash',
+        label: 'Gemini 3.7 Flash',
+        description: '前世代のFlash（2026-08 GA）。動画・音声・PDF入力対応、1Mコンテキスト。3.8 Flashと同価格・同速度',
+        // ⚠️ プロモ価格: 2026-12-31まで。2027-01-01から入力$1.50/出力$7.50に倍額（公式料金表に明記）。
+        pricing: {
+            inputPerMTok: 0.75,
+            outputPerMTok: 3.75,
+        },
+        benchmark: {
+            recognitionQuality: 5,
+            // Intelligence Index 56 → ★4（3.8 Flash=59 を★5に再基準化）
+            analysisQuality: 4,
+            // 出力 ≈287 tok/s・TTFT 11.4s（Artificial Analysis 2026-09-03）。⚠️思考は既定ON・レベルmedium（OFF不可・公式docs確認済2026-09-01）のため実測待ち時間には思考分が含まれる
             estimatedSeconds: 40,
-            recommendedFor: '動画・音声→文書の総合おすすめ。現行の既定モデル',
+            recommendedFor: '3.8 と同価格・同速度の前世代。固定したい場合の互換用途',
         },
     },
     {
@@ -100,10 +122,11 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             outputPerMTok: 9.0,
         },
         benchmark: {
-            recognitionQuality: 5,
-            analysisQuality: 5,
-            estimatedSeconds: 60,
-            recommendedFor: '動画・音声→文書の総合おすすめ。品質最高クラス',
+            // CharXiv 84.2（3.8=86.2）・2世代前 → ★4 / Intelligence Index 52 → ★4 / 189 tok/s・TTFT 13.9s
+            recognitionQuality: 4,
+            analysisQuality: 4,
+            estimatedSeconds: 48,
+            recommendedFor: '前世代のFlash。認識力は高いが 3.7/3.8 より価格が2倍',
         },
     },
     {
@@ -115,9 +138,10 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             outputPerMTok: 2.5,
         },
         benchmark: {
+            // Intelligence Index 37 → ★2 / 347 tok/s・TTFT 7.6s
             recognitionQuality: 3,
-            analysisQuality: 3,
-            estimatedSeconds: 30,
+            analysisQuality: 2,
+            estimatedSeconds: 34,
             recommendedFor: '大量バッチ処理・コスト重視の運用',
         },
     },
@@ -135,10 +159,11 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             },
         },
         benchmark: {
+            // Intelligence Index 48 → ★3 / 102 tok/s・TTFT 22.2s
             recognitionQuality: 4,
-            analysisQuality: 5,
-            estimatedSeconds: 95,
-            recommendedFor: '最高難度の推論・専門的な解析',
+            analysisQuality: 3,
+            estimatedSeconds: 70,
+            recommendedFor: '深い推論が要る専門的な解析（現行Flashより低速・高価格）',
         },
     },
     {
@@ -155,8 +180,9 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             },
         },
         benchmark: {
+            // Artificial Analysis に掲載無し → 3.1 Pro と同帯 ★3（速度は据え置き）
             recognitionQuality: 4,
-            analysisQuality: 5,
+            analysisQuality: 3,
             estimatedSeconds: 85,
             recommendedFor: '複雑な構造化文書・難しい要約',
         },
@@ -170,8 +196,9 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             outputPerMTok: 0.4,
         },
         benchmark: {
+            // Intelligence Index 7（非推論版）→ ★1
             recognitionQuality: 2,
-            analysisQuality: 2,
+            analysisQuality: 1,
             estimatedSeconds: 30,
             recommendedFor: '大量バッチ処理・最安運用',
         },
@@ -185,8 +212,9 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             outputPerMTok: 2.5,
         },
         benchmark: {
+            // 推論版の掲載無し → 2.5 Pro と同帯 ★2
             recognitionQuality: 3,
-            analysisQuality: 3,
+            analysisQuality: 2,
             estimatedSeconds: 35,
             recommendedFor: '日常的な変換・標準利用',
         },
@@ -194,7 +222,7 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
     {
         value: 'gemini-2.5-pro',
         label: 'Gemini 2.5 Pro',
-        description: '複雑な推論・コーディング・マルチモーダルタスク向けフラッグシップ。最高精度だがコスト高',
+        description: '2.5世代のフラッグシップ。当時は最高精度だったが現行の3.x Flashに品質・価格とも劣る',
         pricing: {
             inputPerMTok: 1.25,
             outputPerMTok: 10.0,
@@ -205,10 +233,11 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             },
         },
         benchmark: {
+            // Intelligence Index 26 → ★2 / 122 tok/s・TTFT 24.8s
             recognitionQuality: 4,
-            analysisQuality: 4,
-            estimatedSeconds: 55,
-            recommendedFor: '安定運用したい高品質な文書生成',
+            analysisQuality: 2,
+            estimatedSeconds: 67,
+            recommendedFor: '旧世代の互換用途。現行Flashより低品質・高価格',
         },
     },
 ];
@@ -236,4 +265,14 @@ export function getGeminiPricingLabelShort(model: string): string | undefined {
     const pricing = GEMINI_MODEL_MAP.get(resolveGeminiModel(model))?.pricing;
     if (!pricing) return undefined;
     return `入力 ${PRICE_FORMATTER.format(pricing.inputPerMTok)} / 出力 ${PRICE_FORMATTER.format(pricing.outputPerMTok)}`;
+}
+
+/**
+ * プロモ価格（2026-12-31 まで）が適用されるモデル。
+ * 2027-01-01 に入力 $1.50 / 出力 $7.50 へ倍額（公式料金表・モデルカードに明記）。
+ */
+const INTRODUCTORY_PRICING_MODELS = new Set(['gemini-3.7-flash', 'gemini-3.8-flash']);
+
+export function hasIntroductoryPricing(model: string): boolean {
+    return INTRODUCTORY_PRICING_MODELS.has(model);
 }

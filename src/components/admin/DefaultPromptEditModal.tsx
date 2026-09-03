@@ -464,7 +464,8 @@ export default function DefaultPromptEditModal({
 
                     <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
                         {/* Geminiモデル選択 */}
-                        <div>
+                        {/* 比較表を開いている間は 2 列ぶち抜き（:has で状態を持たずに判定・左列だけだと 6 列中 2 列しか見えない） */}
+                        <div className="md:has-[[aria-expanded=true]]:col-span-2">
                             <span className="block text-sm font-semibold text-gray-700 mb-2">
                                 使用するGeminiモデル
                             </span>

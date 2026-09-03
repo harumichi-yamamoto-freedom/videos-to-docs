@@ -6,6 +6,7 @@ import {
     GEMINI_MODEL_OPTIONS,
     getGeminiModelLabel,
     getGeminiPricingLabelShort,
+    hasIntroductoryPricing,
     resolveGeminiModel,
 } from '../constants/geminiModels';
 
@@ -63,7 +64,7 @@ export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         return (
             <span>
                 {priceLabel}
-                {model === 'gemini-3.7-flash' && (
+                {hasIntroductoryPricing(model) && (
                     <span className="mt-1 block text-[10px] font-medium text-amber-700">
                         プロモ価格（期限2026/12/31）
                     </span>
@@ -227,7 +228,7 @@ export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                 role={onSelect ? 'radiogroup' : undefined}
                 aria-label={onSelect ? 'モデルを選択' : undefined}
             >
-                <table className="w-full min-w-[56rem] text-xs">
+                <table className="w-full min-w-[48rem] text-xs">
                     <caption className="sr-only">Geminiモデル性能比較</caption>
                     <thead className="border-b border-gray-200 bg-gray-50">
                         <tr>
@@ -263,7 +264,7 @@ export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                             <th scope="col" className="px-3 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">
                                 料金（1Mトークン）
                             </th>
-                            <th scope="col" className="min-w-80 px-3 py-2 text-left font-semibold text-gray-700">
+                            <th scope="col" className="min-w-48 px-3 py-2 text-left font-semibold text-gray-700">
                                 おすすめ用途
                             </th>
                         </tr>
@@ -308,11 +309,11 @@ export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                                             </label>
                                         </td>
                                     )}
-                                    <th scope="row" className="px-3 py-4 text-left font-medium text-gray-900 whitespace-nowrap">
-                                        <div className="flex items-center gap-1.5">
+                                    <th scope="row" className="min-w-44 px-3 py-4 text-left font-medium text-gray-900">
+                                        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                                             <span>{option.label}</span>
                                             {isDefaultOption && (
-                                                <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                                                <span className="shrink-0 whitespace-nowrap rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
                                                     現在の既定
                                                 </span>
                                             )}
@@ -355,10 +356,10 @@ export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                                             <span className="text-gray-400">-</span>
                                         )}
                                     </td>
-                                    <td className="px-3 py-4 text-gray-700 whitespace-nowrap">
+                                    <td className="px-3 py-4 text-gray-700">
                                         {renderPrice(metadataModel)}
                                     </td>
-                                    <td className="min-w-80 px-3 py-4 text-gray-700">
+                                    <td className="min-w-48 px-3 py-4 text-gray-700">
                                         {benchmark?.recommendedFor ?? '-'}
                                     </td>
                                 </tr>
