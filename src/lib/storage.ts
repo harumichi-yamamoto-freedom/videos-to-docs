@@ -23,14 +23,15 @@ export interface AudioUploadMetadata {
 }
 
 /**
- * 音声ファイルを Firebase Storage にアップロード
- * エラー時は null を返し、ログのみ記録（ベストエフォート）
+ * 音声ファイルを Firebase Storage にアップロードし、Storage 上のパスを返す。
+ * #4: 文書生成はサーバがこのパスから読むので、アップロード失敗は文書生成の失敗でもある。
+ * 以前の「失敗しても null で続行 (ベストエフォート)」はやめ、失敗はそのまま投げる。
  */
 export async function uploadAudioToStorage(
     audioBlob: Blob,
     fileName: string,
     metadata: AudioUploadMetadata
-): Promise<string | null> {
+): Promise<string> {
     try {
         const ownerId = getCurrentUserId();
         const ownerType = getOwnerType();
@@ -60,8 +61,8 @@ export async function uploadAudioToStorage(
         storageLogger.info('音声ファイルのアップロードが完了', { storagePath });
         return storagePath;
     } catch (error) {
-        storageLogger.error('音声ファイルのアップロードに失敗（文書生成は続行）', error, { fileName });
-        return null;
+        storageLogger.error('音声ファイルのアップロードに失敗（文書生成は行えない）', error, { fileName });
+        throw error;
     }
 }
 
