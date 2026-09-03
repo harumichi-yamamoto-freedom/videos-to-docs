@@ -67,6 +67,22 @@ function extractAllowExpressions(block: string): Record<string, string> {
     return expressions;
 }
 
+/** 書込み系(create/update/delete/write)の allow 式だけを取り出す。読取系の重複定義は無視する。 */
+function extractWriteAllowExpressions(block: string): Record<string, string> {
+    const expressions: Record<string, string> = {};
+    const allowPattern = /allow\s+([a-z,\s]+?):\s*if([\s\S]*?);/g;
+    for (const match of block.matchAll(allowPattern)) {
+        const ops = match[1].split(',').map((op) => op.trim());
+        const expression = normalize(match[2]);
+        for (const op of ops) {
+            if (!['create', 'update', 'delete', 'write'].includes(op)) continue;
+            expect(expressions[op], `allow ${op} が複数回定義されている`).toBeUndefined();
+            expressions[op] = expression;
+        }
+    }
+    return expressions;
+}
+
 /** `function <name>(...)` の return 式(正規化済み)を取り出す。let 束縛は読み飛ばす。 */
 function extractReturnExpression(name: string): string {
     const start = rules.indexOf(`function ${name}`);
@@ -151,6 +167,9 @@ describe('firestore.rules: allow 式の完全一致', () => {
     const relationships = extractAllowExpressions(extractMatchBlock('relationships'));
     const notifications = extractAllowExpressions(extractMatchBlock('systemNotifications'));
     const auditLogs = extractAllowExpressions(extractMatchBlock('auditLogs'));
+    // users は `allow list` を 2 本持つ(管理者の全件 / 上司追加のメール検索 limit<=1)ため、
+    // 重複を拒む extractAllowExpressions は使わず、昇格に関わる書込み系だけを取り出す。
+    const users = extractWriteAllowExpressions(extractMatchBlock('users'));
 
     it('prompts: get は 存在確認/所有者/承認済み上司、list は canListExisting() のみ', () => {
         expect(prompts.get).toBe(
@@ -224,6 +243,20 @@ describe('firestore.rules: allow 式の完全一致', () => {
         expect(auditLogs.read).toBe('isSuperuser()');
         // 監査ログの不変性: create / read 以外の allow 文(update / delete / write)が増えたら錠を落とす。
         expect(Object.keys(auditLogs).sort()).toEqual(['create', 'read']);
+    });
+
+    it('users: create は本人かつ superuser が「無い」か false のみ(delete→create の作り直しで昇格できない)、update は superuser 不変', () => {
+        // S1-1 (#3): 旧ルールは create/delete に superuser の制約が無く、任意の登録ユーザーが自分の doc を
+        // superuser:true で作る(または削除して作り直す)だけで管理者になれた。エミュレータ実証 2026-09-03。
+        expect(users.create).toBe(
+            "request.auth != null && request.auth.uid == userId && (!('superuser' in request.resource.data) || request.resource.data.superuser == false)",
+        );
+        expect(users.update).toBe(
+            "request.auth != null && request.auth.uid == userId && (!request.resource.data.keys().hasAll(['superuser']) || resource.data.superuser == request.resource.data.superuser)",
+        );
+        expect(users.delete).toBe('request.auth != null && request.auth.uid == userId');
+        // 昇格経路は create / update の 2 本だけ: 他の書込み許可文(write / set 等)が増えたら錠を落とす。
+        expect(Object.keys(users).sort()).toEqual(['create', 'delete', 'update']);
     });
 });
 
