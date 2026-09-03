@@ -246,8 +246,8 @@ export const useVideoProcessing = (
     }, []);
 
     /**
-     * V2: 占有中のジョブが全て決着するまで待つ。ただし下層（ffmpeg・Gemini・Storage）は
-     * signal を見ないので、待ちが返らないことがある。上限を超えたら false を返す。
+     * V2: 占有中のジョブが全て決着するまで待つ。文書生成 API の fetch は signal で切れるが、
+     * ffmpeg・Storage は signal を見ないので、待ちが返らないことがある。上限を超えたら false を返す。
      */
     const waitForJobsToSettle = useCallback((
         timeoutMs: number = JOB_SETTLE_TIMEOUT_MS
