@@ -7,9 +7,8 @@ import {
     subscribeToDismissals,
     subscribeToPublishedNotifications,
 } from '@/lib/systemNotifications';
+import { selectBannerNotifications } from '@/lib/selectBannerNotifications';
 
-const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
-const MAX_BANNER_ITEMS_AUTHED = 5;
 
 export interface UseSystemNotificationsResult {
     notifications: SystemNotification[];
@@ -19,7 +18,7 @@ export interface UseSystemNotificationsResult {
     stale: boolean;
     retrying: boolean;
     retry: () => void;
-    /** ホーム最上部バナーに出す通知（dismiss 済み除外）。未認証時は1ヶ月以内最新1件のみ */
+    /** ホーム最上部バナーに出す通知 = 最新 1 件 + 直近 1 週間（dismiss 済み除外・未認証は dismiss 無し） */
     bannerNotifications: SystemNotification[];
 }
 
@@ -37,7 +36,7 @@ export function useSystemNotifications(): UseSystemNotificationsResult {
     const [dismissalsAttempt, setDismissalsAttempt] = useState(0);
     const notificationsAttemptRef = useRef(0);
     const dismissalsAttemptRef = useRef(0);
-    // 1ヶ月以内判定の基準時刻。マウント時に固定して useMemo 内で純粋に扱えるようにする。
+    // 「直近 1 週間」判定の基準時刻。マウント時に固定して useMemo 内で純粋に扱えるようにする。
     const [mountedAt] = useState(() => Date.now());
 
     // user 切替時に dismiss 状態をリセット（Adjusting state during render パターン）。
@@ -114,17 +113,11 @@ export function useSystemNotifications(): UseSystemNotificationsResult {
         }
     }, [currentUid, dismissalsError, notificationsError]);
 
-    const bannerNotifications = useMemo<SystemNotification[]>(() => {
-        if (user?.uid) {
-            const dismissed = new Set(dismissedIds);
-            return notifications
-                .filter(n => !dismissed.has(n.id))
-                .slice(0, MAX_BANNER_ITEMS_AUTHED);
-        }
-        const cutoff = mountedAt - ONE_MONTH_MS;
-        const latest = notifications.find(n => n.publishedAt.getTime() >= cutoff);
-        return latest ? [latest] : [];
-    }, [user?.uid, notifications, dismissedIds, mountedAt]);
+    const bannerNotifications = useMemo<SystemNotification[]>(
+        // 未認証には dismiss の概念が無いので除外リストは空。
+        () => selectBannerNotifications(notifications, user?.uid ? dismissedIds : [], mountedAt),
+        [user?.uid, notifications, dismissedIds, mountedAt],
+    );
 
     // 未認証時は dismiss の概念がないのでロード待ちにしない。
     const effectiveDismissalsLoaded = user?.uid ? dismissalsLoaded : true;
