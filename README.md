@@ -1,6 +1,6 @@
 # 動画・音声→AI文書生成アプリ
 
-WebAssembly (FFmpeg.wasm) とGemini AIを使用して、ブラウザ内で動画・音声から自動的に文書を生成するアプリケーションです。
+WebAssembly (FFmpeg.wasm) とGemini AIを使用して、動画・音声から自動的に文書を生成するアプリケーションです。動画→音声の変換はブラウザ内で行い、Gemini の呼び出しは自社サーバ (`POST /api/generate`) が行います (API キーはブラウザに出ません)。
 
 ## ✨ 主な機能
 
@@ -41,8 +41,8 @@ WebAssembly (FFmpeg.wasm) とGemini AIを使用して、ブラウザ内で動画
 - **管理 `/admin`**: superuser 専用。監査ログ、システム設定、ユーザー一覧を参照・操作。
 
 ### 🎵 動画・音声変換
-- **完全クライアントサイド処理**: すべての変換処理がブラウザ内で完結
-- **プライバシー保護**: ファイルがサーバーにアップロードされることはありません
+- **クライアントサイド変換**: 動画→音声の変換処理はブラウザ内で完結 (元の動画ファイルはどこにも送られない)
+- **音声だけを送る**: 変換後の音声を Firebase Storage (自分のディレクトリ) に上げ、サーバがそこから読んで Gemini に渡す
 - **対応形式**: 
   - **動画**: MP4, MOV, AVI, MKV, WebM
   - **音声**: MP3, WAV, M4A, AAC, OGG, FLAC（変換スキップで高速処理）
@@ -95,7 +95,8 @@ WebAssembly (FFmpeg.wasm) とGemini AIを使用して、ブラウザ内で動画
 
 ## 🚀 技術スタック
 
-- **フロントエンド**: Next.js 15 (App Router) + React 19 + TypeScript
+- **フロントエンド**: Next.js 16 (App Router) + React 19 + TypeScript
+- **サーバ**: Next.js Route Handler `POST /api/generate` (Node ランタイム・firebase-admin) - 認証・所有権・時間あたり上限の確認と Gemini 呼び出し。契約は `src/lib/generateApiContract.ts`、説明は `docs/api-generate.md`
 - **スタイリング**: Tailwind CSS v4
 - **動画変換**: FFmpeg.wasm (WebAssembly) - ブラウザ内で動画から音声を抽出
 - **AI処理**: Google Gemini 2.5〜3.7モデル - 音声認識と文書生成
@@ -104,6 +105,7 @@ WebAssembly (FFmpeg.wasm) とGemini AIを使用して、ブラウザ内で動画
   - Gemini 3.1 Pro (Preview) / 2.5系: 高精度・低コストの選択肢
 - **認証**: Firebase Authentication - メール/パスワード、Google認証
 - **データベース**: Firebase Firestore - 文書・プロンプト・ユーザー管理
+- **ストレージ**: Firebase Storage - 変換後の音声の一時置き場 (サーバが読む)
 - **アイコン**: Lucide React
 - **デプロイ**: Vercel対応
 
@@ -111,8 +113,9 @@ WebAssembly (FFmpeg.wasm) とGemini AIを使用して、ブラウザ内で動画
 
 - Node.js 20以上
 - npm または yarn
-- Firebase プロジェクト
-- Google Gemini API キー
+- Firebase プロジェクト (Authentication / Firestore / Storage)
+- Google Gemini API キー (サーバ専用。ブラウザには配らない)
+- 本番 (Vercel) では Firebase サービスアカウント JSON (サーバが ID トークン検証と Storage 読取に使う)
 
 ## 🔧 セットアップ
 
@@ -166,25 +169,26 @@ npm install
 3. 「**Create API Key**」をクリック
 4. 既存のGoogle Cloud プロジェクトを選択、または新規作成
 5. 生成されたAPIキーをコピー
+6. 本番用のキーは Google Cloud Console → 認証情報 で「API の制限 = Generative Language API のみ」と 1 日あたりの割当上限を設定する (`docs/ops-runbook.md` §5.5)。サーバから呼ぶので HTTP リファラ制限は使えない
 
 ### 5. 環境変数の設定
 
-プロジェクトルートに `.env.local` ファイルを作成：
+`.env.example` をコピーして `.env.local` を作り、値を埋めます (`.env*.local` は `.gitignore` に含まれており、Gitにコミットされません):
 
 ```bash
-# Firebase設定（ステップ3.4で取得）
-NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=123456789
-NEXT_PUBLIC_FIREBASE_APP_ID=1:123456789:web:abc123def456
-
-# Gemini API設定（ステップ4で取得）
-NEXT_PUBLIC_GEMINI_API_KEY=AIzaSy...
+cp .env.example .env.local
 ```
 
-⚠️ **重要**: `.env.local` は `.gitignore` に含まれており、Gitにコミットされません。
+| 変数 | 種別 | 説明 |
+|---|---|---|
+| `NEXT_PUBLIC_FIREBASE_API_KEY` / `_AUTH_DOMAIN` / `_PROJECT_ID` / `_STORAGE_BUCKET` / `_MESSAGING_SENDER_ID` / `_APP_ID` | 公開 (ブラウザに埋め込まれる) | ステップ 3.4 で取得した Firebase Web 設定 6 種 |
+| `GEMINI_API_KEY` | **サーバ専用** | ステップ 4 で取得。`/api/generate` だけが読む。`NEXT_PUBLIC_` が付かないので **ブラウザのバンドルには出ない** |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | **サーバ専用** | サービスアカウント JSON (1 行 JSON か base64)。`/api/generate` が ID トークン検証・Storage 読取・上限カウンタ更新に使う。**ローカルでは省略可** (未設定なら ADC かエミュレータにフォールバック)。本番 (Vercel) では必須 |
+| `FIRESTORE_EMULATOR_HOST` / `FIREBASE_AUTH_EMULATOR_HOST` / `FIREBASE_STORAGE_EMULATOR_HOST` | ローカルのみ | Firebase エミュレータを使うときだけ。Vercel には設定しない |
+
+⚠️ **`NEXT_PUBLIC_GEMINI_API_KEY` は廃止**されました。コードは読みません。以前この変数を設定していた環境 (Vercel・`.env.local`) からは削除し、そのキーは公開 JS に載っていたので Google AI Studio で失効させてください (`docs/ops-runbook.md` §5.4)。
+
+サーバ専用の変数は `src/app/api/generate` と `src/server/` だけが `process.env` 経由で読みます。ブラウザに配られる変数は `NEXT_PUBLIC_` 接頭辞のものだけです。
 
 ### 6. Firestore セキュリティルールの設定
 
@@ -220,6 +224,13 @@ npm run dev
 ```
 
 ブラウザで [http://localhost:3000](http://localhost:3000) を開きます。
+
+文書生成 (`/api/generate`) をローカルで動かすには、サーバが Firebase にアクセスできる資格情報が必要です。次のどちらか:
+
+- **Firebase エミュレータ** (推奨): `firebase emulators:start --only auth,firestore,storage` を別ターミナルで起動し、`.env.local` の `FIRESTORE_EMULATOR_HOST` 等のコメントを外す。本番データに触れません。
+- **ADC**: `gcloud auth application-default login` (作業後は `gcloud auth application-default revoke`。`docs/ops-runbook.md` §3)。
+
+いずれの場合も `GEMINI_API_KEY` には本番と別の開発用キーを使います。詳細は `docs/api-generate.md` §11。
 
 ### 9. 初回管理者の作成（オプション）
 
@@ -340,12 +351,12 @@ npx tsx scripts/create-admin.ts ylSoKJnLhQPgxcjdodQSOyqO5ym1
 
 #### 動画ファイルの場合
 ```
-動画選択 → 音声変換（直列、進捗表示）→ 文書生成（並列）→ Firestore保存
+動画選択 → 音声変換（直列、進捗表示）→ Storage アップロード → /api/generate（並列）→ Firestore保存
 ```
 
 #### 音声ファイルの場合
 ```
-音声選択 → 文書生成（並列、変換スキップ）→ Firestore保存
+音声選択 → Storage アップロード → /api/generate（並列、変換スキップ）→ Firestore保存
 ```
 
 #### 複数ファイル・複数プロンプトの場合
@@ -400,6 +411,31 @@ npx tsx scripts/create-admin.ts ylSoKJnLhQPgxcjdodQSOyqO5ym1
 - 詳細なエラーメッセージ（エラー箇所と進捗状況を明示）
 - TypeScriptによる型安全性
 
+## 🏗️ アーキテクチャ (文書生成の経路)
+
+```
+ブラウザ                                   自社サーバ (Vercel)                      Google
+─────────────────────────────────────────  ──────────────────────────────────────  ─────────────
+動画 ─FFmpeg.wasm→ 音声 (mp3)
+   │
+   ├─ Firebase Storage へアップロード ──────────────────────────────────────────→ Storage
+   │    audio/{uid or GUEST}/{timestamp}_{name}.mp3   (storage.rules: 100MB・audio/*)
+   │
+   └─ POST /api/generate ─────────────────→ src/app/api/generate/route.ts
+        { storagePath, fileName,              ├ Authorization: Bearer <ID token> を firebase-admin で検証 (無ければ GUEST)
+          mimeType, prompt }                  ├ storagePath の ownerId が自分か確認 (403)
+        Authorization: Bearer <ID token>      ├ adminSettings.rateLimit.documentsPerHour を rateLimits/{subject} で強制 (429)
+                                              ├ Storage からファイルを読む (404 / 413)
+                                              └ 16MiB 以内なら inlineData、超えれば Files API ──→ Gemini API
+   ←─ { text, usedModel, transport, usage, elapsedMs } ─┘                          (GEMINI_API_KEY はここだけ)
+   │
+   └─ Firestore transcriptions に保存 (従来どおりブラウザ)
+```
+
+- Gemini API キーはサーバの環境変数 `GEMINI_API_KEY` にだけ存在し、ブラウザには配られません。
+- 未ログイン (GUEST) の利用は維持されます。上限は送信元アドレスのハッシュ単位で数えます。
+- 契約 (型・エラーコード・定数) は `src/lib/generateApiContract.ts`、人間向けの説明は `docs/api-generate.md`。
+
 ## 📁 プロジェクト構造
 
 ```
@@ -411,6 +447,7 @@ src/
 │   │   ├── documents/page.tsx
 │   │   └── team/page.tsx
 │   ├── admin/page.tsx
+│   ├── api/generate/route.ts  # POST /api/generate (サーバ経由の文書生成・Node ランタイム・maxDuration 300)
 │   ├── page.tsx               # ルート（/homeへリダイレクト）
 │   └── globals.css
 ├── components/
@@ -425,13 +462,20 @@ src/
 │   ├── usePromptManagement.ts / useFileManagement.ts
 │   ├── useVideoProcessing.ts / useProcessingWorkflow.ts
 │   └── 他ユーティリティフック
-└── lib/
-    ├── firebase.ts / auth.ts
-    ├── firestore.ts / prompts.ts / relationships.ts
-    ├── userManagement.ts / adminSettings.ts / auditLog.ts
-    ├── accountDeletion.ts / promptPermissions.ts
-    ├── ffmpeg.ts / gemini.ts / videoConversionService.ts
-    └── constants・utils
+├── lib/
+│   ├── firebase.ts / auth.ts
+│   ├── firestore.ts / prompts.ts / relationships.ts
+│   ├── userManagement.ts / adminSettings.ts / auditLog.ts
+│   ├── accountDeletion.ts / promptPermissions.ts
+│   ├── ffmpeg.ts / videoConversionService.ts / storage.ts
+│   ├── gemini.ts              # /api/generate を呼ぶクライアント (Gemini SDK は使わない)
+│   ├── generateApiContract.ts # /api/generate の契約 (型・定数)。サーバとクライアントが共有
+│   ├── inlineMediaBudget.ts   # inline / Files API の切替判定 (サーバとクライアントが共有)
+│   └── constants・utils
+└── server/                    # サーバ専用 (firebase-admin・Gemini SDK・rate limit)。ブラウザには bundle されない
+    ├── firebaseAdmin.ts / auth.ts / mediaSource.ts
+    ├── geminiServer.ts / rateLimit.ts
+    └── (テストは同階層)
 
 scripts/                       # 管理スクリプト (本番 Firestore を直接操作。scripts/README.md 参照)
 ├── create-admin.ts            # 初回管理者作成
@@ -441,8 +485,10 @@ scripts/                       # 管理スクリプト (本番 Firestore を直�
 └── ops-gemini37-rollout.mjs   # Gemini 3.7 ロールアウト (dry-run 既定)
 
 docs/
-└── ops-runbook.md             # 運用手順書 (リリースゲート・バックアップ/復旧・配備・資格情報)
+├── ops-runbook.md             # 運用手順書 (リリースゲート・バックアップ/復旧・配備・資格情報・Gemini キーのサーバ移行)
+└── api-generate.md            # POST /api/generate の説明 (流れ・リクエスト/レスポンス・エラー表・上限)
 
+.env.example                   # 環境変数の雛形 (実値は書かない)
 .github/workflows/ci.yml       # CI (tsc / lint / vitest)
 firestore.rules                # Firestore セキュリティルール
 firestore.indexes.json         # Firestore 複合インデックス
@@ -476,16 +522,17 @@ npm run start
 npm ci && npx tsc --noEmit && npm run lint && npm run test
 ```
 
-バックアップ (Firestore PITR / 日次バックアップ / Storage soft delete) と誤削除からの復旧、Rules・indexes の配備コマンド、Vercel 環境変数の一覧、資格情報の扱いは `docs/ops-runbook.md` にまとめています。
+バックアップ (Firestore PITR / 日次バックアップ / Storage soft delete) と誤削除からの復旧、Rules・indexes の配備コマンド、Vercel 環境変数の一覧、資格情報の扱い、Gemini キーのサーバ移行とローテーションは `docs/ops-runbook.md` にまとめています。
 
 ## 🔒 セキュリティとプライバシー
 
 ### データの保護
-- **完全クライアントサイド変換**: すべての動画・音声変換処理はブラウザ内で実行され、サーバーにアップロードされません
+- **クライアントサイド変換**: 動画→音声の変換処理はブラウザ内で実行され、元の動画ファイルはどこにも送信されません
 - **音声データの扱い**: 
-  - 音声ファイル（変換後のMP3）のみGemini APIに送信されます
-  - 元の動画ファイルはサーバーに送信されません
-  - Gemini APIは文書生成後、音声データを保持しません
+  - 変換後の音声 (MP3) だけが Firebase Storage の自分のディレクトリ (`audio/{uid or GUEST}/`) に上がります (Storage Rules で本人と管理者のみ読める。GUEST は共有)
+  - 自社サーバ (`/api/generate`) が Storage から読んで Gemini API に送ります。16MiB を超える場合は Gemini の Files API を経由し、生成後に削除します (失敗しても 48 時間で自動削除)
+  - Gemini API は文書生成後、音声データを保持しません
+- **Gemini API キーはサーバ専用**: `GEMINI_API_KEY` は Vercel のサーバ側環境変数にだけあり、ブラウザに配られる JS には含まれません。サーバは呼び出しごとに認証・所有権・時間あたり上限を確認します (`docs/api-generate.md`)
 
 ### アクセス制御
 - **Firestore Security Rules**: データベースレベルでアクセス制御
@@ -527,7 +574,9 @@ npm ci && npx tsc --noEmit && npm run lint && npm run test
 | エラー | 原因 | 対処法 |
 |--------|------|--------|
 | `ネットワークエラー: インターネット接続を確認してください` | WiFi切断、ネットワーク障害 | WiFi接続を確認して再開ボタンをクリック |
-| `Gemini APIキーが無効です` | APIキーの設定ミス | `.env.local`のAPIキーを確認 |
+| `サーバの設定が完了していません` (HTTP 503 `not_configured`) | サーバに `GEMINI_API_KEY` / `FIREBASE_SERVICE_ACCOUNT_JSON` が無い | ローカルは `.env.local`、本番は Vercel の環境変数を確認し再デプロイ (`docs/ops-runbook.md` §5) |
+| `時間あたりの上限に達しました` (HTTP 429 `rate_limited`) | 1 時間あたりの生成件数が上限超 | 表示された秒数の後に再試行。上限は管理画面の設定 |
+| `ファイルが見つかりません` (HTTP 404) / 権限エラー (HTTP 403) | Storage への上げ直しが必要、または別ユーザーのファイル | ファイルを選び直して再開。ログイン状態を確認 |
 | `音声変換に失敗しました` | 動画ファイルの形式が非対応 | 別の形式の動画ファイルを試す |
 | `プロンプトが一つも選択されていません` | プロンプト未選択 | 最低1つのプロンプトを選択 |
 | `Missing or insufficient permissions` | Firestore Rules未設定 | Firebase ConsoleでRulesをデプロイ |
@@ -600,8 +649,10 @@ MIT
 ## 📚 ドキュメント
 
 - **セットアップガイド**: このREADME（上記）
-- **運用手順書** (リリースゲート・バックアップ/復旧・Rules 配備・資格情報): `docs/ops-runbook.md`
+- **文書生成 API** (`POST /api/generate` の流れ・リクエスト/レスポンス・エラー表・上限): `docs/api-generate.md`
+- **運用手順書** (リリースゲート・バックアップ/復旧・Rules 配備・資格情報・Gemini キーのサーバ移行/ローテーション): `docs/ops-runbook.md`
 - **スクリプト使用方法**: `scripts/README.md`
+- **環境変数の雛形**: `.env.example`
 
 ## 🙏 謝辞
 

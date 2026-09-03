@@ -39,6 +39,8 @@ export GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/keys/<project>-admin.json
 
 ⚠️ `.gitignore` の `serviceAccountKey.json` / `*-firebase-adminsdk-*.json` は誤って置いたときの保険であり、置いてよい理由ではありません。
 
+ℹ️ 本番サーバ (`/api/generate`) が Vercel で使う `FIREBASE_SERVICE_ACCOUNT_JSON` は、ここで使う運用スクリプト用の鍵とは**別の専用サービスアカウント** (読取中心の最小権限) です。混ぜないでください。作り方は `docs/ops-runbook.md` §5.6。
+
 #### `./serviceAccountKey.json` 固定のスクリプトを動かすとき
 
 `create-admin.ts` / `migrate-existing-data.ts` / `create-system-notification.ts` / `migrate-text-to-transcription.mjs` は、現状ではカレントディレクトリの `serviceAccountKey.json` しか読みません。改修されるまでは、**実行の直前にシンボリックリンクを張り、直後に外して**ください (鍵の実体はリポジトリ外のまま)。

@@ -1,6 +1,6 @@
 # 運用手順書 (ops runbook)
 
-商談くんミニ (videos-to-docs) の本番運用手順。対象 issue: #12 (S2-7 CI とリリースゲート)・#14 (S2-9 バックアップ/PITR/復旧)・#15 (S2-10 資格情報の運用)。
+商談くんミニ (videos-to-docs) の本番運用手順。対象 issue: #12 (S2-7 CI とリリースゲート)・#14 (S2-9 バックアップ/PITR/復旧)・#15 (S2-10 資格情報の運用)・#4 (S1-2 Gemini 呼び出しのサーバ経由化 = §5)。
 
 **この文書は手順書であり、ここに書いたコマンドを機械的に実行する仕組みは無い。** 本番プロジェクトに対する操作は、実行者が内容を読んでから 1 行ずつ手で実行する。
 
@@ -11,7 +11,7 @@
 | Firebase / GCP プロジェクト | `hy-docs-generated-from-audio` (`.firebaserc` の default) |
 | Firestore データベース | `(default)` (アプリは `getFirestore(app)` = database id 指定なし) |
 | Storage バケット | `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` の値 (以下 `$BUCKET` と表記)。音声は `audio/{ownerId}/{timestamp}_{name}.mp3` |
-| ホスティング | Vercel の git 統合。**`main` への push = 即本番** (ステージング無し) |
+| ホスティング | Vercel の git 統合。**`main` への push = 即本番** (ステージング無し)。`POST /api/generate` (Node ランタイム・`maxDuration = 300`) も同じ Vercel プロジェクトの Serverless Function |
 | GitHub | `harumichi-yamamoto-freedom/videos-to-docs`。**public リポジトリ** (鍵の混入は即時公開と同義) |
 | 配備対象ファイル | `firestore.rules` / `firestore.indexes.json` / `storage.rules` (`firebase.json` に 3 つとも登録済み) |
 | ローカル CLI | `firebase` (firebase-tools), `gcloud`, `gh`, Node 20 |
@@ -263,23 +263,25 @@ firebase deploy --only firestore:indexes --project "$PROJECT"
 - Rules: 未ログイン (ゲスト) と本人ログインで、`/home` のプロンプト一覧と `/documents` が開けること。未ログインで他人の文書が list できないことを SDK 経路で 1 回確認 (REST `:runQuery` は Rules を評価しないので確認には使えない)。
 - 巻き戻し: Firebase Console → Firestore → ルール → 履歴 から前版を選んで公開、または退避した JSON の `source.files[].content` を `firestore.rules` に戻して再配備。
 
-### 2.10 Vercel の環境変数 (7 種)
-アプリが読む環境変数は次の 7 つだけ (`src/lib/firebase.ts` と `src/lib/gemini.ts`)。すべて `NEXT_PUBLIC_` = **クライアントバンドルに埋め込まれ、閲覧者から見える**。
+### 2.10 Vercel の環境変数 (8 種)
+アプリが読む環境変数は次の 8 つ (`src/lib/firebase.ts`・`src/app/api/generate`・`src/server/*`)。`NEXT_PUBLIC_` の 6 つは**クライアントバンドルに埋め込まれ閲覧者から見える**。残り 2 つは**サーバ専用**で、Route Handler (`/api/generate`) の `process.env` だけが読む。雛形は `.env.example`。
 
 | 変数 | 用途 | 秘密か |
 |---|---|---|
 | `NEXT_PUBLIC_FIREBASE_API_KEY` | Firebase Web API key | 公開前提 (Rules と API 制限で守る) |
 | `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Auth ドメイン | 公開 |
-| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | プロジェクト id | 公開 |
-| `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | 音声バケット | 公開 |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | プロジェクト id (admin SDK の projectId にも使う) | 公開 |
+| `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | 音声バケット (サーバもここから読む) | 公開 |
 | `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | Firebase 設定 | 公開 |
 | `NEXT_PUBLIC_FIREBASE_APP_ID` | Firebase 設定 | 公開 |
-| `NEXT_PUBLIC_GEMINI_API_KEY` | Gemini API key | **本来は秘密**。現行設計ではクライアント露出 (S1-2 でサーバ経由化予定)。Google AI Studio 側で HTTP リファラ制限と日次上限を必ず設定する |
+| `GEMINI_API_KEY` | Gemini API key。`/api/generate` だけが読む | **秘密 (サーバ専用)**。無いと 503 `not_configured` |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | サービスアカウント JSON (1 行 JSON か base64)。ID トークン検証・Storage 読取・`rateLimits` 更新に使う | **秘密 (サーバ専用)**。無いと ADC にフォールバック = Vercel では 503 |
 
-- 設定場所: Vercel → Project → Settings → Environment Variables (Production / Preview 両方)。
-- 変更は**再デプロイしないと反映されない** (ビルド時に埋め込まれる)。
-- Gemini key のローテーション: AI Studio で新キー作成 → Vercel の値を更新 → Redeploy → 本番で 1 件生成して疎通確認 → 旧キーを削除。
-- サーバ側の秘密 (サービスアカウント鍵) は Vercel に**置かない** (現行アプリにサーバ層は無い)。
+- 設定場所: Vercel → Project → Settings → Environment Variables (Production / Preview 両方)。サーバ専用の 2 つは「Sensitive」にチェックを入れる (保存後に値を UI で読めなくなる)。
+- 変更は**再デプロイしないと反映されない** (`NEXT_PUBLIC_` はビルド時に埋め込まれ、サーバ専用も Function の起動時に読まれる)。
+- **`NEXT_PUBLIC_GEMINI_API_KEY` は廃止** (#4)。残っていても読まれないが、値そのものが公開 JS に載っていた履歴があるので、削除と失効を §5.4 の手順で行う。
+- Gemini key のローテーション: §5.4。
+- サービスアカウント JSON の作り方 (最小権限) と貼り方: §5.6。**§3 の鍵 (運用スクリプト用の Firebase Admin SDK 既定 SA) とは別の SA** を使う。
 
 ---
 
@@ -291,6 +293,7 @@ firebase deploy --only firestore:indexes --project "$PROJECT"
 3. 鍵をダウンロードせず済むなら **ADC + サービスアカウント impersonation** を優先する (鍵ファイルが存在しない状態が最も安全)。
 4. 作業が終わったら **ADC を revoke** する。この Mac の ADC が本番に書けるままだと、`--project-id` 一致だけで本番を書き換えるスクリプトが動いてしまう。
 5. 本番を変更するスクリプトは **dry-run 既定 + `--apply` + `--confirm`** (3.3)。
+6. Vercel に置くサーバ用の資格情報 (`FIREBASE_SERVICE_ACCOUNT_JSON`) は、**運用スクリプト用の鍵とは別のサービスアカウント**で、読取中心の最小権限にする (§5.6)。Vercel 側が漏れても本番 Firestore を全消しできない構成にしておく。
 
 ### 3.2 鍵の置き方
 
@@ -389,4 +392,133 @@ gcloud iam service-accounts keys delete <KEY_ID> \
 - [ ] §2.4 日次スケジュールバックアップ
 - [ ] §2.6 Storage soft delete + versioning + lifecycle
 - [ ] §1.3 Actions 復旧後にブランチ保護 (PR 必須 + `check` 必須)
-- [ ] `NEXT_PUBLIC_GEMINI_API_KEY` の HTTP リファラ制限と日次上限 (Google AI Studio)
+- [ ] §5 Gemini キーのサーバ移行: Vercel に `GEMINI_API_KEY` / `FIREBASE_SERVICE_ACCOUNT_JSON` → #4 の PR をマージ → 本番で 1 件生成 → **新キーへローテーションして旧キーを失効** → `NEXT_PUBLIC_GEMINI_API_KEY` を Vercel から削除 → 新キーに API 制限と日次割当
+
+---
+
+## 5. Gemini キーのサーバ移行とローテーション手順 (S1-2 / #4)
+
+### 5.1 背景と目標
+- #4 以前は `NEXT_PUBLIC_GEMINI_API_KEY` がブラウザの JS に埋め込まれていた。**この値は既に公開されたものとして扱う** (public リポジトリ + 公開サイトの JS から誰でも取り出せた)。HTTP リファラ制限は `Referer` を偽装する curl には効かない。
+- #4 で Gemini 呼び出しは `POST /api/generate` (サーバ) に移り、キーはサーバ専用の `GEMINI_API_KEY` になる (API の説明は `docs/api-generate.md`)。
+- 目標: (1) サーバ経由で本番が動く状態にする → (2) **旧キーを失効させる** (ここまでやって初めて課金暴走の経路が閉じる) → (3) 新キーに API 制限と割当上限を掛ける。
+
+順番が重要。**旧キーの失効 (5.4) はサーバ経由が本番で動いた (5.3) 後**に行う。先に失効させると旧デプロイの本番が全滅する。ただし失効を後回しにしすぎない (マージ当日中に終える)。
+
+### 5.2 事前: Vercel に環境変数を設定 (マージ前)
+
+Vercel → Project → Settings → Environment Variables。**Production と Preview の両方**に追加する (Preview だけ無いと PR の Preview デプロイで 503 になり、検証ができない)。
+
+| 変数 | 値 | Sensitive |
+|---|---|---|
+| `GEMINI_API_KEY` | まず**現行のキー** (= `NEXT_PUBLIC_GEMINI_API_KEY` と同じ値) を入れる。5.4 で新キーに差し替える | ✅ |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | 5.6 で作った SA の JSON (base64) | ✅ |
+
+- 5.2 の時点で現行キーを入れるのは「マージ直後から動く」ため。新キーを先に発行して入れてもよいが、その場合も旧キーの削除は 5.3 の確認後。
+- `NEXT_PUBLIC_GEMINI_API_KEY` はこの時点では**まだ消さない** (マージ前の本番はそれで動いている)。
+- 確認: Settings → Environment Variables で 2 つが Production / Preview に並ぶ。値は Sensitive なので目視できないが、変数名と環境の列は見える。
+- 注意: `FIRESTORE_EMULATOR_HOST` 等のエミュレータ変数を Vercel に**入れない** (入っていると本番サーバがローカルアドレスを向く)。
+
+### 5.3 配備と疎通確認
+
+1. #4 の PR をマージする (`main` への push = 即本番)。Vercel の Build Command (§1.2) が `npm test && npm run build` なら、テストが赤い時点で止まる。
+2. Vercel → Deployments で当該デプロイが Ready になるのを待つ。
+3. **本番で 1 件生成する**: 未ログイン (ゲスト) で短い音声 (1 分程度) を 1 本、プロンプト 1 つで生成。次にログインして同じことを 1 回。両方成功したら OK。
+4. Vercel → Project → Logs (Runtime) で `/api/generate` の観測ログ (`{"usedModel":…,"transport":…,"usage":…,"elapsedMs":…}` の 1 行) が 2 本出ていることを見る。これがサーバ経由で動いた証拠。
+5. ブラウザの開発者ツール → Network で `generativelanguage.googleapis.com` への直接リクエストが**出ていない**こと、`/api/generate` に `Authorization: Bearer …` が (ログイン時のみ) 付いていることを見る。
+6. 配布された JS にキーが無いことを確認:
+
+```bash
+# 本番のトップページから参照される JS を全部取り、旧キーの文字列と AIza パターンを探す (0 件が期待値)
+SITE=https://<本番ドメイン>
+curl -s "$SITE/home" | grep -o '/_next/static/[^"]*\.js' | sort -u | \
+  while read -r f; do curl -s "$SITE$f"; done | grep -c 'AIza' || true
+#   → 0 (Firebase Web API key も AIza で始まるので 0 でなければ内容を見て Firebase の物か判別する)
+```
+
+失敗したら: 503 → 5.2 の変数名と環境 (Production/Preview) を再確認して Redeploy。403/401 → ログイン状態と `storagePath` の ownerId。502/504 → Vercel Logs の生エラーを見る。戻すときは Vercel → Deployments → 前のデプロイ → Promote to Production (旧キーがまだ生きていれば旧デプロイは動く)。
+
+### 5.4 キーのローテーション (旧キーの失効) — 必ずやる
+
+旧キーは公開 JS に載っていたので、サーバ経由が動いたら**必ず新しいキーに替えて旧キーを削除する**。
+
+1. 新キーを発行: [Google AI Studio → API keys](https://aistudio.google.com/app/apikey) → Create API key → 本番と同じ Google Cloud プロジェクトを選ぶ (割当・課金の連続性)。キー名は `videos-to-docs-server-YYYYMM` のように用途と日付を入れる。
+2. 新キーに制限を掛ける (5.5)。
+3. Vercel → Settings → Environment Variables → `GEMINI_API_KEY` を Edit → 新キーの値に差し替え (Production / Preview 両方)。
+4. Vercel → Deployments → 最新 → Redeploy (環境変数の変更はデプロイしないと反映されない)。
+5. 5.3 の手順 3〜4 をもう一度 (本番で 1 件生成 → Logs に観測ログ)。
+6. **旧キーを削除**: Google Cloud Console → APIs & Services → Credentials → 旧キー (以前 `NEXT_PUBLIC_GEMINI_API_KEY` に入っていた物) → Delete。AI Studio の一覧からも消えることを確認。
+7. 旧キーが死んだことを実測:
+
+```bash
+# 旧キーで 1 回だけ叩く。400 (API key not valid / expired) が期待値。200 なら削除できていない
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "https://generativelanguage.googleapis.com/v1beta/models?key=<旧キー>"
+```
+
+8. Vercel → Settings → Environment Variables → **`NEXT_PUBLIC_GEMINI_API_KEY` を削除** (Production / Preview / Development すべて)。Redeploy (残っていても読まれないが、ビルドログや環境変数一覧に旧値が残らないようにする)。
+9. ローカルの `.env.local` からも `NEXT_PUBLIC_GEMINI_API_KEY` を消し、開発用には別のキーを使う (`.env.example` 参照)。
+10. 作業記録: 実施日・新キー名 (値は書かない)・旧キー削除の確認結果 (手順 7 の HTTP ステータス) を issue #4 に残す。
+
+以後の定期ローテーション (四半期ごと・§3.5 と同じタイミング): 手順 1〜7 を繰り返す。サーバ側にしかキーが無いので、Vercel の値を差し替えて Redeploy し、本番で 1 件生成できた後に旧キーを削除する。ダウンタイムは無い (新旧キーは差し替え〜削除の間、両方有効)。
+
+### 5.5 新キーへの制限 (暫定策)
+
+サーバから呼ぶので **HTTP リファラ制限は使えない** (サーバのリクエストには Referer が付かない。付けても意味が無い)。IP 制限も Vercel の送信元 IP が固定でないため使えない。代わりに次の 2 つを掛ける。
+
+1. **API の制限** (キーが使える API を絞る): Google Cloud Console → APIs & Services → Credentials → 当該キー → 「API の制限」→「キーを制限」→ **Generative Language API** だけにチェック → Save。これで漏れても Gemini 以外 (Maps・Firebase 管理 API 等) には使えない。
+2. **1 日あたりの割当上限**: Google Cloud Console → APIs & Services → Enabled APIs → Generative Language API → Quotas & System Limits → `Requests per day` 系のクォータ → Edit quota → 通常利用の 3〜5 倍程度の値 (例: 現状の 1 日最大件数 × 4)。超えたらその日は 429 で止まる = 暴走時の損失上限になる。
+   - 併せて Billing → Budgets & alerts で本番プロジェクトに月額予算アラート (50% / 90% / 100%) を設定する。割当上限は「件数」、予算アラートは「金額」で、両方あると原因の切り分けが早い。
+3. アプリ側の上限 (`adminSettings.rateLimit.documentsPerHour`、既定 50/時) はサーバで強制されるようになった (#4)。管理画面の値が本番の実効上限なので、割当上限より小さいことを確認する。
+
+確認: Credentials の一覧で当該キーの「制限」列が「1 API」と表示される。
+
+### 5.6 サービスアカウント JSON (`FIREBASE_SERVICE_ACCOUNT_JSON`) の作り方と貼り方
+
+サーバ (`/api/generate`) が必要とする権限は 3 つだけ: (a) Firebase ID トークンの検証、(b) Storage の音声の読取、(c) Firestore の `adminSettings/config` 読取と `rateLimits/{subject}` の読み書き。**Firebase Admin SDK の既定 SA (`firebase-adminsdk-…`、Editor 相当) は使わない**。専用 SA を作って最小権限にする。
+
+```bash
+export PROJECT=hy-docs-generated-from-audio
+export SA=vtd-api-generate@$PROJECT.iam.gserviceaccount.com
+
+# 1. 専用 SA を作る
+gcloud iam service-accounts create vtd-api-generate \
+  --project "$PROJECT" --display-name "videos-to-docs /api/generate (Vercel)"
+
+# 2. 最小権限を付ける
+#   Cloud Datastore ユーザー          … Firestore の読み書き (adminSettings 読取・rateLimits 更新)
+#   Storage オブジェクト閲覧者          … 音声バケットの読取 (書込・削除は不要)
+#   Firebase Authentication 閲覧者     … ID トークン検証 (公開鍵取得自体は権限不要。ユーザー参照系 API に備えて閲覧者)
+#   (Firebase Admin / Editor / トークン作成者 は付けない)
+gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$SA" --role=roles/datastore.user
+gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$SA" --role=roles/storage.objectViewer
+gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$SA" --role=roles/firebaseauth.viewer
+
+# 3. 鍵を発行 (リポジトリ外へ。§3.2 と同じ置き場)
+mkdir -p ~/.config/gcloud/keys && chmod 700 ~/.config/gcloud/keys
+gcloud iam service-accounts keys create ~/.config/gcloud/keys/$PROJECT-api-generate.json \
+  --iam-account "$SA" --project "$PROJECT"
+chmod 600 ~/.config/gcloud/keys/$PROJECT-api-generate.json
+
+# 4. Vercel に貼る値を作る。JSON は private_key に改行 (\n) を含むので、Vercel の UI に
+#    そのまま貼ると改行の扱いで壊れることがある。base64 で 1 行にしてから貼る。
+base64 -i ~/.config/gcloud/keys/$PROJECT-api-generate.json | tr -d '\n' | pbcopy
+#   → Vercel → Settings → Environment Variables → Add
+#      Key:   FIREBASE_SERVICE_ACCOUNT_JSON
+#      Value: (ペースト。先頭が "ewog" で始まる = base64 の {\n)
+#      Environments: Production + Preview   / Sensitive: ON
+
+# 5. 貼った後、ローカルの鍵ファイルは消す (Vercel 側だけに存在する状態にする)
+rm ~/.config/gcloud/keys/$PROJECT-api-generate.json
+```
+
+- サーバは値が `{` で始まれば JSON、そうでなければ base64 として decode する。どちらでも動くが、**Vercel には base64 を推奨** (改行事故の回避)。
+- `roles/datastore.user` は Firestore 全コレクションの読み書きを含む (Firestore Rules はサーバ SDK に効かない)。コレクション単位に絞る IAM は無いので、これが今の最小。Storage は `objectViewer` なので、Vercel 側から音声の削除・改竄はできない。
+- 鍵の棚卸し/削除は §3.5 と同じ (`--iam-account "$SA"`)。ローテーションは「新しい鍵を `keys create` → Vercel の値を差し替え → Redeploy → 本番で 1 件生成 → 旧鍵を `keys delete`」。
+- ローカル開発では `FIREBASE_SERVICE_ACCOUNT_JSON` を置かず、エミュレータ (`FIRESTORE_EMULATOR_HOST` 等) か ADC を使う (`docs/api-generate.md` §11)。ローカルに本番 SA の鍵を常駐させない。
+
+### 5.7 事故時の切り戻し
+- `/api/generate` が全滅 (503/502 連発) したとき: Vercel → Deployments → #4 マージ直前のデプロイ → Promote to Production。**ただし旧デプロイはブラウザから旧キーで Gemini を呼ぶので、5.4 で旧キーを削除済みなら旧デプロイも動かない**。その場合は原因 (環境変数名・SA 権限・割当超過) を Vercel Logs で見て前に進むほうが早い。
+- 割当上限 (5.5) に当たって 429 が続くとき: Quotas で一時的に上げる。暴走が疑われるなら先に Vercel Logs で `/api/generate` の呼び出し元 (subject) を数え、特定の subject なら `rateLimits/{subject}` の件数を確認する。
+- SA 鍵が漏れたとき: §3.6 と同じ順番 (先に `keys delete`、次に履歴除去)。この SA は読取中心なので、被害は「音声の読取」と「rateLimits/adminSettings の改竄」に限られる。
+

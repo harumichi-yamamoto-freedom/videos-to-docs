@@ -32,6 +32,10 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # local env files
+# .env.example だけを追跡する (実値を書かない雛形)。実値を持つ .env / .env.* は除外。
+.env
+.env.*
+!.env.example
 .env*.local
 .env.local
 .env.development.local
