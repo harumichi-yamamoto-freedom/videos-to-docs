@@ -30,7 +30,7 @@ export const ConversionSettings: React.FC<ConversionSettingsProps> = ({
     <fieldset className="rounded-lg border border-gray-200 bg-gray-50 p-4" disabled={disabled}>
         <legend className="px-1 text-sm font-medium text-gray-900">音声のビットレート</legend>
         <p className="mt-1 text-[13px] text-gray-700">
-            低いほど長い録音をそのまま送れます。目安を超える長さは大きなファイル用の送信方式に自動で切り替えます。うまくいかない場合はビットレートを下げるか、ファイルを分割してください。
+            低いほど長い録音をそのまま送れます。目安を超える長さは、サーバーが大きなファイル用の送信方式に自動で切り替えます。うまくいかない場合はビットレートを下げるか、ファイルを分割してください。
         </p>
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {AUDIO_BITRATE_OPTIONS.map(option => {
