@@ -459,8 +459,10 @@ describe('Gemini 3.8 Flash の追加と★の再基準化 (2026-09-03)', () => {
         return option.benchmark;
     };
 
-    it('3.8 Flash が先頭の選択肢で、ラベルとプロモ価格を持つ', () => {
+    it('3.8 Flash が先頭の選択肢かつ既定モデルで、ラベルとプロモ価格を持つ', () => {
         expect(GEMINI_MODEL_OPTIONS[0].value).toBe('gemini-3.8-flash');
+        expect(DEFAULT_GEMINI_MODEL).toBe('gemini-3.8-flash');
+        expect(resolveGeminiModel('default')).toBe('gemini-3.8-flash');
         expect(getGeminiModelLabel('gemini-3.8-flash')).toBe('Gemini 3.8 Flash');
         expect(getGeminiPricingLabelShort('gemini-3.8-flash')).toBe('入力 $0.75 / 出力 $3.75');
     });

@@ -50,7 +50,7 @@ export interface GeminiModelOption {
     benchmark?: GeminiModelBenchmark;
 }
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 export const GEMINI_DEFAULT_MODEL_SENTINEL = 'default';
 
 /**
@@ -92,13 +92,13 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             analysisQuality: 5,
             // 出力 ≈302 tok/s・TTFT 13.3s（Artificial Analysis 2026-09-03）。思考レベルは low/medium/high（minimal 不可・公式 docs）。
             estimatedSeconds: 41,
-            recommendedFor: '動画・音声→文書の総合おすすめ。3.7と同価格・同速度で分析品質が最高',
+            recommendedFor: '動画・音声→文書の総合おすすめ。現行の既定モデル（おまかせ）',
         },
     },
     {
         value: 'gemini-3.7-flash',
         label: 'Gemini 3.7 Flash',
-        description: '現行の既定モデル（2026-08 GA）。動画・音声・PDF入力対応、1Mコンテキスト。3.8 Flashと同価格・同速度',
+        description: '前世代のFlash（2026-08 GA）。動画・音声・PDF入力対応、1Mコンテキスト。3.8 Flashと同価格・同速度',
         // ⚠️ プロモ価格: 2026-12-31まで。2027-01-01から入力$1.50/出力$7.50に倍額（公式料金表に明記）。
         pricing: {
             inputPerMTok: 0.75,
@@ -110,7 +110,7 @@ export const GEMINI_MODEL_OPTIONS: GeminiModelOption[] = [
             analysisQuality: 4,
             // 出力 ≈287 tok/s・TTFT 11.4s（Artificial Analysis 2026-09-03）。⚠️思考は既定ON・レベルmedium（OFF不可・公式docs確認済2026-09-01）のため実測待ち時間には思考分が含まれる
             estimatedSeconds: 40,
-            recommendedFor: '動画・音声→文書の総合おすすめ。現行の既定モデル',
+            recommendedFor: '3.8 と同価格・同速度の前世代。固定したい場合の互換用途',
         },
     },
     {
