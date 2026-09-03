@@ -4,7 +4,7 @@ import {
     MAX_BANNER_ITEMS,
     RECENT_BANNER_WINDOW_MS,
     selectBannerNotifications,
-} from './useSystemNotifications';
+} from '@/lib/selectBannerNotifications';
 
 const NOW = Date.parse('2026-09-03T00:00:00.000Z');
 const DAY = 24 * 60 * 60 * 1000;
