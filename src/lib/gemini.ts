@@ -1,16 +1,24 @@
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { DEFAULT_GEMINI_MODEL, resolveGeminiModel } from '../constants/geminiModels';
-import {
-    resolveThinkingLevelForModel,
-    type GeminiThinkingLevel,
-} from '../constants/geminiThinking';
+/**
+ * 文書生成 API (`POST /api/generate`) のブラウザ側クライアント。
+ *
+ * #4: 以前はここで @google/genai を直接呼び、API キーが公開 JS に埋め込まれていた。
+ * 今はブラウザは Firebase Storage に上げた音声/動画のパスとプロンプトだけをサーバへ渡し、
+ * inline / Files API の経路選択・モデルのセンチネル解決・Gemini 呼び出しはすべてサーバが行う。
+ * このファイルは Gemini SDK も API キーも持たない。
+ */
+import type { GeminiThinkingLevel } from '../constants/geminiThinking';
+import { auth } from './firebase';
 import { createLogger } from './logger';
 import {
-    INLINE_REQUEST_BUDGET_BYTES,
-    describeInlineBudgetExceeded,
-    selectMediaTransport,
-    utf8ByteLength,
-} from './inlineMediaBudget';
+    GENERATE_API_PATH,
+    GENERATE_AUTH_HEADER,
+    type GenerateErrorBody,
+    type GenerateErrorCode,
+    type GenerateRequestBody,
+    type GenerateResponseBody,
+    type GenerateTransport,
+    type GenerateUsage,
+} from './generateApiContract';
 
 const geminiLogger = createLogger('gemini');
 
@@ -20,510 +28,243 @@ export interface TranscriptionResult {
     error?: string;
     usedModel?: string;
     usedThinkingLevel?: string;
+    /** サーバが実際に使った送信経路 (観測用) */
+    transport?: GenerateTransport;
+    /** サーバ側の処理時間 (ms・観測用) */
+    elapsedMs?: number;
 }
 
-/** S2-1: Files API へアップロード済みのメディア参照。生成後は name で削除する */
-export interface UploadedMediaRef {
-    name: string;
-    fileUri: string;
+export interface GenerateDocumentInput {
+    /** Storage 上のパス (`audio/{ownerId}/{name}`)。所有権はサーバが検査する */
+    storagePath: string;
+    /** 元ファイル名 (ログとエラー文言用) */
+    fileName: string;
+    /** 元ファイルの MIME (audio/* か video/*)。Gemini へ渡す種別 */
     mimeType: string;
-}
-
-export interface UploadMediaOptions {
+    prompt: {
+        name: string;
+        content: string;
+        model: string;
+        thinkingLevel?: GeminiThinkingLevel;
+    };
+    /** 中止用。fetch に渡す (サーバ側の処理は継続し得る) */
     signal?: AbortSignal;
-    pollIntervalMs?: number;
-    timeoutMs?: number;
 }
 
-/** Files API のファイルが ACTIVE になるのを待つ間隔と上限 (動画は PROCESSING が長引くことがある) */
-export const FILES_API_ACTIVATION_POLL_MS = 2_000;
-export const FILES_API_ACTIVATION_TIMEOUT_MS = 5 * 60 * 1000;
-
-interface GeminiUsageMetadata {
-    promptTokenCount?: number;
-    candidatesTokenCount?: number;
-    thoughtsTokenCount?: number;
-    totalTokenCount?: number;
+/** サーバが契約どおりのエラー本文を返したとき。利用者向け文言は message に入っている */
+export class GenerateApiError extends Error {
+    constructor(
+        readonly status: number,
+        readonly code: GenerateErrorCode | 'unknown',
+        message: string,
+        readonly retryAfterSec?: number,
+    ) {
+        super(message);
+        this.name = 'GenerateApiError';
+    }
 }
 
-/** generateContent へ渡すメディアの出所。inline は Base64、file は Files API の URI */
-type MediaSource =
-    | { kind: 'inline'; base64Data: string; mimeType: string }
-    | { kind: 'file'; fileUri: string; mimeType: string };
+type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
-const THINKING_LEVEL_ENUMS = {
-    LOW: ThinkingLevel.LOW,
-    MEDIUM: ThinkingLevel.MEDIUM,
-    HIGH: ThinkingLevel.HIGH,
-} as const;
+export interface GeminiClientOptions {
+    /** テスト用。既定は globalThis.fetch */
+    fetchImpl?: FetchLike;
+    /** テスト用。既定は auth.currentUser?.getIdToken() (未ログインなら null) */
+    getIdToken?: () => Promise<string | null>;
+}
 
-const VIDEO_DEFAULT_PROMPT = `
-以下の動画ファイルの内容を分析し、以下の形式でMarkdown文書を作成してください：
+const defaultGetIdToken = async (): Promise<string | null> => {
+    const user = auth.currentUser;
+    if (!user) return null;
+    return user.getIdToken();
+};
 
-# タイトル
-（動画の主題を簡潔に）
+const defaultFetch: FetchLike = (input, init) => fetch(input, init);
 
-## 要約
-（内容の要約を3-5文で）
+/** 契約外の応答 (Vercel のゲートウェイエラー・HTML など) に対する状態別の既定文言 */
+const fallbackMessageForStatus = (status: number): string => {
+    if (status === 401) return 'ログインの有効期限が切れています。ログインし直してから、もう一度お試しください。';
+    if (status === 403) return 'このファイルを処理する権限がありません。ログイン状態を確認してから、もう一度お試しください。';
+    if (status === 404) return 'アップロードした音声/動画がサーバで見つかりませんでした。音声変換からやり直してください。';
+    if (status === 413) return '音声/動画が大きすぎます。ビットレートを下げるか、ファイルを分割してください。';
+    if (status === 429) return '短時間に処理できる件数の上限に達しました。しばらく待ってから、もう一度お試しください。';
+    if (status === 503) return 'サーバの文書生成機能が準備できていません。管理者にお問い合わせください。';
+    if (status === 504) return '文書生成が時間内に終わりませんでした。ファイルを短くするか、しばらくしてから再試行してください。';
+    return `文書生成サーバがエラーを返しました（HTTP ${status}）。しばらくしてから、もう一度お試しください。`;
+};
 
-## 詳細な内容
-（話されている内容を詳しく記述）
+/** 429 の retryAfterSec を利用者向け文言に含める */
+const describeRetryAfter = (message: string, retryAfterSec: number | undefined): string => {
+    if (retryAfterSec === undefined || !Number.isFinite(retryAfterSec)) return message;
+    const seconds = Math.max(1, Math.ceil(retryAfterSec));
+    const wait = seconds >= 120 ? `約${Math.ceil(seconds / 60)}分後` : `約${seconds}秒後`;
+    return `${message}（${wait}に再試行できます）`;
+};
 
-## キーポイント
-- （重要なポイント1）
-- （重要なポイント2）
-- （重要なポイント3）
+const isErrorBody = (value: unknown): value is GenerateErrorBody =>
+    typeof value === 'object'
+    && value !== null
+    && typeof (value as GenerateErrorBody).error === 'string'
+    && typeof (value as GenerateErrorBody).message === 'string';
 
-動画が日本語の場合は日本語で、英語の場合は英語で文書を作成してください。
-`.trim();
+const isResponseBody = (value: unknown): value is GenerateResponseBody =>
+    typeof value === 'object'
+    && value !== null
+    && typeof (value as GenerateResponseBody).text === 'string'
+    && typeof (value as GenerateResponseBody).usedModel === 'string';
 
-const AUDIO_DEFAULT_PROMPT = `
-以下の音声ファイルの内容を分析し、以下の形式でMarkdown文書を作成してください：
-
-# タイトル
-（音声の主題を簡潔に）
-
-## 要約
-（内容の要約を3-5文で）
-
-## 詳細な内容
-（話されている内容を詳しく記述）
-
-## キーポイント
-- （重要なポイント1）
-- （重要なポイント2）
-- （重要なポイント3）
-
-音声が日本語の場合は日本語で、英語の場合は英語で文書を作成してください。
-`.trim();
-
-const defaultPromptFor = (mimeType: string): string =>
-    mimeType.startsWith('video/') ? VIDEO_DEFAULT_PROMPT : AUDIO_DEFAULT_PROMPT;
+async function parseJsonSafely(response: Response): Promise<unknown> {
+    try {
+        return await response.json();
+    } catch {
+        return undefined;
+    }
+}
 
 function logGeminiUsage(
     model: string,
     thinkingLevel: string,
-    usageMetadata?: GeminiUsageMetadata,
+    transport: GenerateTransport,
+    usage: GenerateUsage | undefined,
 ): void {
     geminiLogger.info('Gemini API usage', {
         model,
         thinkingLevel,
-        promptTokenCount: usageMetadata?.promptTokenCount,
-        candidatesTokenCount: usageMetadata?.candidatesTokenCount,
-        thoughtsTokenCount: usageMetadata?.thoughtsTokenCount,
-        totalTokenCount: usageMetadata?.totalTokenCount,
+        transport,
+        promptTokenCount: usage?.promptTokenCount,
+        candidatesTokenCount: usage?.candidatesTokenCount,
+        thoughtsTokenCount: usage?.thoughtsTokenCount,
+        totalTokenCount: usage?.totalTokenCount,
     });
 }
 
-/** API のエラー文を利用者向けの文言に読み替える。該当しなければ元の文をそのまま返す */
-function translateGeminiError(errorMessage: string, targetModel: string): string {
-    if (errorMessage.includes('fetch') ||
-        errorMessage.includes('network') ||
-        errorMessage.includes('Failed to fetch') ||
-        errorMessage.includes('NetworkError') ||
-        errorMessage.toLowerCase().includes('offline')) {
+/** fetch 自体の失敗 (接続不可・DNS・CORS) を利用者向けに読み替える */
+const describeNetworkFailure = (error: unknown): string => {
+    const raw = error instanceof Error ? error.message : String(error);
+    geminiLogger.error('文書生成 API へ接続できませんでした', error);
+    if (/fetch|network|offline/i.test(raw)) {
         return 'ネットワークエラー: インターネット接続を確認してください。';
     }
-    if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('API key not valid')) {
-        return 'Gemini APIキーが無効です。.env.localファイルを確認してください。';
-    }
-    if (errorMessage.includes('not found') || errorMessage.includes('404')) {
-        return `指定されたモデルが見つかりません（${targetModel}）。Gemini APIキーとモデル名を確認してください。`;
-    }
-    if (errorMessage.includes('PERMISSION_DENIED')) {
-        return 'Gemini APIへのアクセスが拒否されました。APIキーの権限を確認してください。';
-    }
-    if (errorMessage.includes('file too large') ||
-        errorMessage.includes('too large') ||
-        errorMessage.includes('payload')) {
-        // S2-1: 「大きすぎます」で終わらせず、利用者が自分で打てる手を示す
-        return describeInlineBudgetExceeded();
-    }
-    return errorMessage;
-}
+    return `文書生成サーバへ接続できませんでした: ${raw}`;
+};
 
 export class GeminiClient {
-    private genAI: GoogleGenAI;
-    private defaultModel: string;
+    private readonly fetchImpl: FetchLike;
+    private readonly getIdToken: () => Promise<string | null>;
 
-    constructor(defaultModel: string = DEFAULT_GEMINI_MODEL) {
-        const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-
-        if (!apiKey) {
-            throw new Error('NEXT_PUBLIC_GEMINI_API_KEY が設定されていません');
-        }
-
-        this.genAI = new GoogleGenAI({ apiKey });
-        this.defaultModel = resolveGeminiModel(defaultModel);
+    constructor(options: GeminiClientOptions = {}) {
+        this.fetchImpl = options.fetchImpl ?? defaultFetch;
+        this.getIdToken = options.getIdToken ?? defaultGetIdToken;
     }
 
     /**
-     * 動画ファイルから文字起こしと文書生成を行う（直接送信）
-     * @param videoBlob 動画ファイルのBlob
-     * @param fileName ファイル名
-     * @param customPrompt カスタムプロンプト（オプション）
-     * @param modelName 使用するGeminiモデル。未指定の場合は既定モデル。
-     * @param thinkingLevel 思考レベル。未指定の場合は default。
+     * Storage 上のメディアとプロンプトをサーバに渡して文書を生成する。
+     * 失敗は `{ success: false, error }` で返す (文言はそのまま利用者に見せてよい)。
+     * 中止 (signal) だけは例外として投げ直し、呼び出し側が「失敗」と区別できるようにする。
      */
-    async transcribeVideo(
-        videoBlob: Blob,
-        fileName: string,
-        customPrompt?: string,
-        modelName?: string,
-        thinkingLevel: GeminiThinkingLevel = 'default',
-    ): Promise<TranscriptionResult> {
-        const targetModel = resolveGeminiModel(modelName ?? this.defaultModel);
-        geminiLogger.info('transcribeVideo 開始', {
-            fileName,
-            mimeType: videoBlob.type,
-            sizeInMB: (videoBlob.size / 1024 / 1024).toFixed(2),
-            modelName: targetModel,
-            hasCustomPrompt: Boolean(customPrompt),
-            customPromptLength: customPrompt?.length,
-        });
+    async generateDocument(input: GenerateDocumentInput): Promise<TranscriptionResult> {
+        const { storagePath, fileName, mimeType, prompt, signal } = input;
 
-        let base64Video: string;
-        try {
-            base64Video = await this.blobToBase64(videoBlob);
-        } catch (error) {
-            geminiLogger.error('動画の直接送信でエラーが発生', error, { fileName, modelName: targetModel });
-            return { success: false, error: error instanceof Error ? error.message : '不明なエラーが発生しました' };
-        }
-
-        return this.generateDocument(
-            { kind: 'inline', base64Data: base64Video, mimeType: videoBlob.type || 'video/mp4' },
-            fileName,
-            customPrompt,
-            modelName,
-            thinkingLevel,
-        );
-    }
-
-    /**
-     * 音声ファイルから文字起こしと文書生成を行う
-     * @param modelName 使用するGeminiモデル。未指定の場合は既定モデル。
-     * @param thinkingLevel 思考レベル。未指定の場合は default。
-     */
-    async transcribeAudio(
-        audioBlob: Blob,
-        fileName: string,
-        customPrompt?: string,
-        modelName?: string,
-        thinkingLevel: GeminiThinkingLevel = 'default',
-    ): Promise<TranscriptionResult> {
-        const targetModel = resolveGeminiModel(modelName ?? this.defaultModel);
-        geminiLogger.info('transcribeAudio 開始', {
-            fileName,
-            mimeType: audioBlob.type,
-            sizeInMB: (audioBlob.size / 1024 / 1024).toFixed(2),
-            modelName: targetModel,
-            hasCustomPrompt: Boolean(customPrompt),
-            customPromptLength: customPrompt?.length,
-        });
-
-        let base64Audio: string;
-        try {
-            base64Audio = await this.blobToBase64(audioBlob);
-        } catch (error) {
-            geminiLogger.error('Gemini API呼び出しでエラーが発生', error, { fileName, modelName: targetModel });
-            return { success: false, error: error instanceof Error ? error.message : '不明なエラーが発生しました' };
-        }
-
-        return this.generateDocument(
-            { kind: 'inline', base64Data: base64Audio, mimeType: audioBlob.type || 'audio/mp3' },
-            fileName,
-            customPrompt,
-            modelName,
-            thinkingLevel,
-        );
-    }
-
-    /**
-     * BlobをBase64文字列に変換（1回だけ変換して複数プロンプトで共有するために公開）
-     * 同一Blobを複数FileReaderで同時読みすると、大容量で空データになることがあるため、
-     * 呼び出し元で1回だけ呼び、その結果を transcribeWithBase64 に渡すこと。
-     */
-    async getBase64(blob: Blob): Promise<string> {
-        return this.blobToBase64(blob);
-    }
-
-    /**
-     * S2-1: inline 予算を超えるメディアを Files API へアップロードし、generateContent から参照できる状態
-     * (ACTIVE) になるまで待つ。1 ファイルにつき 1 回だけ呼び、全プロンプトで参照を共有すること。
-     * アップロードしたファイルは 48 時間で自動削除されるが、生成が決着したら deleteUploadedMedia で消す。
-     */
-    async uploadMedia(
-        blob: Blob,
-        fileName: string,
-        options: UploadMediaOptions = {},
-    ): Promise<UploadedMediaRef> {
-        const {
-            signal,
-            pollIntervalMs = FILES_API_ACTIVATION_POLL_MS,
-            timeoutMs = FILES_API_ACTIVATION_TIMEOUT_MS,
-        } = options;
-        const mimeType = blob.type || 'audio/mpeg';
-
-        geminiLogger.info('Files API へアップロードを開始', {
+        const body: GenerateRequestBody = {
+            storagePath,
             fileName,
             mimeType,
-            sizeInMB: (blob.size / 1024 / 1024).toFixed(2),
-        });
-
-        const uploaded = await this.genAI.files.upload({
-            file: blob,
-            config: {
-                mimeType,
-                displayName: fileName,
-                ...(signal && { abortSignal: signal }),
+            prompt: {
+                name: prompt.name,
+                content: prompt.content,
+                model: prompt.model,
+                thinkingLevel: prompt.thinkingLevel ?? 'default',
             },
+        };
+
+        geminiLogger.info('文書生成 API を呼び出し', {
+            fileName,
+            storagePath,
+            mimeType,
+            promptName: prompt.name,
+            promptLength: prompt.content.length,
+            model: prompt.model,
+            thinkingLevel: body.prompt.thinkingLevel,
         });
 
-        let current = uploaded;
-        const deadline = Date.now() + timeoutMs;
-        // state は SDK の FileState 列挙 ('PROCESSING' | 'ACTIVE' | 'FAILED') の文字列値。
-        // 列挙オブジェクト経由にしないのは、SDK をモックしたテストで undefined 参照にならないため
-        while ((current.state as string | undefined) === 'PROCESSING') {
-            if (!current.name) {
-                throw new Error('Files API がファイル名を返さなかったため、処理状態を確認できません。');
-            }
+        let token: string | null;
+        try {
+            token = await this.getIdToken();
+        } catch (error) {
+            geminiLogger.error('ID トークンの取得に失敗', error, { fileName });
+            return {
+                success: false,
+                error: 'ログイン状態を確認できませんでした。ログインし直してから、もう一度お試しください。',
+            };
+        }
+
+        const headers: Record<string, string> = { 'content-type': 'application/json' };
+        if (token) {
+            headers[GENERATE_AUTH_HEADER] = `Bearer ${token}`;
+        }
+
+        let response: Response;
+        try {
+            response = await this.fetchImpl(GENERATE_API_PATH, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(body),
+                ...(signal && { signal }),
+            });
+        } catch (error) {
             if (signal?.aborted) {
                 throw signal.reason instanceof Error ? signal.reason : new Error('処理が中止されました。');
             }
-            if (Date.now() >= deadline) {
-                throw new Error('Files API でのファイル処理が時間内に完了しませんでした。しばらくしてから再試行してください。');
-            }
-            await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-            current = await this.genAI.files.get({ name: current.name });
+            return { success: false, error: describeNetworkFailure(error) };
         }
 
-        if ((current.state as string | undefined) === 'FAILED') {
-            throw new Error(`Files API でのファイル処理に失敗しました: ${current.error?.message ?? '理由不明'}`);
-        }
-        if (!current.uri || !current.name) {
-            throw new Error('Files API がファイルURIを返しませんでした。');
-        }
+        const payload = await parseJsonSafely(response);
 
-        geminiLogger.info('Files API へのアップロードが完了', {
-            fileName,
-            name: current.name,
-            state: current.state,
-            sizeBytes: current.sizeBytes,
-            expirationTime: current.expirationTime,
-        });
+        if (!response.ok) {
+            const apiError = isErrorBody(payload)
+                ? new GenerateApiError(
+                    response.status,
+                    payload.error,
+                    response.status === 429
+                        ? describeRetryAfter(payload.message, payload.retryAfterSec)
+                        : payload.message,
+                    payload.retryAfterSec,
+                )
+                : new GenerateApiError(response.status, 'unknown', fallbackMessageForStatus(response.status));
 
-        return { name: current.name, fileUri: current.uri, mimeType: current.mimeType ?? mimeType };
-    }
-
-    /** uploadMedia で上げたファイルを消す。失敗しても 48 時間で自動削除されるため、記録だけして例外にしない */
-    async deleteUploadedMedia(name: string): Promise<void> {
-        try {
-            await this.genAI.files.delete({ name });
-            geminiLogger.info('Files API のファイルを削除', { name });
-        } catch (error) {
-            geminiLogger.warn('Files API のファイル削除に失敗（48時間で自動削除される）', {
-                name,
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
-    }
-
-    /**
-     * 既にBase64化したメディアで文書生成を行う（getBase64 を1回だけ行い、複数プロンプトで共有する用途）
-     * @param base64Data Base64文字列（data URLのプレフィックスなし）
-     * @param mimeType 'video/mp4' または 'audio/mpeg' など
-     * @param thinkingLevel 思考レベル。未指定の場合は default。
-     * @param mediaBitrate 変換時のビットレート。予算超過の文言を「約N分」で出すために使う（任意）
-     */
-    async transcribeWithBase64(
-        base64Data: string,
-        mimeType: string,
-        fileName: string,
-        customPrompt?: string,
-        modelName?: string,
-        thinkingLevel: GeminiThinkingLevel = 'default',
-        mediaBitrate?: string,
-    ): Promise<TranscriptionResult> {
-        return this.generateDocument(
-            { kind: 'inline', base64Data, mimeType },
-            fileName,
-            customPrompt,
-            modelName,
-            thinkingLevel,
-            mediaBitrate,
-        );
-    }
-
-    /**
-     * S2-1: Files API にアップロード済みのメディア (uploadMedia の戻り値) を参照して文書生成を行う。
-     * inline 予算を超えるファイルはこちらを使う。
-     */
-    async transcribeWithFileUri(
-        fileUri: string,
-        mimeType: string,
-        fileName: string,
-        customPrompt?: string,
-        modelName?: string,
-        thinkingLevel: GeminiThinkingLevel = 'default',
-    ): Promise<TranscriptionResult> {
-        return this.generateDocument(
-            { kind: 'file', fileUri, mimeType },
-            fileName,
-            customPrompt,
-            modelName,
-            thinkingLevel,
-        );
-    }
-
-    /** generateContent の唯一の入口。inline は送る前に予算を検査し、超えていれば API を呼ばずに返す */
-    private async generateDocument(
-        media: MediaSource,
-        fileName: string,
-        customPrompt: string | undefined,
-        modelName: string | undefined,
-        thinkingLevel: GeminiThinkingLevel,
-        mediaBitrate?: string,
-    ): Promise<TranscriptionResult> {
-        const targetModel = resolveGeminiModel(modelName ?? this.defaultModel);
-        const resolvedThinkingLevel = resolveThinkingLevelForModel(thinkingLevel, targetModel);
-        const usedThinkingLevel = resolvedThinkingLevel ?? 'unspecified';
-        const { mimeType } = media;
-
-        try {
-            if (media.kind === 'inline' && (!media.base64Data || media.base64Data.length === 0)) {
-                geminiLogger.error('Base64データが空のため送信をスキップ', { fileName, mimeType });
-                return {
-                    success: false,
-                    error: '音声/動画データの読み取りに失敗しました。ファイルが大きい場合は再試行してください。',
-                };
-            }
-
-            const prompt = customPrompt || defaultPromptFor(mimeType);
-
-            if (media.kind === 'inline') {
-                // S2-1: generateContent を呼ぶ前に inline 予算を検査する。超えていれば API に投げずに
-                // 実行可能な文言で返す（API 側の「payload too large」は理由が伝わらず、課金にも時間にも無駄）
-                const promptBytes = utf8ByteLength(prompt);
-                if (selectMediaTransport(media.base64Data.length, promptBytes) !== 'inline') {
-                    geminiLogger.error('inline 予算を超えるため generateContent を呼ばずに中止', undefined, {
-                        fileName,
-                        mimeType,
-                        base64LengthChars: media.base64Data.length,
-                        promptBytes,
-                        budgetBytes: INLINE_REQUEST_BUDGET_BYTES,
-                    });
-                    return { success: false, error: describeInlineBudgetExceeded(mediaBitrate) };
-                }
-
-                geminiLogger.info('Gemini API へ送信（Base64共有）', {
-                    fileName,
-                    mimeType,
-                    base64LengthChars: media.base64Data.length,
-                    modelName: targetModel,
-                    promptLength: prompt.length,
-                });
-            } else {
-                geminiLogger.info('Gemini API へ送信（Files API 参照）', {
-                    fileName,
-                    mimeType,
-                    fileUri: media.fileUri,
-                    modelName: targetModel,
-                    promptLength: prompt.length,
-                });
-            }
-
-            const mediaPart = media.kind === 'inline'
-                ? { inlineData: { mimeType, data: media.base64Data } }
-                : { fileData: { fileUri: media.fileUri, mimeType } };
-
-            const result = await this.genAI.models.generateContent({
-                model: targetModel,
-                ...(resolvedThinkingLevel && {
-                    config: {
-                        thinkingConfig: {
-                            thinkingLevel: THINKING_LEVEL_ENUMS[resolvedThinkingLevel],
-                        },
-                    },
-                }),
-                contents: [
-                    {
-                        role: 'user',
-                        parts: [
-                            { text: prompt },
-                            mediaPart,
-                        ],
-                    },
-                ],
-            });
-
-            geminiLogger.info('generateContent のレスポンスを受信', { fileName });
-
-            const text = result.text ?? '';
-
-            logGeminiUsage(targetModel, usedThinkingLevel, result.usageMetadata);
-
-            geminiLogger.info('文書生成が成功', {
+            geminiLogger.error('文書生成 API がエラーを返却', apiError, {
                 fileName,
-                modelName: targetModel,
-                generatedTextLength: text.length,
+                status: apiError.status,
+                code: apiError.code,
+                retryAfterSec: apiError.retryAfterSec,
             });
+            return { success: false, error: apiError.message };
+        }
 
-            return {
-                success: true,
-                text,
-                usedModel: targetModel,
-                usedThinkingLevel,
-            };
-        } catch (error) {
-            geminiLogger.error('Gemini API呼び出しでエラーが発生', error, {
-                fileName,
-                modelName: targetModel,
-                mediaKind: media.kind,
-            });
-
-            let errorMessage = '不明なエラーが発生しました';
-            if (error instanceof Error) {
-                errorMessage = translateGeminiError(error.message, targetModel);
-            }
-
+        if (!isResponseBody(payload)) {
+            geminiLogger.error('文書生成 API の応答が契約と異なる', undefined, { fileName, payload });
             return {
                 success: false,
-                error: errorMessage,
+                error: '文書生成サーバの応答を読み取れませんでした。しばらくしてから、もう一度お試しください。',
             };
         }
-    }
 
-    /**
-     * BlobをBase64文字列に変換
-     */
-    private async blobToBase64(blob: Blob): Promise<string> {
-        geminiLogger.info('Base64変換を開始', {
-            mimeType: blob.type,
-            sizeInMB: (blob.size / 1024 / 1024).toFixed(2),
-            sizeInBytes: blob.size,
+        logGeminiUsage(payload.usedModel, payload.thinkingLevel, payload.transport, payload.usage);
+        geminiLogger.info('文書生成が成功', {
+            fileName,
+            modelName: payload.usedModel,
+            transport: payload.transport,
+            elapsedMs: payload.elapsedMs,
+            generatedTextLength: payload.text.length,
         });
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64String = reader.result as string;
-                // "data:audio/mpeg;base64," の部分を削除
-                const base64Data = base64String?.split(',')[1] ?? '';
-                if (!base64Data) {
-                    geminiLogger.error('Base64変換結果が空です', { blobSize: blob.size, mimeType: blob.type });
-                    reject(new Error('音声/動画データの読み取りに失敗しました。'));
-                    return;
-                }
-                geminiLogger.info('Base64変換が完了', {
-                    base64LengthChars: base64Data.length,
-                    estimatedEncodedSizeMB: (base64Data.length * 0.75 / 1024 / 1024).toFixed(2),
-                });
-                resolve(base64Data);
-            };
-            reader.onerror = (e) => {
-                geminiLogger.error('Base64変換でエラーが発生', e);
-                reject(e);
-            };
-            reader.readAsDataURL(blob);
-        });
+
+        return {
+            success: true,
+            text: payload.text,
+            usedModel: payload.usedModel,
+            usedThinkingLevel: payload.thinkingLevel,
+            transport: payload.transport,
+            elapsedMs: payload.elapsedMs,
+        };
     }
 }

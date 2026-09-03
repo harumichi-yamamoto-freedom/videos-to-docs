@@ -10,10 +10,9 @@ const reactHarness = vi.hoisted(() => ({
 }));
 
 const serviceMocks = vi.hoisted(() => ({
-    getBase64: vi.fn(),
+    generateDocument: vi.fn(),
     getCurrentUserId: vi.fn(),
     saveTranscription: vi.fn(),
-    transcribeWithBase64: vi.fn(),
     uploadAudioToStorage: vi.fn(),
     validatePromptPermission: vi.fn(),
 }));
@@ -134,7 +133,6 @@ beforeEach(() => {
     reactHarness.stateCursor = 0;
     reactHarness.stateValues = [];
     vi.clearAllMocks();
-    serviceMocks.getBase64.mockResolvedValue('base64-data');
     serviceMocks.getCurrentUserId.mockReturnValue('user-1');
     serviceMocks.saveTranscription.mockResolvedValue('doc-1');
     serviceMocks.uploadAudioToStorage.mockResolvedValue('audio/path');
@@ -151,8 +149,8 @@ describe.each([
             createPrompt('prompt-c', 'Prompt C'),
         ];
         const saveDeferred = createDeferred<void>();
-        serviceMocks.transcribeWithBase64.mockImplementation(
-            (_base64, _mimeType, _fileName, content: string) => {
+        serviceMocks.generateDocument.mockImplementation(
+            ({ prompt: { content } }: { prompt: { content: string } }) => {
                 if (content !== 'Prompt B content') {
                     return Promise.reject(new Error(`${content.replace(' content', '')} failed`));
                 }
@@ -168,8 +166,7 @@ describe.each([
         );
         hook.setProcessingStatuses([createStatus(prompts.length)]);
         hook.geminiClientRef.current = {
-            getBase64: serviceMocks.getBase64,
-            transcribeWithBase64: serviceMocks.transcribeWithBase64,
+            generateDocument: serviceMocks.generateDocument,
         } as never;
 
         const file = createFile(prompts.map(prompt => prompt.id!));
@@ -208,11 +205,10 @@ describe.each([
 describe.each([
     ['initial processing', false],
     ['resume processing', true],
-] as const)('useVideoProcessing preparation settlement: %s', (_label, resume) => {
-    it('waits for both preparation tasks and reports every rejected reason together', async () => {
+] as const)('useVideoProcessing storage upload gate (#4): %s', (_label, resume) => {
+    it('Storage へのアップロード失敗は upload フェーズの明示エラーにし、API を呼ばない', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        const uploadDeferred = createDeferred<string | null>();
-        serviceMocks.getBase64.mockRejectedValue(new Error('base64 failed'));
+        const uploadDeferred = createDeferred<string>();
         serviceMocks.uploadAudioToStorage.mockReturnValue(uploadDeferred.promise);
 
         const hook = useVideoProcessing(
@@ -221,8 +217,7 @@ describe.each([
         );
         hook.setProcessingStatuses([createStatus(1)]);
         hook.geminiClientRef.current = {
-            getBase64: serviceMocks.getBase64,
-            transcribeWithBase64: serviceMocks.transcribeWithBase64,
+            generateDocument: serviceMocks.generateDocument,
         } as never;
 
         const file = createFile([prompt.id!]);
@@ -239,17 +234,39 @@ describe.each([
             expect(serviceMocks.uploadAudioToStorage).toHaveBeenCalledTimes(1);
         });
         expect(finished).toBe(false);
-        expect(getCurrentStatus().status).toBe('transcribing');
+        expect(getCurrentStatus()).toMatchObject({ status: 'transcribing', phase: 'uploading' });
 
         uploadDeferred.reject(new Error('storage failed'));
         await processingPromise;
 
         expect(finished).toBe(true);
-        expect(serviceMocks.transcribeWithBase64).not.toHaveBeenCalled();
-        expect(getCurrentStatus().status).toBe('error');
-        expect(getCurrentStatus().error).toContain('Base64変換');
+        // 以前は「失敗しても続行」だったが、サーバは Storage から読むので続行できない
+        expect(serviceMocks.generateDocument).not.toHaveBeenCalled();
+        expect(serviceMocks.saveTranscription).not.toHaveBeenCalled();
+        expect(getCurrentStatus()).toMatchObject({ status: 'error', failedPhase: 'upload', phase: 'uploading' });
         expect(getCurrentStatus().error).toContain('Storageアップロード');
         expect(getCurrentStatus().error).toContain('storage failed');
+    });
+
+    it('古い test double のように null を返しても成功扱いにしない', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        serviceMocks.uploadAudioToStorage.mockResolvedValue(null as never);
+
+        const hook = useVideoProcessing(
+            [prompt],
+            { ffmpegError: false, geminiError: false, errorAtFileIndex: 0, errorAtSegmentIndex: 0 }
+        );
+        hook.setProcessingStatuses([createStatus(1)]);
+        hook.geminiClientRef.current = { generateDocument: serviceMocks.generateDocument } as never;
+
+        const file = createFile([prompt.id!]);
+        const audioBlob = new Blob(['audio'], { type: 'audio/mpeg' });
+        await (resume
+            ? hook.processTranscriptionResume(createJob(file), audioBlob, [], '192k', 44100)
+            : hook.processTranscription(createJob(file), audioBlob, '192k', 44100));
+
+        expect(serviceMocks.generateDocument).not.toHaveBeenCalled();
+        expect(getCurrentStatus()).toMatchObject({ status: 'error', failedPhase: 'upload' });
     });
 });
 
@@ -260,8 +277,7 @@ const useProcessingHarness = (prompts: Prompt[], totalTranscriptions = prompts.l
     );
     hook.setProcessingStatuses([createStatus(totalTranscriptions)]);
     hook.geminiClientRef.current = {
-        getBase64: serviceMocks.getBase64,
-        transcribeWithBase64: serviceMocks.transcribeWithBase64,
+        generateDocument: serviceMocks.generateDocument,
     } as never;
     return hook;
 };
@@ -269,7 +285,7 @@ const useProcessingHarness = (prompts: Prompt[], totalTranscriptions = prompts.l
 describe('useVideoProcessing owner pinning', () => {
     it('refuses to save when the signed-in user changes after the job started', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockImplementation(() => {
+        serviceMocks.generateDocument.mockImplementation(() => {
             // 生成中にサインインし直したユーザーへ切り替わる状況を再現する
             serviceMocks.getCurrentUserId.mockReturnValue('user-2');
             return Promise.resolve({ success: true, text: 'generated' });
@@ -292,7 +308,7 @@ describe('useVideoProcessing owner pinning', () => {
 
     it('saves under the uid captured at job start when the uid never changes', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
 
         const hook = useProcessingHarness([prompt]);
         const file = createFile([prompt.id!]);
@@ -312,7 +328,7 @@ describe('useVideoProcessing owner pinning', () => {
 describe('useVideoProcessing idempotency', () => {
     it('does not generate or save the same file and prompt twice across a resume', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
 
         const hook = useProcessingHarness([prompt]);
         const file = createFile([prompt.id!]);
@@ -322,7 +338,7 @@ describe('useVideoProcessing idempotency', () => {
         // 完了済みIDを渡し忘れた再開でも、二重生成・二重保存をしない
         await hook.processTranscriptionResume(createJob(file), audioBlob, [], '192k', 44100);
 
-        expect(serviceMocks.transcribeWithBase64).toHaveBeenCalledTimes(1);
+        expect(serviceMocks.generateDocument).toHaveBeenCalledTimes(1);
         expect(serviceMocks.saveTranscription).toHaveBeenCalledTimes(1);
         expect(getCurrentStatus().status).toBe('completed');
         expect(getCurrentStatus().transcriptionCount).toBe(1);
@@ -332,7 +348,7 @@ describe('useVideoProcessing idempotency', () => {
 describe('useVideoProcessing completion gate', () => {
     it('treats a blank generation as a failure instead of completing', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: '   \n  ' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: '   \n  ' });
 
         const hook = useProcessingHarness([prompt]);
         const file = createFile([prompt.id!]);
@@ -360,7 +376,7 @@ describe('useVideoProcessing completion gate', () => {
             44100
         );
 
-        expect(serviceMocks.transcribeWithBase64).not.toHaveBeenCalled();
+        expect(serviceMocks.generateDocument).not.toHaveBeenCalled();
         expect(getCurrentStatus().status).toBe('error');
     });
 
@@ -369,8 +385,8 @@ describe('useVideoProcessing completion gate', () => {
             createPrompt('prompt-a', 'Prompt A'),
             createPrompt('prompt-b', 'Prompt B'),
         ];
-        serviceMocks.transcribeWithBase64.mockImplementation(
-            (_base64, _mimeType, _fileName, content: string) =>
+        serviceMocks.generateDocument.mockImplementation(
+            ({ prompt: { content } }: { prompt: { content: string } }) =>
                 content === 'Prompt A content'
                     ? Promise.resolve({ success: true, text: 'A result' })
                     : Promise.reject(new Error('Prompt B failed'))
@@ -432,7 +448,7 @@ describe('useVideoProcessing job exclusion', () => {
     it('ignores a second start while the first job is still in flight', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
         const saveDeferred = createDeferred<void>();
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
         serviceMocks.saveTranscription.mockReturnValue(saveDeferred.promise);
 
         const hook = useProcessingHarness([prompt]);
@@ -446,7 +462,7 @@ describe('useVideoProcessing job exclusion', () => {
 
         // 1本目がまだ保存中（冪等キーは未登録）の状態で2本目を投げる
         await hook.processTranscription(createJob(file), audioBlob, '192k', 44100);
-        expect(serviceMocks.transcribeWithBase64).toHaveBeenCalledTimes(1);
+        expect(serviceMocks.generateDocument).toHaveBeenCalledTimes(1);
 
         saveDeferred.resolve();
         await first;
@@ -458,7 +474,7 @@ describe('useVideoProcessing abort handling', () => {
     it('does not save a document generated before the job was canceled', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
         const hook = useProcessingHarness([prompt]);
-        serviceMocks.transcribeWithBase64.mockImplementation(() => {
+        serviceMocks.generateDocument.mockImplementation(() => {
             hook.cancelJob(FILE_ID, '中止しました。');
             return Promise.resolve({ success: true, text: 'generated' });
         });
@@ -477,7 +493,7 @@ describe('useVideoProcessing abort handling', () => {
     it('waits for the running job to settle before clearing the state', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
         const saveDeferred = createDeferred<void>();
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
         serviceMocks.saveTranscription.mockReturnValue(saveDeferred.promise);
 
         const hook = useProcessingHarness([prompt]);
@@ -519,7 +535,7 @@ describe('useVideoProcessing prompt integrity', () => {
             44100
         );
 
-        expect(serviceMocks.transcribeWithBase64).not.toHaveBeenCalled();
+        expect(serviceMocks.generateDocument).not.toHaveBeenCalled();
         expect(serviceMocks.saveTranscription).not.toHaveBeenCalled();
         expect(getCurrentStatus().status).toBe('error');
         expect(getCurrentStatus().error).toContain('見つかりません');
@@ -527,7 +543,7 @@ describe('useVideoProcessing prompt integrity', () => {
 
     it('completes on a resume even when completedPromptIds carries a deleted prompt', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
 
         const hook = useProcessingHarness([prompt]);
 
@@ -548,7 +564,7 @@ describe('useVideoProcessing prompt integrity', () => {
 describe('useVideoProcessing save failure', () => {
     it('keeps the prompt in the save-pending set so the retry hint can be shown', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
         serviceMocks.saveTranscription.mockRejectedValue(new Error('firestore down'));
 
         const hook = useProcessingHarness([prompt]);
@@ -566,7 +582,7 @@ describe('useVideoProcessing save failure', () => {
 
     it('retries only the save, without generating again', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
         serviceMocks.saveTranscription.mockRejectedValueOnce(new Error('firestore down'));
 
         const hook = useProcessingHarness([prompt]);
@@ -579,8 +595,9 @@ describe('useVideoProcessing save failure', () => {
         serviceMocks.saveTranscription.mockResolvedValue('doc-1');
         await hook.processTranscriptionResume(job, null, [], '192k', 44100);
 
-        expect(serviceMocks.transcribeWithBase64).toHaveBeenCalledTimes(1);
-        expect(serviceMocks.getBase64).toHaveBeenCalledTimes(1);
+        expect(serviceMocks.generateDocument).toHaveBeenCalledTimes(1);
+        // 下書きが残っているので Storage へ上げ直さない
+        expect(serviceMocks.uploadAudioToStorage).toHaveBeenCalledTimes(1);
         expect(getCurrentStatus().status).toBe('completed');
     });
 });
@@ -588,7 +605,7 @@ describe('useVideoProcessing save failure', () => {
 describe('useVideoProcessing owner argument', () => {
     it('passes the pinned uid to saveTranscription so the write is checked there too', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
 
         const hook = useProcessingHarness([prompt]);
         await hook.processTranscription(
@@ -642,7 +659,7 @@ describe('countPendingSaveDrafts (V1)', () => {
 describe('useVideoProcessing discard confirmation (V1)', () => {
     it('asks for confirmation when unsaved drafts exist even with no job running', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
         serviceMocks.saveTranscription.mockRejectedValue(new Error('firestore down'));
 
         const hook = useProcessingHarness([prompt]);
@@ -673,7 +690,7 @@ describe('useVideoProcessing forced discard (V2)', () => {
     it('reports a timeout and keeps the progress when a job will not stop', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
         const saveDeferred = createDeferred<void>();
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
         serviceMocks.saveTranscription.mockReturnValue(saveDeferred.promise);
 
         const hook = useProcessingHarness([prompt]);
@@ -705,7 +722,7 @@ describe('useVideoProcessing forced discard (V2)', () => {
 
     it('settles normally when the job finishes inside the limit', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
 
         const hook = useProcessingHarness([prompt]);
         await hook.processTranscription(
@@ -801,7 +818,7 @@ describe('useVideoProcessing cancel after generation (U1)', () => {
     it('still reports the generated draft as save-pending after a cancel', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
         const hook = useProcessingHarness([prompt]);
-        serviceMocks.transcribeWithBase64.mockImplementation(() => {
+        serviceMocks.generateDocument.mockImplementation(() => {
             // 生成が終わり下書きが出来た直後に中止される
             hook.cancelJob(FILE_ID, '中止しました。');
             return Promise.resolve({ success: true, text: 'generated' });
@@ -827,7 +844,7 @@ describe('useVideoProcessing cancel after generation (U1)', () => {
     it('reports nothing pending when the cancel happened before generation', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
         const hook = useProcessingHarness([prompt]);
-        serviceMocks.transcribeWithBase64.mockImplementation(() =>
+        serviceMocks.generateDocument.mockImplementation(() =>
             Promise.reject(new Error('generation failed'))
         );
 
@@ -865,7 +882,7 @@ describe('resolveSavePendingPromptIds pending state (G2)', () => {
 describe('useVideoProcessing save-only retry keeps the discard gate (G2)', () => {
     it('still reports the draft as save-pending while the retry is in flight', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
         serviceMocks.saveTranscription.mockRejectedValueOnce(new Error('firestore down'));
 
         const hook = useProcessingHarness([prompt]);
@@ -927,116 +944,152 @@ describe('savePendingPromptIds has a single writer (G2 invariant)', () => {
     });
 });
 
-describe('useVideoProcessing Files API 迂回 (S2-1)', () => {
-    const geminiDoubles = {
-        uploadMedia: vi.fn(),
-        deleteUploadedMedia: vi.fn(),
-        transcribeWithFileUri: vi.fn(),
-    };
-    /** inline 予算 (Base64 + プロンプト ≦ 16MiB) を確実に超えるサイズ。中身は読まないので size だけ持つ */
-    const largeBlob = { size: 13 * 1024 * 1024, type: 'audio/mpeg' } as Blob;
-    const smallBlob = new Blob(['audio'], { type: 'audio/mpeg' });
-
+describe('useVideoProcessing サーバ経由の文書生成 (#4)', () => {
     const DEBUG_OFF = { ffmpegError: false, geminiError: false, errorAtFileIndex: 0, errorAtSegmentIndex: 0 };
-    /** フック本体は各テスト内で呼ぶ (rules-of-hooks)。ここは戻り値に test double を差すだけ */
-    const attachDoubles = (hook: ReturnType<typeof useVideoProcessing>, promptCount: number) => {
-        hook.setProcessingStatuses([createStatus(promptCount)]);
-        hook.geminiClientRef.current = {
-            getBase64: serviceMocks.getBase64,
-            transcribeWithBase64: serviceMocks.transcribeWithBase64,
-            ...geminiDoubles,
-        } as never;
-        return hook;
-    };
 
     beforeEach(() => {
-        geminiDoubles.uploadMedia.mockReset().mockResolvedValue({
-            name: 'files/abc',
-            fileUri: 'https://files/abc',
-            mimeType: 'audio/mpeg',
+        serviceMocks.generateDocument.mockResolvedValue({
+            success: true,
+            text: 'generated',
+            usedModel: 'gemini-resolved',
+            usedThinkingLevel: 'HIGH',
+            transport: 'files_api',
+            elapsedMs: 100,
         });
-        geminiDoubles.deleteUploadedMedia.mockReset().mockResolvedValue(undefined);
-        geminiDoubles.transcribeWithFileUri.mockReset().mockResolvedValue({ success: true, text: 'generated' });
-        serviceMocks.transcribeWithBase64.mockResolvedValue({ success: true, text: 'generated' });
+        serviceMocks.uploadAudioToStorage.mockResolvedValue('audio/user-1/1_sample.mp3');
     });
 
-    it('inline 予算を超える音声は getBase64 ではなく uploadMedia で上げ、fileUri で生成する', async () => {
-        const prompt = createPrompt('prompt-a', 'Prompt A');
-        const hook = attachDoubles(useVideoProcessing([prompt], DEBUG_OFF, vi.fn()), 1);
+    it('Storage のパス・元ファイルの MIME・プロンプト・signal を API クライアントへ渡す', async () => {
+        const prompt: Prompt = { ...createPrompt('prompt-a', 'Prompt A'), thinkingLevel: 'high' };
+        const hook = useProcessingHarness([prompt]);
         const file = createFile([prompt.id!]);
 
-        await hook.processTranscription(createJob(file), largeBlob, '128k', 44100);
+        await hook.processTranscription(createJob(file), new Blob(['audio'], { type: 'audio/mpeg' }), '128k', 44100);
 
-        expect(serviceMocks.getBase64).not.toHaveBeenCalled();
-        expect(serviceMocks.transcribeWithBase64).not.toHaveBeenCalled();
-        expect(geminiDoubles.uploadMedia).toHaveBeenCalledTimes(1);
-        expect(geminiDoubles.uploadMedia).toHaveBeenCalledWith(
-            largeBlob,
-            'sample.mp3',
-            expect.objectContaining({ signal: expect.any(AbortSignal) })
-        );
-        expect(geminiDoubles.transcribeWithFileUri).toHaveBeenCalledWith(
-            'https://files/abc',
-            'audio/mpeg',
-            'sample.mp3',
-            'Prompt A content',
-            'gemini-test',
-            undefined
-        );
+        expect(serviceMocks.uploadAudioToStorage).toHaveBeenCalledTimes(1);
+        expect(serviceMocks.generateDocument).toHaveBeenCalledTimes(1);
+        expect(serviceMocks.generateDocument).toHaveBeenCalledWith({
+            storagePath: 'audio/user-1/1_sample.mp3',
+            fileName: 'sample.mp3',
+            mimeType: 'audio/mpeg',
+            prompt: {
+                name: 'Prompt A',
+                content: 'Prompt A content',
+                model: 'gemini-test',
+                thinkingLevel: 'high',
+            },
+            signal: expect.any(AbortSignal),
+        });
         expect(getCurrentStatus()).toMatchObject({ status: 'completed', transcriptionCount: 1 });
-        // 生成が決着したら Files API 上のファイルは消す
-        expect(geminiDoubles.deleteUploadedMedia).toHaveBeenCalledWith('files/abc');
+        // 保存には応答の usedModel / thinkingLevel と Storage パスを使う
+        expect(serviceMocks.saveTranscription.mock.calls[0][7]).toBe('audio/user-1/1_sample.mp3');
+        expect(serviceMocks.saveTranscription.mock.calls[0][8]).toBe('gemini-resolved');
+        expect(serviceMocks.saveTranscription.mock.calls[0][10]).toBe('HIGH');
     });
 
-    it('予算内の音声は従来どおり Base64 で送り、Files API を使わない', async () => {
+    it('API に渡す signal はそのジョブの中止で aborted になる', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        const hook = attachDoubles(useVideoProcessing([prompt], DEBUG_OFF, vi.fn()), 1);
-        const file = createFile([prompt.id!]);
+        const hook = useProcessingHarness([prompt]);
+        let capturedSignal: AbortSignal | undefined;
+        serviceMocks.generateDocument.mockImplementation(async ({ signal }: { signal?: AbortSignal }) => {
+            capturedSignal = signal;
+            hook.cancelJob(FILE_ID, '中止しました。');
+            // 実物のクライアントは fetch が落ちたとき signal.reason を投げ直す
+            throw signal!.reason;
+        });
 
-        await hook.processTranscription(createJob(file), smallBlob, '128k', 44100);
-
-        expect(geminiDoubles.uploadMedia).not.toHaveBeenCalled();
-        expect(geminiDoubles.transcribeWithFileUri).not.toHaveBeenCalled();
-        expect(serviceMocks.getBase64).toHaveBeenCalledTimes(1);
-        // 予算超過の文言を「約N分」で出せるよう、ビットレートも渡す
-        expect(serviceMocks.transcribeWithBase64).toHaveBeenCalledWith(
-            'base64-data',
-            'audio/mpeg',
-            'sample.mp3',
-            'Prompt A content',
-            'gemini-test',
-            undefined,
-            '128k'
+        await hook.processTranscription(
+            createJob(createFile([prompt.id!])),
+            new Blob(['audio'], { type: 'audio/mpeg' }),
+            '128k',
+            44100
         );
-        expect(geminiDoubles.deleteUploadedMedia).not.toHaveBeenCalled();
-        expect(getCurrentStatus()).toMatchObject({ status: 'completed' });
+
+        expect(capturedSignal?.aborted).toBe(true);
+        expect(serviceMocks.saveTranscription).not.toHaveBeenCalled();
+        expect(getCurrentStatus()).toMatchObject({ status: 'canceled', phase: 'canceled' });
     });
 
-    it('複数プロンプトでもアップロードは 1 回で、参照を共有する', async () => {
+    it('動画直送 (Blob が video/*) はサーバへ video/* を渡す', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = useProcessingHarness([prompt]);
+        const file: FileWithPrompts = {
+            file: { name: 'clip.mp4', type: 'video/mp4' } as File,
+            selectedPromptIds: [prompt.id!],
+        };
+
+        await hook.processTranscription(createJob(file), file.file as Blob, '128k', 44100);
+
+        expect(serviceMocks.generateDocument.mock.calls[0][0]).toMatchObject({
+            fileName: 'clip.mp4',
+            mimeType: 'video/mp4',
+        });
+        expect(serviceMocks.uploadAudioToStorage.mock.calls[0][2]).toMatchObject({ originalFileType: 'video' });
+    });
+
+    it('動画を音声に変換した Blob (audio/mpeg) は元が動画でも audio/mpeg を渡す', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = useProcessingHarness([prompt]);
+        const file: FileWithPrompts = {
+            file: { name: 'clip.mp4', type: 'video/mp4' } as File,
+            selectedPromptIds: [prompt.id!],
+        };
+
+        await hook.processTranscription(createJob(file), new Blob(['mp3'], { type: 'audio/mpeg' }), '128k', 44100);
+
+        expect(serviceMocks.generateDocument.mock.calls[0][0]).toMatchObject({ mimeType: 'audio/mpeg' });
+    });
+
+    it('複数プロンプトでも Storage へのアップロードは 1 回で、同じパスを共有する', async () => {
         const prompts = [createPrompt('prompt-a', 'Prompt A'), createPrompt('prompt-b', 'Prompt B')];
-        const hook = attachDoubles(useVideoProcessing(prompts, DEBUG_OFF, vi.fn()), prompts.length);
+        const hook = useProcessingHarness(prompts);
         const file = createFile(prompts.map(prompt => prompt.id!));
 
-        await hook.processTranscription(createJob(file), largeBlob, '128k', 44100);
+        await hook.processTranscription(createJob(file), new Blob(['audio'], { type: 'audio/mpeg' }), '128k', 44100);
 
-        expect(geminiDoubles.uploadMedia).toHaveBeenCalledTimes(1);
-        expect(geminiDoubles.transcribeWithFileUri).toHaveBeenCalledTimes(2);
-        expect(geminiDoubles.deleteUploadedMedia).toHaveBeenCalledTimes(1);
+        expect(serviceMocks.uploadAudioToStorage).toHaveBeenCalledTimes(1);
+        expect(serviceMocks.generateDocument).toHaveBeenCalledTimes(2);
+        const paths = serviceMocks.generateDocument.mock.calls.map(call => call[0].storagePath);
+        expect(paths).toEqual(['audio/user-1/1_sample.mp3', 'audio/user-1/1_sample.mp3']);
         expect(getCurrentStatus()).toMatchObject({ status: 'completed', transcriptionCount: 2 });
     });
 
-    it('Files API のアップロードに失敗したら upload フェーズで止め、ビットレートの目安を示す', async () => {
+    it('API の失敗文言 (429 等) をそのままプロンプトの失敗として表示する', async () => {
         const prompt = createPrompt('prompt-a', 'Prompt A');
-        geminiDoubles.uploadMedia.mockRejectedValue(new Error('CORS blocked'));
-        const hook = attachDoubles(useVideoProcessing([prompt], DEBUG_OFF, vi.fn()), 1);
-        const file = createFile([prompt.id!]);
+        serviceMocks.generateDocument.mockResolvedValue({
+            success: false,
+            error: '1時間あたりの上限に達しました。（約90秒後に再試行できます）',
+        });
+        const hook = useProcessingHarness([prompt]);
 
-        await hook.processTranscription(createJob(file), largeBlob, '128k', 44100);
+        await hook.processTranscription(
+            createJob(createFile([prompt.id!])),
+            new Blob(['audio'], { type: 'audio/mpeg' }),
+            '128k',
+            44100
+        );
 
-        expect(getCurrentStatus()).toMatchObject({ status: 'error', failedPhase: 'upload' });
-        expect(getCurrentStatus().error).toContain('Gemini Files API アップロード: CORS blocked');
-        expect(getCurrentStatus().error).toContain('ビットレート 128k では約13分を超えると失敗します');
-        expect(geminiDoubles.transcribeWithFileUri).not.toHaveBeenCalled();
-        expect(geminiDoubles.deleteUploadedMedia).not.toHaveBeenCalled();
+        expect(getCurrentStatus()).toMatchObject({ status: 'error', failedPhase: 'text_generation' });
+        expect(getCurrentStatus().error).toContain('約90秒後に再試行できます');
+        expect(serviceMocks.saveTranscription).not.toHaveBeenCalled();
+    });
+
+    it('デバッグの「Gemini エラーを発生させる」はクライアント側で API を呼ばずに失敗にする', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = useVideoProcessing([prompt], { ...DEBUG_OFF, geminiError: true, errorAtFileIndex: 0 });
+        hook.setProcessingStatuses([createStatus(1)]);
+        hook.geminiClientRef.current = { generateDocument: serviceMocks.generateDocument } as never;
+
+        await hook.processTranscription(
+            createJob(createFile([prompt.id!])),
+            new Blob(['audio'], { type: 'audio/mpeg' }),
+            '128k',
+            44100
+        );
+
+        expect(serviceMocks.uploadAudioToStorage).not.toHaveBeenCalled();
+        expect(serviceMocks.generateDocument).not.toHaveBeenCalled();
+        expect(getCurrentStatus()).toMatchObject({ status: 'error', failedPhase: 'text_generation' });
+        expect(getCurrentStatus().error).toContain('[デバッグ]');
     });
 });
