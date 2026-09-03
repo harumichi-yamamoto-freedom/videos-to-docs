@@ -5,6 +5,8 @@
  * 上限に張り付けると単位の解釈や封筒サイズの差で落ちるため、余裕を引いた予算で判定し、
  * 超える分は Files API (ai.files.upload) へ迂回する。ここは SDK に依存しない純関数だけを置く。
  */
+import { GENERATE_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
+
 export const GEMINI_INLINE_REQUEST_LIMIT_BYTES = 20 * 1024 * 1024;
 
 /** JSON 封筒 (キー名・モデル名・thinkingConfig 等) と計測誤差の余裕 */
@@ -73,4 +75,29 @@ export const describeInlineBudgetExceeded = (bitrate?: string): string => {
     }
     const maxMediaMb = Math.floor((INLINE_REQUEST_BUDGET_BYTES * 3) / 4 / 1024 / 1024);
     return `音声・動画データが大きすぎるため、そのままでは送信できません（そのまま送れる上限の目安: 約${maxMediaMb}MB）。ビットレートを下げるか、ファイルを分割してください。`;
+};
+
+/**
+ * そのビットレートで扱える録音の長さ (分・切り捨て)。
+ *
+ * inline 予算 (estimateInlineLimitMinutes) は Files API へ迂回すれば超えられる内部の分岐点でしかなく、
+ * 利用者が実際にぶつかる壁は Storage のサイズ上限 (100MB) のほう。画面にはこちらを出す。
+ */
+export const estimateMaxRecordingMinutes = (
+    bitrate: string,
+    maxMediaBytes: number = GENERATE_MAX_MEDIA_BYTES,
+): number | null => {
+    const kbps = parseBitrateKbps(bitrate);
+    if (kbps === null) return null;
+    const bytesPerSecond = (kbps * 1000) / 8;
+    return Math.floor(Math.max(0, maxMediaBytes) / bytesPerSecond / 60);
+};
+
+/** 分を「約3時間38分」「約45分」の形にする。1 時間未満は分だけ、ちょうどの時間は「約2時間」 */
+export const formatDurationJa = (minutes: number): string => {
+    const total = Math.max(0, Math.floor(minutes));
+    if (total < 60) return `約${total}分`;
+    const hours = Math.floor(total / 60);
+    const rest = total % 60;
+    return rest === 0 ? `約${hours}時間` : `約${hours}時間${rest}分`;
 };

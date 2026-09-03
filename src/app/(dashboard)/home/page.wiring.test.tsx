@@ -474,11 +474,11 @@ describe('bitrate wiring (S2-1)', () => {
         hookMocks.handleStartProcessing.mockResolvedValue({ ok: true });
     });
 
-    it('既定の 128k を開始処理へ渡す (192k 固定だと約 10 分で送れなくなる)', async () => {
+    it('既定の 96k を開始処理へ渡す (128k だと 2 時間の商談が上限に届かない)', async () => {
         await click('変換・文書生成を開始する');
 
         expect(hookMocks.handleStartProcessing).toHaveBeenCalledTimes(1);
-        expect(hookMocks.handleStartProcessing.mock.calls[0][2]).toBe('128k');
+        expect(hookMocks.handleStartProcessing.mock.calls[0][2]).toBe('96k');
         expect(hookMocks.handleStartProcessing.mock.calls[0][3]).toBe(44100);
     });
 
@@ -487,7 +487,7 @@ describe('bitrate wiring (S2-1)', () => {
             typeof element.props.onBitrateChange === 'function'
         );
         expect(settings, 'ConversionSettings が配線されていない').toBeDefined();
-        expect(settings!.props.bitrate).toBe('128k');
+        expect(settings!.props.bitrate).toBe('96k');
 
         (settings!.props.onBitrateChange as (bitrate: string) => void)('64k');
         await click('変換・文書生成を開始する');
