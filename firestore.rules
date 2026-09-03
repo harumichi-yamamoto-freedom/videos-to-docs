@@ -271,8 +271,14 @@ service cloud.firestore {
       // 管理者はすべてのユーザーを読み取り可能
       allow list: if isSuperuser();
 
-      // ユーザープロファイルの作成（自分のみ）
-      allow create: if request.auth != null && request.auth.uid == userId;
+      // ユーザープロファイルの作成（自分のみ・superuser を true で作ることはできない）
+      //   update だけを守っても delete→create の作り直しで迂回できるため、create でも
+      //   superuser フィールドを「無い」か「false」に限定する (S1-1 #3・エミュレータ実証 2026-09-03)。
+      //   管理者への昇格は firebase-admin (scripts/create-admin.ts) 専任。
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && (!('superuser' in request.resource.data)
+            || request.resource.data.superuser == false);
 
       // ユーザープロファイルの更新（自分のみ、superuserフィールドは変更不可）
       allow update: if request.auth != null
