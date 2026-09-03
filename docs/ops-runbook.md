@@ -387,7 +387,10 @@ gcloud iam service-accounts keys delete <KEY_ID> \
 - [ ] 作業記録を issue / `auditLogs` に残した
 
 ### 初回だけ (このリポジトリの現状から)
-- [ ] §1.2 Vercel Build Command を `npm test && npm run build` に変更
+- [ ] §1.2 Vercel Build Command を `NODE_ENV=test npm test && npm run build` に変更
+
+> ⚠️ `NODE_ENV=test` を付ける理由: Vercel はビルド時に `NODE_ENV=production` を設定するため、そのまま `npm test` を走らせると
+> React が本番ビルドになり `act` が無く jsdom 系のテストが大量に落ちる (2026-09-03 に初回配備で実害)。テストの部分だけ `test` に上書きする。
 - [ ] §2.3 PITR + 削除保護
 - [ ] §2.4 日次スケジュールバックアップ
 - [ ] §2.6 Storage soft delete + versioning + lifecycle
@@ -421,7 +424,7 @@ Vercel → Project → Settings → Environment Variables。**Production と Pre
 
 ### 5.3 配備と疎通確認
 
-1. #4 の PR をマージする (`main` への push = 即本番)。Vercel の Build Command (§1.2) が `npm test && npm run build` なら、テストが赤い時点で止まる。
+1. #4 の PR をマージする (`main` への push = 即本番)。Vercel の Build Command (§1.2) が `NODE_ENV=test npm test && npm run build` なら、テストが赤い時点で止まる。
 2. Vercel → Deployments で当該デプロイが Ready になるのを待つ。
 3. **本番で 1 件生成する**: 未ログイン (ゲスト) で短い音声 (1 分程度) を 1 本、プロンプト 1 つで生成。次にログインして同じことを 1 回。両方成功したら OK。
 4. Vercel → Project → Logs (Runtime) で `/api/generate` の観測ログ (`{"usedModel":…,"transport":…,"usage":…,"elapsedMs":…}` の 1 行) が 2 本出ていることを見る。これがサーバ経由で動いた証拠。

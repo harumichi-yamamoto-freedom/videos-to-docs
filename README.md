@@ -513,7 +513,7 @@ npm run start
 
 `main` は Vercel の git 統合で **push した瞬間に本番** になります (ステージング無し)。壊れたコードが本番に出ないよう、次の 2 段でゲートします。詳細は `docs/ops-runbook.md` §1。
 
-1. **Vercel の Build Command を `npm test && npm run build` にする** (Settings → Build & Development Settings)。テストが赤ならビルドが止まり、本番は前のデプロイのまま残ります。GitHub Actions が停止していても効く即効策です。
+1. **Vercel の Build Command を `NODE_ENV=test npm test && npm run build` にする** (Settings → Build & Development Settings)。テストが赤ならビルドが止まり、本番は前のデプロイのまま残ります。GitHub Actions が停止していても効く即効策です。
 2. **CI workflow + ブランチ保護**: `.github/workflows/ci.yml` が push / PR (main 宛) で `npm ci` → `npx tsc --noEmit` → `npm run lint` → `npm run test` を Node 20 で走らせます (job 名 `check`)。Actions が動く状態になったら、main を **PR 必須 + status check `check` 必須** にします (手順とコマンドは runbook §1.3)。
 
 ローカルで CI と同じ検査を回す:
