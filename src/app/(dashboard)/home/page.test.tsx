@@ -81,6 +81,11 @@ vi.mock('@/hooks/useProcessingWorkflow', () => ({
     }),
 }));
 
+// S2-2: 離脱ガードは next/navigation を使う。ここは見出し・文言の錠なので中身を差し替える
+vi.mock('@/hooks/useNavigationGuard', () => ({
+    useNavigationGuard: () => ({ leaveConfirmation: null, approveLeave: vi.fn(), denyLeave: vi.fn() }),
+}));
+
 vi.mock('@/components/PromptListSidebar', () => ({
     PromptListSidebar: () => <div>プロンプト一覧</div>,
 }));

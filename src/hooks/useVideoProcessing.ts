@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { VideoConverter } from '@/lib/ffmpeg';
 import { GeminiClient } from '@/lib/gemini';
+import {
+    base64LengthForBytes,
+    describeInlineBudgetExceeded,
+    selectMediaTransport,
+    utf8ByteLength,
+} from '@/lib/inlineMediaBudget';
 import { saveTranscription } from '@/lib/firestore';
 import { uploadAudioToStorage } from '@/lib/storage';
 import {
@@ -50,6 +56,11 @@ interface GeneratedDraft {
     bitrate: string;
     sampleRate: number;
 }
+
+/** S2-1: 生成に使うメディアの持ち方。inline は Base64 文字列、file は Files API 上の参照 */
+type PreparedMedia =
+    | { kind: 'inline'; base64Data: string; mimeType: string }
+    | { kind: 'file'; name: string; fileUri: string; mimeType: string };
 
 export interface JobClaim {
     signal: AbortSignal;
@@ -376,6 +387,8 @@ export const useVideoProcessing = (
         const savedPromptIds = [...alreadyCompletedPromptIds];
         const failures: string[] = [];
         let failedPhase: ProcessingFailedPhase = 'text_generation';
+        // S2-1: Files API へ上げたファイルは、ジョブがどう終わっても finally で消す
+        let uploadedMediaName: string | null = null;
 
         const failJob = (phase: ProcessingFailedPhase, messages: string[]) => {
             updateStatus(fileId, status => ({
@@ -506,9 +519,8 @@ export const useVideoProcessing = (
                 totalTranscriptions: plannedTotal,
             }));
 
-            let base64Data = '';
+            let preparedMedia: PreparedMedia | null = null;
             let audioStoragePath: string | null = null;
-            let mimeType = 'audio/mpeg';
 
             if (needsGeneration) {
                 if (!audioBlob) {
@@ -516,12 +528,38 @@ export const useVideoProcessing = (
                     return;
                 }
 
-                mimeType = audioBlob.type || 'audio/mpeg';
+                const mimeType = audioBlob.type || 'audio/mpeg';
 
-                // 同一Blobを複数FileReaderで同時読みすると大容量で空になることがあるため、
-                // Base64は1回だけ取得し、全プロンプトで共有する
-                const [base64Settled, uploadSettled] = await Promise.allSettled([
-                    geminiClientRef.current!.getBase64(audioBlob),
+                // S2-1: inline (Base64) で送れる量には上限がある。generateContent を呼ぶ前にサイズで経路を決め、
+                // 超える分は Files API へ迂回する。経路はファイル単位で 1 つなので、プロンプトは残り全件の最長で見積もる
+                const promptBytes = remainingPrompts.reduce(
+                    (max, prompt) => Math.max(max, utf8ByteLength(prompt.content)),
+                    0
+                );
+                const transport = selectMediaTransport(base64LengthForBytes(audioBlob.size), promptBytes);
+                videoProcessingLogger.info('Gemini への送信経路を決定', {
+                    fileId,
+                    fileIndex,
+                    transport,
+                    blobSizeBytes: audioBlob.size,
+                    promptBytes,
+                    bitrate,
+                });
+
+                const prepareMedia = async (): Promise<PreparedMedia> => {
+                    if (transport === 'inline') {
+                        // 同一Blobを複数FileReaderで同時読みすると大容量で空になることがあるため、
+                        // Base64は1回だけ取得し、全プロンプトで共有する
+                        const base64Data = await geminiClientRef.current!.getBase64(audioBlob);
+                        return { kind: 'inline', base64Data, mimeType };
+                    }
+                    // Files API も 1 ファイルにつき 1 回だけ上げ、全プロンプトで参照を共有する
+                    const uploaded = await geminiClientRef.current!.uploadMedia(audioBlob, file.file.name, { signal });
+                    return { kind: 'file', ...uploaded };
+                };
+
+                const [mediaSettled, uploadSettled] = await Promise.allSettled([
+                    prepareMedia(),
                     uploadAudioToStorage(audioBlob, file.file.name, {
                         originalFileName: file.file.name,
                         originalFileType,
@@ -530,17 +568,28 @@ export const useVideoProcessing = (
                     }),
                 ]);
 
+                if (mediaSettled.status === 'fulfilled' && mediaSettled.value.kind === 'file') {
+                    uploadedMediaName = mediaSettled.value.name;
+                }
+
                 throwIfAborted();
 
                 // H7: 準備段階の失敗はアップロード失敗として、両方の理由をまとめて報告する
                 const preparationFailures: string[] = [];
-                if (base64Settled.status === 'fulfilled') {
-                    base64Data = base64Settled.value;
-                    if (!base64Data || base64Data.length === 0) {
+                if (mediaSettled.status === 'fulfilled') {
+                    preparedMedia = mediaSettled.value;
+                    if (preparedMedia.kind === 'inline' && preparedMedia.base64Data.length === 0) {
+                        preparedMedia = null;
                         preparationFailures.push('Base64変換: 音声/動画データの読み取り結果が空でした。');
                     }
+                } else if (transport === 'inline') {
+                    preparationFailures.push(`Base64変換: ${describeError(mediaSettled.reason)}`);
                 } else {
-                    preparationFailures.push(`Base64変換: ${describeError(base64Settled.reason)}`);
+                    // S2-1: 迂回経路も失敗したときだけ、利用者が自分で打てる手 (ビットレート/分割) を示す
+                    preparationFailures.push(
+                        `Gemini Files API アップロード: ${describeError(mediaSettled.reason)}`,
+                        describeInlineBudgetExceeded(bitrate)
+                    );
                 }
 
                 if (uploadSettled.status === 'fulfilled') {
@@ -569,16 +618,34 @@ export const useVideoProcessing = (
 
                 if (!draft) {
                     throwIfAborted();
+                    const media = preparedMedia;
+                    if (!media) {
+                        throw new PromptPhaseError(
+                            'upload',
+                            '送信用の音声/動画データが準備されていません。音声変換からやり直してください。'
+                        );
+                    }
                     markPromptState(fileId, promptId, 'generating');
 
-                    const transcriptionResult = await geminiClientRef.current!.transcribeWithBase64(
-                        base64Data,
-                        mimeType,
-                        file.file.name,
-                        prompt.content,
-                        prompt.model,
-                        prompt.thinkingLevel,
-                    );
+                    const client = geminiClientRef.current!;
+                    const transcriptionResult = media.kind === 'file'
+                        ? await client.transcribeWithFileUri(
+                            media.fileUri,
+                            media.mimeType,
+                            file.file.name,
+                            prompt.content,
+                            prompt.model,
+                            prompt.thinkingLevel,
+                        )
+                        : await client.transcribeWithBase64(
+                            media.base64Data,
+                            media.mimeType,
+                            file.file.name,
+                            prompt.content,
+                            prompt.model,
+                            prompt.thinkingLevel,
+                            bitrate,
+                        );
 
                     if (!transcriptionResult.success) {
                         throw new PromptPhaseError(
@@ -738,6 +805,11 @@ export const useVideoProcessing = (
                 [describeError(error)]
             );
         } finally {
+            if (uploadedMediaName) {
+                // S2-1: Files API 上のファイルは 48 時間で自動削除されるが、生成が決着したら待たずに消す
+                // (失敗しても続行。再開で生成が要るときは上げ直す)
+                void geminiClientRef.current?.deleteUploadedMedia(uploadedMediaName);
+            }
             claim.release();
         }
     }, [availablePrompts, claimJob, debugErrorMode, markPromptState, onDocumentSaved, updateStatus, withPromptStates]);

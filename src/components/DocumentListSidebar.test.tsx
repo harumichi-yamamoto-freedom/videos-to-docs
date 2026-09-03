@@ -46,10 +46,36 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import {
+    DOCUMENT_LIST_POLL_INTERVAL_MS,
     DocumentListSidebar,
     DocumentListStatus,
 } from './DocumentListSidebar';
 import type { Transcription } from '@/lib/firestore';
+
+interface DocumentStub {
+    hidden: boolean;
+    addEventListener: ReturnType<typeof vi.fn>;
+    removeEventListener: ReturnType<typeof vi.fn>;
+}
+
+// node環境にはdocumentが無い。一覧effectが読むのは可視性(hidden)と
+// visibilitychangeの登録/解除だけなので、その最小面だけを立てる。
+function createDocumentStub(hidden: boolean): DocumentStub {
+    return {
+        hidden,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+    };
+}
+
+function getVisibilityChangeHandler(documentStub: DocumentStub): () => void {
+    const registration = documentStub.addEventListener.mock.calls
+        .find(call => call[0] === 'visibilitychange');
+    if (typeof registration?.[1] !== 'function') {
+        throw new Error('visibilitychange ハンドラが登録されていません');
+    }
+    return registration[1] as () => void;
+}
 
 interface TestCollectionState {
     subjectKey: string | null;
@@ -272,6 +298,7 @@ describe('DocumentListSidebar', () => {
                 return 1;
             }),
         });
+        vi.stubGlobal('document', createDocumentStub(false));
     });
 
     afterEach(() => {
@@ -472,6 +499,72 @@ describe('DocumentListSidebar', () => {
                 ownerType: 'user',
             });
         });
+    });
+
+    it('表示中のタブは初回取得の後、30秒以上の間隔で定期取得を登録する', () => {
+        configureHookState({
+            subjectKey: userSubjectKey,
+            status: 'loading',
+            documents: [],
+        });
+        renderSidebar();
+
+        layoutEffects[0]();
+
+        expect(mocks.getTranscriptions).toHaveBeenCalledTimes(1);
+        const setIntervalMock = window.setInterval as unknown as ReturnType<typeof vi.fn>;
+        expect(setIntervalMock).toHaveBeenCalledTimes(1);
+        const [, delay] = setIntervalMock.mock.calls[0] as [() => void, number];
+        expect(delay).toBe(DOCUMENT_LIST_POLL_INTERVAL_MS);
+        expect(delay).toBeGreaterThanOrEqual(30_000);
+    });
+
+    it('非表示タブでは初回取得も定期取得も発生させず、表示に戻った時だけ即時1回取り直して周期を再開する', () => {
+        const documentStub = createDocumentStub(true);
+        vi.stubGlobal('document', documentStub);
+        configureHookState({
+            subjectKey: userSubjectKey,
+            status: 'loading',
+            documents: [],
+        });
+        const onListStateChange = vi.fn();
+        renderSidebar({ onListStateChange });
+        const setIntervalMock = window.setInterval as unknown as ReturnType<typeof vi.fn>;
+        const clearIntervalMock = window.clearInterval as unknown as ReturnType<typeof vi.fn>;
+
+        const cleanup = layoutEffects[0]();
+
+        // 非表示中は一覧の読取を一切発生させない(初回取得も定期取得の登録も無し)。
+        expect(mocks.getTranscriptions).not.toHaveBeenCalled();
+        expect(setIntervalMock).not.toHaveBeenCalled();
+        expect(onListStateChange).toHaveBeenLastCalledWith({ status: 'loading' });
+        const handleVisibilityChange = getVisibilityChangeHandler(documentStub);
+
+        // 非表示のままのvisibilitychangeでは取得しない。
+        handleVisibilityChange();
+        expect(mocks.getTranscriptions).not.toHaveBeenCalled();
+
+        // 表示に戻った時に即時1回取り直し、定期取得を開始する。
+        documentStub.hidden = false;
+        handleVisibilityChange();
+        expect(mocks.getTranscriptions).toHaveBeenCalledTimes(1);
+        expect(mocks.getTranscriptions).toHaveBeenCalledWith(100, {
+            ownerId: 'user-a',
+            ownerType: 'user',
+        });
+        expect(setIntervalMock).toHaveBeenCalledTimes(1);
+        expect(setIntervalMock.mock.calls[0][1]).toBeGreaterThanOrEqual(30_000);
+
+        // 再び非表示になったら定期取得を止める(取得は増えない)。
+        documentStub.hidden = true;
+        handleVisibilityChange();
+        expect(clearIntervalMock).toHaveBeenCalledWith(1);
+        expect(mocks.getTranscriptions).toHaveBeenCalledTimes(1);
+
+        // unmountでvisibilitychangeの購読を解除する。
+        cleanup?.();
+        expect(documentStub.removeEventListener)
+            .toHaveBeenCalledWith('visibilitychange', handleVisibilityChange);
     });
 
     it('ポーリング結果のIDとupdatedAtが同じなら文書参照を維持する', async () => {

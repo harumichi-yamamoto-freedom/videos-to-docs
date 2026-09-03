@@ -60,11 +60,11 @@ Thumbs.db
 /temp
 *.tmp
 
-# Firebase service account key
+# Firebase service account keys
+# 鍵はリポジトリ外 (~/.config 配下) に置き GOOGLE_APPLICATION_CREDENTIALS で指す
+# (docs/ops-runbook.md §3)。ここは誤って置いたときの保険。
 serviceAccountKey.json
-
-# docs
-/docs
+*-firebase-adminsdk-*.json
 
 # review-with-ai-agent
 /pre-commit-review-v3

@@ -229,8 +229,16 @@ npm run dev
 
 1. [Firebase Console](https://console.firebase.google.com/) > プロジェクト設定 > **サービスアカウント**
 2. 「**新しい秘密鍵の生成**」をクリック
-3. ダウンロードした JSON ファイルをプロジェクトルートに配置
-4. ファイル名を `serviceAccountKey.json` に変更
+3. ダウンロードした JSON ファイルを **リポジトリの外** (`~/.config/gcloud/keys/`) に移動し、`GOOGLE_APPLICATION_CREDENTIALS` で指す (このリポジトリは public のため、プロジェクトルートには置かない)
+
+```bash
+mkdir -p ~/.config/gcloud/keys && chmod 700 ~/.config/gcloud/keys
+mv ~/Downloads/<project>-firebase-adminsdk-*.json ~/.config/gcloud/keys/<project>-admin.json
+chmod 600 ~/.config/gcloud/keys/<project>-admin.json
+export GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/keys/<project>-admin.json
+```
+
+詳細 (impersonation で鍵を持たない方法・作業後の `gcloud auth application-default revoke`) は `docs/ops-runbook.md` §3 と `scripts/README.md`。
 
 #### ステップ2: firebase-admin をインストール
 
@@ -246,8 +254,12 @@ npm install -D tsx firebase-admin
 
 #### ステップ4: 管理者権限を付与
 
+`create-admin.ts` は現状カレントディレクトリの `serviceAccountKey.json` しか読まないため、実行の直前にシンボリックリンクを張り、直後に外します (鍵の実体はリポジトリ外のまま):
+
 ```bash
+ln -s "$GOOGLE_APPLICATION_CREDENTIALS" serviceAccountKey.json
 npx tsx scripts/create-admin.ts YOUR_USER_UID
+rm serviceAccountKey.json
 ```
 
 **例**:
@@ -421,15 +433,20 @@ src/
     ├── ffmpeg.ts / gemini.ts / videoConversionService.ts
     └── constants・utils
 
-scripts/                       # 管理スクリプト
+scripts/                       # 管理スクリプト (本番 Firestore を直接操作。scripts/README.md 参照)
 ├── create-admin.ts            # 初回管理者作成
-└── migrate-existing-data.ts   # データ移行
+├── create-system-notification.ts  # お知らせ作成
+├── migrate-existing-data.ts   # 旧データ移行
+├── migrate-text-to-transcription.mjs  # text→transcription 二段階移行 (dry-run 既定)
+└── ops-gemini37-rollout.mjs   # Gemini 3.7 ロールアウト (dry-run 既定)
 
-docs/                          # ドキュメント
-├── admin-setup-guide.md       # 管理者セットアップ
-└── account-deletion-guide.md  # アカウント削除ガイド
+docs/
+└── ops-runbook.md             # 運用手順書 (リリースゲート・バックアップ/復旧・配備・資格情報)
 
+.github/workflows/ci.yml       # CI (tsc / lint / vitest)
 firestore.rules                # Firestore セキュリティルール
+firestore.indexes.json         # Firestore 複合インデックス
+storage.rules                  # Storage セキュリティルール
 ```
 
 ## 🛠️ ビルド
@@ -445,6 +462,21 @@ npm run build
 ```bash
 npm run start
 ```
+
+## 🚦 リリースゲートと運用
+
+`main` は Vercel の git 統合で **push した瞬間に本番** になります (ステージング無し)。壊れたコードが本番に出ないよう、次の 2 段でゲートします。詳細は `docs/ops-runbook.md` §1。
+
+1. **Vercel の Build Command を `npm test && npm run build` にする** (Settings → Build & Development Settings)。テストが赤ならビルドが止まり、本番は前のデプロイのまま残ります。GitHub Actions が停止していても効く即効策です。
+2. **CI workflow + ブランチ保護**: `.github/workflows/ci.yml` が push / PR (main 宛) で `npm ci` → `npx tsc --noEmit` → `npm run lint` → `npm run test` を Node 20 で走らせます (job 名 `check`)。Actions が動く状態になったら、main を **PR 必須 + status check `check` 必須** にします (手順とコマンドは runbook §1.3)。
+
+ローカルで CI と同じ検査を回す:
+
+```bash
+npm ci && npx tsc --noEmit && npm run lint && npm run test
+```
+
+バックアップ (Firestore PITR / 日次バックアップ / Storage soft delete) と誤削除からの復旧、Rules・indexes の配備コマンド、Vercel 環境変数の一覧、資格情報の扱いは `docs/ops-runbook.md` にまとめています。
 
 ## 🔒 セキュリティとプライバシー
 
@@ -477,6 +509,7 @@ npm run start
   - 文書: 500KB（デフォルト）
 - **再認証**: アカウント削除などの重要操作は再認証が必要
 - **環境変数の保護**: `.env.local` ファイルはGitにコミットされません
+- **サービスアカウント鍵**: リポジトリ外 (`~/.config/gcloud/keys/`) に置き `GOOGLE_APPLICATION_CREDENTIALS` で指す。`.gitignore` の `serviceAccountKey.json` / `*-firebase-adminsdk-*.json` は誤配置時の保険 (`docs/ops-runbook.md` §3)
 
 ## 🔧 トラブルシューティング
 
@@ -567,8 +600,7 @@ MIT
 ## 📚 ドキュメント
 
 - **セットアップガイド**: このREADME（上記）
-- **管理者セットアップ**: `docs/admin-setup-guide.md`
-- **アカウント削除ガイド**: `docs/account-deletion-guide.md`
+- **運用手順書** (リリースゲート・バックアップ/復旧・Rules 配備・資格情報): `docs/ops-runbook.md`
 - **スクリプト使用方法**: `scripts/README.md`
 
 ## 🙏 謝辞

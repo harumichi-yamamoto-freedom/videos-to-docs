@@ -1,0 +1,53 @@
+# CI ゲート (S2-7)
+#
+# main は Vercel の git 統合で即本番になる。ここで tsc / lint / vitest を回し、
+# main へのマージ条件 (branch protection の required status check) に使う。
+# ジョブ名 `check` は branch protection 側から参照するので変えない
+# (変えるときは docs/ops-runbook.md の「復旧後の恒久策」も併せて更新する)。
+#
+# ローカルで同じ手順を再現する: npm ci && npx tsc --noEmit && npm run lint && npm run test
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+# 同じブランチ/PR の古い実行は打ち切る (連続 push で走行が積み上がるのを防ぐ)
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  CI: "true"
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install (lockfile 厳密一致)
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
