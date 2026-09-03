@@ -12,6 +12,8 @@ import {
     PromptJobState,
 } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
+import { isTranscriptPrompt } from '@/lib/transcriptPrompt';
+import { runTranscriptPipeline } from '@/hooks/transcriptPipelineAdapter';
 import { validatePromptPermission } from '@/lib/promptPermissions';
 import { getCurrentUserId } from '@/lib/auth';
 import { createLogger } from '@/lib/logger';
@@ -578,19 +580,28 @@ export const useVideoProcessing = (
                     }
                     markPromptState(fileId, promptId, 'generating');
 
-                    // 中止は fetch に渡して切る。サーバ側の処理は継続し得る (仕様として許容)
-                    const transcriptionResult = await geminiClientRef.current!.generateDocument({
-                        storagePath: media.storagePath,
-                        fileName: file.file.name,
-                        mimeType: media.mimeType,
-                        prompt: {
-                            name: prompt.name,
-                            content: prompt.content,
-                            model: prompt.model,
-                            thinkingLevel: prompt.thinkingLevel,
-                        },
-                        signal,
-                    });
+                    // 🔴 全文文字起こしだけは分割パイプラインへ流す (設計 §3)。
+                    //    ここで分けると、**下流の下書き・保存・冪等・中断はすべて既存のまま効く**。
+                    //    戻り値を TranscriptionResult に揃えてあるので、以降の処理は分岐を知らない。
+                    //    中止は fetch に渡して切る。サーバ側の処理は継続し得る (仕様として許容)
+                    const transcriptionResult = isTranscriptPrompt(prompt)
+                        ? await runTranscriptPipeline({
+                            file: file.file,
+                            converter: converterRef.current,
+                            signal,
+                        })
+                        : await geminiClientRef.current!.generateDocument({
+                            storagePath: media.storagePath,
+                            fileName: file.file.name,
+                            mimeType: media.mimeType,
+                            prompt: {
+                                name: prompt.name,
+                                content: prompt.content,
+                                model: prompt.model,
+                                thinkingLevel: prompt.thinkingLevel,
+                            },
+                            signal,
+                        });
 
                     videoProcessingLogger.info('文書生成 API の応答', {
                         fileId,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { withTranscriptPrompt } from '@/lib/transcriptPrompt';
 import { Prompt, getPrompts } from '@/lib/prompts';
 import { useAuth } from './useAuth';
 import { createLogger } from '@/lib/logger';
@@ -26,6 +27,24 @@ class StalePromptLoadError extends Error {
 const getErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : 'プロンプト一覧の読み込みに失敗しました。';
 
+/**
+ * 一覧に出すプロンプト。
+ *
+ * 🔴 「全文文字起こし」は**組み込み**として先頭に差し込む (設計 §6.2)。
+ * Firestore には保存しない — 利用者が編集・削除できる普通のプロンプトにすると、
+ * 中身を書き換えられたときに分割パイプラインの前提が崩れる。
+ *
+ * 🔴 **取得が成功したときだけ差し込む。** 読み込み中や失敗時に差し込むと、
+ * 「一覧が空なのに1件だけある」状態になり、利用者は他のプロンプトが消えたと読む。
+ */
+export function resolveAvailablePrompts(
+    loadedPrompts: readonly Prompt[],
+    status: PromptLoadStatus,
+): Prompt[] {
+    if (status !== 'success') return [...loadedPrompts];
+    return withTranscriptPrompt(loadedPrompts);
+}
+
 export const usePromptManagement = () => {
     const { user, loading } = useAuth();
     const authKey = loading ? null : (user?.uid ?? 'GUEST');
@@ -44,7 +63,11 @@ export const usePromptManagement = () => {
 
     // 別の認証状態で取得した一覧は表示しない（他ユーザーのプロンプトを残さない）
     const isResultCurrent = result.authKey === authKey;
-    const availablePrompts = authKey === null || !isResultCurrent ? [] : result.prompts;
+    const loadedPrompts = authKey === null || !isResultCurrent ? [] : result.prompts;
+    const availablePrompts = resolveAvailablePrompts(
+        loadedPrompts,
+        isResultCurrent ? result.status : 'loading',
+    );
     // V5: 認証が未解決の間は結果が確定していない。idle と言い切らず読み込み中として扱う
     const status: PromptLoadStatus = authKey === null
         ? 'loading'
