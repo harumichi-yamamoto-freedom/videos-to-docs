@@ -18,14 +18,23 @@ service firebase.storage {
         || (request.auth != null && request.auth.uid == ownerId)
         || isSuperuser();
 
-      // 書き込み（create/update）:
-      //   - ゲスト: 未認証でも GUEST ディレクトリに書き込み可
-      //   - ログインユーザー: 自分のディレクトリにのみ書き込み可
+      // 所有者判定（ゲストは GUEST ディレクトリ、ログインユーザーは自分のディレクトリ）
+      function isOwner() {
+        return ownerId == "GUEST" || (request.auth != null && request.auth.uid == ownerId);
+      }
+
+      // 作成・更新:
       //   - ファイルサイズ上限: 100MB
       //   - content-type: audio/* のみ許可
-      allow write: if (ownerId == "GUEST" || (request.auth != null && request.auth.uid == ownerId))
+      allow create, update: if isOwner()
         && request.resource.size < 100 * 1024 * 1024
         && request.resource.contentType.matches('audio/.*');
+
+      // 削除:
+      // 🔴 `write` にまとめてはいけない。削除では `request.resource` が null になり、
+      //    サイズと content-type の条件が評価できずに常に拒否される（実測: DELETE が 403）。
+      //    その結果、ゲストが上げ直しても古いファイルが消えずに溜まり続けていた。
+      allow delete: if isOwner();
     }
   }
 }

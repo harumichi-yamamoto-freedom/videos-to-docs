@@ -3,6 +3,7 @@ import { VideoConverter } from '@/lib/ffmpeg';
 import { GeminiClient } from '@/lib/gemini';
 import { saveTranscription } from '@/lib/firestore';
 import { uploadAudioToStorage } from '@/lib/storage';
+import { GENERATE_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
 import {
     FileProcessingStatus,
     FileWithPrompts,
@@ -524,6 +525,23 @@ export const useVideoProcessing = (
             if (needsGeneration) {
                 if (!audioBlob) {
                     failJob('upload', ['変換済みの音声データが見つかりませんでした。音声変換からやり直してください。']);
+                    return;
+                }
+
+                // 🔴 上限超過は、Storage に投げると `storage/unauthorized`（権限がありません）で返る。
+                //    ルールが `request.resource.size < 上限` を条件にしているためで、
+                //    利用者にはサイズの問題が**権限の問題として見える**（2026-09-04 の実害）。
+                //    投げる前にこちらで落として、何をすればよいかを書いた文言を出す。
+                if (audioBlob.size > GENERATE_MAX_MEDIA_BYTES) {
+                    const sizeMb = (audioBlob.size / 1024 / 1024).toFixed(0);
+                    const limitMb = Math.floor(GENERATE_MAX_MEDIA_BYTES / 1024 / 1024);
+                    videoProcessingLogger.error('アップロードするファイルが上限超', undefined, {
+                        fileId, fileIndex, blobSizeBytes: audioBlob.size, limit: GENERATE_MAX_MEDIA_BYTES, bitrate,
+                    });
+                    failJob('upload', [
+                        `この音声は ${sizeMb}MB で、アップロードできる上限 ${limitMb}MB を超えています。`
+                        + 'ビットレートを下げるか、録音を分割してから、もう一度お試しください。',
+                    ]);
                     return;
                 }
 

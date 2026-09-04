@@ -52,12 +52,15 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { CONVERSION_QUEUE_WAIT_LIMIT_MS, useProcessingWorkflow } from './useProcessingWorkflow';
+import { canSendAudioAsIs } from '@/lib/mediaInput';
+import { GENERATE_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
 
 const BITRATE = '192k';
 const SAMPLE_RATE = 44100;
 
-const createFile = (name: string, type: string): FileWithPrompts => ({
-    file: { name, type } as File,
+/** 既定のサイズは上限内。上限超えを測るテストだけ明示的に大きくする */
+const createFile = (name: string, type: string, size = 1024): FileWithPrompts => ({
+    file: { name, type, size } as File,
     selectedPromptIds: ['prompt-a'],
 });
 
@@ -264,6 +267,51 @@ describe('handleStartProcessing failure reporting', () => {
     });
 });
 
+/**
+ * 🔴 実害 (2026-09-04): 1時間22分の WAV は 301MB あり、Storage ルールの 100MB 上限に当たって
+ * `storage/unauthorized`（権限がありません）になっていた。音声入力は変換を丸ごと飛ばしていたため、
+ * **ビットレートを下げても同じ 301MB が上がり続けた**。
+ */
+describe('🔴 上限を超える音声は、変換を飛ばさない', () => {
+    const OVER_LIMIT = GENERATE_MAX_MEDIA_BYTES + 1;
+
+    it('上限を超える WAV は変換に回す（元ファイルをそのまま送らない）', async () => {
+        const harness = useWorkflowHarness();
+
+        await harness.workflow.handleStartProcessing(
+            [createFile('long.wav', 'audio/wav', OVER_LIMIT)], ['f1'], BITRATE, SAMPLE_RATE
+        );
+
+        expect(serviceMocks.convertVideoToAudioSegments).toHaveBeenCalledTimes(1);
+        // 変換に回すなら FFmpeg が要る。ここを飛ばすと「変換が必要なのにエンジンが無い」で落ちる
+        expect(serviceMocks.ffmpegLoad).toHaveBeenCalled();
+    });
+
+    it('上限ちょうどはそのまま送る / 1 バイト超えたら変換する（境界）', async () => {
+        const at = useWorkflowHarness();
+        await at.workflow.handleStartProcessing(
+            [createFile('at.mp3', 'audio/mpeg', GENERATE_MAX_MEDIA_BYTES)], ['f1'], BITRATE, SAMPLE_RATE
+        );
+        expect(serviceMocks.convertVideoToAudioSegments).not.toHaveBeenCalled();
+
+        vi.clearAllMocks();
+        const over = useWorkflowHarness();
+        await over.workflow.handleStartProcessing(
+            [createFile('over.mp3', 'audio/mpeg', OVER_LIMIT)], ['f1'], BITRATE, SAMPLE_RATE
+        );
+        expect(serviceMocks.convertVideoToAudioSegments).toHaveBeenCalledTimes(1);
+    });
+
+    it('size が読めないファイルは変換に回す（安全側。合格に丸めない）', async () => {
+        const harness = useWorkflowHarness();
+        const noSize = { file: { name: 'x.wav', type: 'audio/wav' } as File, selectedPromptIds: ['prompt-a'] };
+
+        await harness.workflow.handleStartProcessing([noSize], ['f1'], BITRATE, SAMPLE_RATE);
+
+        expect(serviceMocks.convertVideoToAudioSegments).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('handleResumeFile checkpoint planning', () => {
     const resume = async (
         harness: Harness,
@@ -432,5 +480,24 @@ describe('conversion queue wait limit (V8)', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+
+describe('canSendAudioAsIs', () => {
+    const f = (name: string, type: string, size: number) => ({ name, type, size }) as File;
+
+    it('圧縮済みで上限内の音声だけ、そのまま送る', () => {
+        expect(canSendAudioAsIs(f('a.mp3', 'audio/mpeg', 1024))).toBe(true);
+        expect(canSendAudioAsIs(f('a.m4a', 'audio/mp4', 1024))).toBe(true);
+    });
+
+    it('🔴 上限を超える音声は、拡張子が何であれ変換に回す', () => {
+        expect(canSendAudioAsIs(f('a.wav', 'audio/wav', GENERATE_MAX_MEDIA_BYTES + 1))).toBe(false);
+        expect(canSendAudioAsIs(f('a.mp3', 'audio/mpeg', GENERATE_MAX_MEDIA_BYTES + 1))).toBe(false);
+    });
+
+    it('動画はそのまま送らない', () => {
+        expect(canSendAudioAsIs(f('a.mp4', 'video/mp4', 1024))).toBe(false);
     });
 });

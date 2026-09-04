@@ -3,7 +3,7 @@ import { VideoConverter } from '@/lib/ffmpeg';
 import { GeminiClient } from '@/lib/gemini';
 import { FileWithPrompts, FileProcessingStatus, DebugErrorMode } from '@/types/processing';
 import { convertVideoToAudioSegments, resumeVideoConversion } from '@/lib/videoConversionService';
-import { getSupportedMediaKind } from '@/components/FileDropZone';
+import { canSendAudioAsIs } from '@/lib/mediaInput';
 import type { JobClaim, TranscriptionJobRef } from '@/hooks/useVideoProcessing';
 import { createLogger } from '@/lib/logger';
 
@@ -33,8 +33,6 @@ export interface WorkflowResult {
 type ResumePlan = 'save_only' | 'transcribe' | 'convert_resume' | 'convert_full';
 
 const processingWorkflowLogger = createLogger('useProcessingWorkflow');
-
-const isAudioInput = (file: File) => getSupportedMediaKind(file) === 'audio';
 
 const describeAbort = (signal: AbortSignal): string =>
     signal.reason instanceof Error ? signal.reason.message : '処理を中止しました。';
@@ -164,8 +162,10 @@ export const useProcessingWorkflow = ({
         try {
             // H6: エンジンの初期化も失敗を捕捉できる位置に置き、
             //     音声のみの場合は FFmpeg を読み込まない
+            // 🔴 上限を超える音声は変換に回すので、その場合も FFmpeg が要る。
+            //    ここを isAudioInput のままにすると、変換が必要なのにエンジンが無い状態で落ちる。
             const needsFfmpeg = !sendVideoDirectly
-                && selectedFiles.some(file => !isAudioInput(file.file));
+                && selectedFiles.some(file => !canSendAudioAsIs(file.file));
 
             try {
                 await prepareEngines(needsFfmpeg);
@@ -206,8 +206,8 @@ export const useProcessingWorkflow = ({
 
                 const job: TranscriptionJobRef = { file, fileIndex: i, fileId, signal: claim.signal };
 
-                if (isAudioInput(file.file)) {
-                    // 音声ファイルの場合：音声変換をスキップして直接文書生成へ
+                if (canSendAudioAsIs(file.file)) {
+                    // 圧縮済みで上限内の音声：変換をスキップして直接文書生成へ
                     updateById(fileId, status => ({ ...status, convertedAudioBlob: file.file as Blob }));
                     transcriptionPromises.push(
                         processTranscription(job, file.file as Blob, bitrate, sampleRate)
@@ -321,7 +321,7 @@ export const useProcessingWorkflow = ({
             return 'transcribe';
         }
 
-        if (isAudioInput(file.file) || sendVideoDirectly) {
+        if (canSendAudioAsIs(file.file) || sendVideoDirectly) {
             return 'transcribe';
         }
 
@@ -423,7 +423,7 @@ export const useProcessingWorkflow = ({
 
             if (plan === 'save_only' || plan === 'transcribe') {
                 const audioBlob = status.convertedAudioBlob
-                    ?? (isAudioInput(file.file) || sendVideoDirectly ? (file.file as Blob) : null);
+                    ?? (canSendAudioAsIs(file.file) || sendVideoDirectly ? (file.file as Blob) : null);
 
                 if (plan === 'transcribe' && !audioBlob) {
                     const message = '変換済みの音声が見つかりませんでした。音声変換からやり直してください。';
