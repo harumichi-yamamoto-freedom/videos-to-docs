@@ -39,6 +39,10 @@ const gateChunk = (text: string, overrides: Partial<ChunkResult> = {}): ChunkRes
 const gatesOf = (chunk: ChunkResult, options = {}): QualityGateId[] =>
     evaluateChunkQuality(chunk, options).failedGates;
 
+/** 警告だけのゲート。🔴 合格に丸めない — 「落ちない」と「何も言っていない」は別物 */
+const warningsOf = (chunk: ChunkResult, options = {}): QualityGateId[] =>
+    evaluateChunkQuality(chunk, options).warnedGates;
+
 /**
  * 境界テスト用のユニット列。
  * distinct 文 と 2 種類の相槌を交互に置くので、同一ユニットは 1 度も連続しない (最長連続 1) =
@@ -430,34 +434,35 @@ describe('G6 (最長穴) の境界', () => {
     });
 });
 
-describe('G7 (話者の妥当性)', () => {
-    it('話者分離 ON で 1 種類しか居なければ落ち、2 種類なら落ちない', () => {
-        const audioSec = 600;
-        const single = makeChunk(NORMAL_LONG_TRANSCRIPT, {
-            audioSec,
-            speechSec: 740,
-            annotations: makeAnnotations(audioSec, 0.99, ['spk:0']),
+describe('G7 (話者の妥当性) — 🔴 warn 止まり', () => {
+    const audioSec = 600;
+    const withSpeakers = (speakers: Array<string | null>) =>
+        makeChunk(NORMAL_LONG_TRANSCRIPT, {
+            audioSec, speechSec: 740,
+            annotations: makeAnnotations(audioSec, 0.99, speakers),
         });
-        const pair = makeChunk(NORMAL_LONG_TRANSCRIPT, {
-            audioSec,
-            speechSec: 740,
-            annotations: makeAnnotations(audioSec, 0.99, ['spk:0', 'spk:1']),
-        });
-        expect(gatesOf(single)).toContain('G7');
-        expect(gatesOf(pair)).not.toContain('G7');
+
+    it('話者分離 ON で 1 種類しか居なければ警告し、2 種類なら警告しない', () => {
+        expect(warningsOf(withSpeakers(['spk:0']))).toContain('G7');
+        expect(warningsOf(withSpeakers(['spk:0', 'spk:1']))).not.toContain('G7');
+    });
+
+    it('🔴 本文ごと捨てない — 話者ラベルはメタデータであって本文ではない', () => {
+        // 実測: Gemini は 10 分窓 9 走中 3 走で話者を 1 名も返さない。fail のままだと
+        // MAI から Gemini へフォールバックしたチャンクの約 3 割がゲートで捨てられ、
+        // フォールバックが用をなさない（設計 §3.7）
+        const report = evaluateChunkQuality(withSpeakers(['spk:0']));
+        expect(report.failedGates).not.toContain('G7');
+        expect(report.passed).toBe(true);
+        expect(report.findings.find(f => f.gate === 'G7')?.severity).toBe('warn');
     });
 
     it('話者分離 OFF (speaker が null) では判定しない', () => {
-        const audioSec = 600;
-        const chunk = makeChunk(NORMAL_LONG_TRANSCRIPT, {
-            audioSec,
-            speechSec: 740,
-            annotations: makeAnnotations(audioSec, 0.99, [null]),
-        });
+        const chunk = withSpeakers([null]);
         expect(evaluateChunkQuality(chunk).metrics.speakerCount).toBe(0);
-        expect(gatesOf(chunk)).not.toContain('G7');
-        // 有効だと明示したときだけ落ちる (話者分離を単独指定すると注釈に speaker が付かない実測がある)
-        expect(gatesOf(chunk, { diarizationEnabled: true })).toContain('G7');
+        expect(warningsOf(chunk)).not.toContain('G7');
+        // 有効だと明示したときだけ警告する (話者分離を単独指定すると注釈に speaker が付かない実測がある)
+        expect(warningsOf(chunk, { diarizationEnabled: true })).toContain('G7');
     });
 });
 
@@ -568,8 +573,10 @@ describe('レポートの形', () => {
                 annotations: makeAnnotations(1200, 0.5, ['spk:0']),
             }),
         );
-        // 注釈は音声の 50% までしか無い = 末尾 600 秒が穴 (G6)。話者は 1 種類 (G7)。
-        expect(report.failedGates).toEqual(['G1', 'G3', 'G4', 'G5', 'G6', 'G7']);
+        // 注釈は音声の 50% までしか無い = 末尾 600 秒が穴 (G6)。
+        expect(report.failedGates).toEqual(['G1', 'G3', 'G4', 'G5', 'G6']);
+        // 🔴 話者 1 種類は warn。不合格の一覧に混ぜない（本文ごと捨てる理由にはならない）
+        expect(report.warnedGates).toContain('G7');
     });
 });
 
