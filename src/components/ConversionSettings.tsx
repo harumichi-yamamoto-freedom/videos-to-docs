@@ -22,15 +22,28 @@ interface ConversionSettingsProps {
     bitrate: string;
     onBitrateChange: (bitrate: string) => void;
     disabled?: boolean;
+    /**
+     * 選んだファイルが 1 つでも変換を通るか。
+     * 🔴 圧縮済みで上限内の音声はそのまま送られる＝**ビットレートは一切効かない**。
+     * 効かないのに選べる状態にしておくと、上限に当たったときに
+     * 「下げたのに直らない」という誤解を生む（2026-09-04 の実害）。
+     */
+    appliesToSelection?: boolean;
 }
 
 export const ConversionSettings: React.FC<ConversionSettingsProps> = ({
     bitrate,
     onBitrateChange,
     disabled = false,
+    appliesToSelection = true,
 }) => (
     <fieldset className="rounded-lg border border-gray-200 bg-gray-50 p-4" disabled={disabled}>
         <legend className="px-1 text-sm font-medium text-gray-900">音声のビットレート</legend>
+        {!appliesToSelection && (
+            <p className="mt-1 rounded-md bg-amber-50 px-2 py-1.5 text-[13px] text-amber-900">
+                選択中の音声ファイルはそのまま送られるため、この設定は使われません。
+            </p>
+        )}
         <p className="mt-1 text-[13px] text-gray-700">
             低いほど長い録音を扱えます。2 時間程度の商談は 96 kbps、3 時間を超える録音は 64 kbps を選んでください。表示の長さを超えるファイルは変換できないため、ビットレートを下げるか、ファイルを分割してください。
         </p>

@@ -16,6 +16,7 @@ import { useFileManagement } from '@/hooks/useFileManagement';
 import { usePromptManagement } from '@/hooks/usePromptManagement';
 import { useVideoProcessing } from '@/hooks/useVideoProcessing';
 import { useProcessingWorkflow } from '@/hooks/useProcessingWorkflow';
+import { canSendAudioAsIs } from '@/lib/mediaInput';
 import { useNavigationGuard } from '@/hooks/useNavigationGuard';
 import { DebugErrorMode, FileProcessingStatus } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
@@ -362,6 +363,7 @@ export default function HomePage() {
                   bitrate={bitrate}
                   onBitrateChange={setBitrate}
                   disabled={isBusy}
+                  appliesToSelection={selectedFiles.some(file => !canSendAudioAsIs(file.file))}
                 />
               )}
 
