@@ -5,7 +5,7 @@
  * 下流（下書き・保存・冪等）は分岐を知らないので、成功/失敗の判定はここが最後の砦。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { buildTranscriptionJobDeps, runTranscriptPipeline } from './transcriptPipelineAdapter';
+import { buildTranscriptionJobDeps, runTranscriptPipeline, summarizeChunkFailures } from './transcriptPipelineAdapter';
 import type { VideoConverter } from '@/lib/ffmpeg';
 
 vi.mock('@/lib/logger', () => ({
@@ -133,5 +133,45 @@ describe('🔴 buildTranscriptionJobDeps — 本番の配線', () => {
         expect(spy).not.toHaveBeenCalled();
         await deps.scanSilence(new File([new Uint8Array(1)], 'a.mp3'), { durationSec: 10 }).catch(() => {});
         expect(spy).toHaveBeenCalledTimes(1);
+    });
+});
+
+/**
+ * 🔴 原因を名指ししない警報は、鳴っていても直らない。
+ * 実害 (2026-09-04): 本番で 9 区間が落ちたが、文言が件数だけで、
+ * サーバのログ保持窓も過ぎており、理由をどこからも追えなかった。
+ */
+describe('summarizeChunkFailures', () => {
+    const chunk = (status: string, attempts: unknown[]) =>
+        ({ status, attempts }) as unknown as Parameters<typeof summarizeChunkFailures>[0][number];
+
+    it('落ちたゲートを名指しし、件数の多い順に並べる', () => {
+        const r = summarizeChunkFailures([
+            chunk('failed', [{ quality: { failedGates: ['G6'] } }]),
+            chunk('failed', [{ quality: { failedGates: ['G6'] } }]),
+            chunk('failed', [{ error: 'fetch failed' }]),
+            chunk('completed', [{}]),
+        ]);
+        expect(r.text).toBe('品質検査 G6 2件・通信または処理の失敗 1件');
+        expect(r.counts).toEqual({ '品質検査 G6': 2, '通信または処理の失敗': 1 });
+    });
+
+    it('🔴 最後の試行の落ち方を採る（再試行で様式が変わる）', () => {
+        const r = summarizeChunkFailures([
+            chunk('failed', [{ error: 'timeout' }, { quality: { failedGates: ['G3'] } }]),
+        ]);
+        expect(r.text).toBe('品質検査 G3 1件');
+    });
+
+    it('成功したチャンクは数えない', () => {
+        expect(summarizeChunkFailures([chunk('completed', [{}])]).counts).toEqual({});
+    });
+
+    it('理由が何も無ければ「原因不明」として残す（黙って空にしない）', () => {
+        expect(summarizeChunkFailures([chunk('failed', [{}])]).text).toBe('原因不明 1件');
+    });
+
+    it('失敗が無ければ、その旨を返す（例外にしない）', () => {
+        expect(summarizeChunkFailures([]).text).toBe('原因を特定できませんでした');
     });
 });

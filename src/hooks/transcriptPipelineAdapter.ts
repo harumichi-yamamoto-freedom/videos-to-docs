@@ -84,6 +84,34 @@ export function buildTranscriptionJobDeps(converter: VideoConverter): Transcript
     };
 }
 
+/**
+ * 失敗したチャンクの理由を数え上げ、人が読む一文にする。
+ *
+ * 🔴 原因を名指ししない警報は、鳴っていても直らない。件数だけでなく
+ * 「品質検査に通らなかった」「通信に失敗した」の別と、**どのゲートか**まで残す。
+ */
+export function summarizeChunkFailures(
+    chunks: readonly { status: string; attempts: readonly { error?: string; quality?: { failedGates: readonly string[] } }[] }[],
+): { text: string; counts: Record<string, number> } {
+    const counts: Record<string, number> = {};
+    for (const chunk of chunks) {
+        if (chunk.status !== 'failed') continue;
+        // 最後の試行が、その区間の最終的な落ち方
+        const last = chunk.attempts[chunk.attempts.length - 1];
+        const gates = last?.quality?.failedGates ?? [];
+        const key = gates.length > 0
+            ? `品質検査 ${[...gates].join('/')}`
+            : last?.error
+                ? '通信または処理の失敗'
+                : '原因不明';
+        counts[key] = (counts[key] ?? 0) + 1;
+    }
+    const parts = Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([key, n]) => `${key} ${n}件`);
+    return { text: parts.length > 0 ? parts.join('・') : '原因を特定できませんでした', counts };
+}
+
 export async function runTranscriptPipeline(
     input: RunTranscriptPipelineInput,
 ): Promise<TranscriptionResult> {
@@ -110,14 +138,23 @@ export async function runTranscriptPipeline(
             // 🔴 1本でも失敗チャンクがあれば成功にしない（設計 §4.4）。
             //    ただし**本文は捨てない** — 取れたところまでは読める形で返し、
             //    欠落は本文中に注記として残っている。
+            // 🔴 **件数だけ伝えない。** 「9 個の区間を文字起こしできませんでした」では、
+            //    利用者も我々も次に何をすればよいか分からない。原因を名指ししない警報は直らない。
+            //    実害 (2026-09-04): 本番で 9 区間が落ちたが、サーバのログ保持窓を過ぎていて
+            //    理由が追えなかった。理由は**この文言と記録の両方**に載せる。
+            const summary = summarizeChunkFailures(job.chunks);
             const detail = job.aborted
                 ? '文字起こしを中止しました。'
-                : `${job.failedChunkIndexes.length} 個の区間を文字起こしできませんでした。`;
+                : `${job.failedChunkIndexes.length} 個の区間を文字起こしできませんでした`
+                    + `（${summary.text}）。もう一度お試しいただくと、通ることがあります。`;
             logger.warn('文字起こしが完全には終わらなかった', {
                 fileName: file.name,
                 aborted: job.aborted,
                 failedChunks: job.failedChunkIndexes.length,
                 chars: job.markdown?.length ?? 0,
+                // 🔴 内訳を必ず残す。件数だけだと、次に何を直せばよいか決められない
+                failureBreakdown: summary.counts,
+                fallbackChunks: job.fallbackChunks.length,
             });
             return { success: false, error: detail, ...(job.markdown ? { text: job.markdown } : {}) };
         }
