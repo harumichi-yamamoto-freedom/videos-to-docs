@@ -4,6 +4,8 @@ import {
     base64LengthForBytes,
     describeInlineBudgetExceeded,
     estimateInlineLimitMinutes,
+    estimateMaxRecordingMinutes,
+    formatDurationJa,
     parseBitrateKbps,
     selectMediaTransport,
     utf8ByteLength,
@@ -129,5 +131,48 @@ describe('describeInlineBudgetExceeded (実行可能な文言)', () => {
 
     it('解釈できないビットレートはサイズの目安に落ちる', () => {
         expect(describeInlineBudgetExceeded('???')).toContain('約12MB');
+    });
+});
+
+describe('estimateMaxRecordingMinutes (画面に出す「扱える録音の長さ」)', () => {
+    it('Storage 上限 100MB から逆算する (inline 予算 16MB ではない)', () => {
+        // 100MB / (kbps*1000/8) / 60 の切り捨て。inline 予算由来の 26/17/13/8 分とは別物
+        expect(estimateMaxRecordingMinutes('64k')).toBe(218);
+        expect(estimateMaxRecordingMinutes('96k')).toBe(145);
+        expect(estimateMaxRecordingMinutes('128k')).toBe(109);
+        expect(estimateMaxRecordingMinutes('192k')).toBe(72);
+    });
+
+    it('inline 予算の目安より必ず長い (Files API 迂回のぶん実際に扱える)', () => {
+        for (const bitrate of ['64k', '96k', '128k', '192k']) {
+            expect(estimateMaxRecordingMinutes(bitrate)!).toBeGreaterThan(estimateInlineLimitMinutes(bitrate)!);
+        }
+    });
+
+    it('その長さの音声が上限ちょうどに収まり、1 分足すと超える', () => {
+        const maxBytes = 8 * 1024 * 1024;
+        const minutes = estimateMaxRecordingMinutes('64k', maxBytes)!;
+        const bytesPerMinute = (64 * 1000 / 8) * 60;
+        expect(minutes * bytesPerMinute).toBeLessThanOrEqual(maxBytes);
+        expect((minutes + 1) * bytesPerMinute).toBeGreaterThan(maxBytes);
+    });
+
+    it('解釈できないビットレートは null', () => {
+        expect(estimateMaxRecordingMinutes('unknown')).toBeNull();
+    });
+});
+
+describe('formatDurationJa', () => {
+    it('1 時間未満は分だけ、境界の 60 分は「約1時間」', () => {
+        expect(formatDurationJa(59)).toBe('約59分');
+        expect(formatDurationJa(60)).toBe('約1時間');
+        expect(formatDurationJa(61)).toBe('約1時間1分');
+    });
+
+    it('時間と分を並べる', () => {
+        expect(formatDurationJa(218)).toBe('約3時間38分');
+        expect(formatDurationJa(145)).toBe('約2時間25分');
+        expect(formatDurationJa(120)).toBe('約2時間');
+        expect(formatDurationJa(0)).toBe('約0分');
     });
 });

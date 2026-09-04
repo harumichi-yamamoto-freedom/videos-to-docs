@@ -59,7 +59,7 @@ export default function HomePage() {
   // 🎬 動画を直接送信する機能（試験的）
   const [sendVideoDirectly, setSendVideoDirectly] = useState(false);
 
-  // S2-1: 192k 固定だと約 10 分で inline 上限に達して失敗していた。既定を 128k に下げ、画面から選べるようにする
+  // S2-1: 192k 固定だと約 10 分で inline 上限に達して失敗していた。既定を下げ、画面から選べるようにする
   const [bitrate, setBitrate] = useState<string>(DEFAULT_AUDIO_BITRATE);
   const sampleRate = 44100;
 
