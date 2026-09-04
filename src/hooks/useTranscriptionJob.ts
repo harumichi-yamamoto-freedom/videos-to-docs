@@ -508,7 +508,7 @@ export interface TranscriptionJobResult {
      * 🔴 MAI が落ちて Gemini で起こしたチャンク（設計 §3.7）。
      * 用語集は MAI でしか効かないので、**ここに出てくる区間だけ用語の反映が弱い**。
      */
-    fallbackChunks: { chunkIndex: number; reason?: string }[];
+    fallbackChunks: { chunkIndex: number; startSec: number; endSec: number; reason?: string }[];
     merged: MergedTranscript;
     invariants: MergeInvariantResult;
     markdown: string;
@@ -757,6 +757,8 @@ export const runTranscriptionJob = async (
                 const last = chunk.attempts[chunk.attempts.length - 1];
                 return {
                     chunkIndex: chunk.index,
+                    startSec: chunk.startSec,
+                    endSec: chunk.endSec,
                     ...(last?.fallbackReason !== undefined && { reason: last.fallbackReason }),
                 };
             });
@@ -782,7 +784,12 @@ export const runTranscriptionJob = async (
             fallbackChunks,
             merged,
             invariants,
-            markdown: toTranscriptMarkdown(merged, markdownOptions),
+            // 🔴 フォールバック区間は**本文に注記として出す**。ログだけだと利用者に見えず、
+            //    用語の表記が揺れている理由が分からない（設計 §3.7）
+            markdown: toTranscriptMarkdown(merged, {
+                ...markdownOptions,
+                fallbackRanges: fallbackChunks,
+            }),
         };
     } finally {
         // 🔴 チャンク音声は元音声より本数が増える。成功・失敗・中断のいずれでも消す

@@ -76,3 +76,4 @@ serviceAccountKey.json
 
 # Claude Code
 .claude/
+.env*
