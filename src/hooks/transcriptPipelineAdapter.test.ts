@@ -21,7 +21,7 @@ const file = new File(['x'], 'call.mp3', { type: 'audio/mpeg' });
 
 const jobResult = (over: Record<string, unknown> = {}) => ({
     ok: true, aborted: false, durationSec: 8700, noiseFloorDb: -34.9, silenceThresholdDb: -39.9,
-    chunks: [{}, {}], failedChunkIndexes: [], cachedRuns: [],
+    chunks: [{}, {}], failedChunkIndexes: [], cachedRuns: [], fallbackChunks: [],
     merged: { segments: [], gaps: [] }, invariants: { ok: true, violations: [] },
     markdown: '[00:00](#t=0) **営業** こんにちは。', ...over,
 });
@@ -34,7 +34,19 @@ describe('成功のとき', () => {
         const r = await runTranscriptPipeline({ file, converter, runJob: runJob(jobResult()) });
         expect(r.success).toBe(true);
         expect(r.text).toContain('#t=0');
-        expect(r.usedModel).toBe('gemini-3.5-transcribe');
+        expect(r.usedModel).toBe('MAI-Transcribe-2');
+    });
+
+    it('🔴 フォールバックした区間があれば、両方のエンジンを記録に残す', async () => {
+        // 用語集は MAI でしか効かない。片方だけ書くと、用語が効いていない区間がある事実が消える
+        const r = await runTranscriptPipeline({
+            file, converter,
+            runJob: runJob(jobResult({ fallbackChunks: [{ chunkIndex: 1, reason: 'MAI timeout' }] })),
+        });
+        expect(r.success).toBe(true);
+        expect(r.usedModel).toContain('MAI-Transcribe-2');
+        expect(r.usedModel).toContain('gemini-3.5-transcribe');
+        expect(r.usedModel).toContain('1/2');
     });
 });
 

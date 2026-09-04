@@ -11,6 +11,7 @@
  */
 import type { TranscriptAnnotation } from '@/lib/transcriptQuality';
 import type { QualityGateId } from '@/lib/transcriptQuality';
+import type { TranscribeEngine } from '@/lib/maiTranscribeContract';
 
 export const TRANSCRIBE_CHUNK_API_PATH = '/api/transcribe/chunk';
 
@@ -72,6 +73,14 @@ export interface TranscribeChunkResponseBody {
      */
     cachedTokens?: number;
     elapsedMs: number;
+    /**
+     * この本文を起こしたエンジン（設計 §3.7）。
+     * 🔴 **用語集は MAI でしか効かない**ので、`gemini` に落ちた区間だけ用語の反映が弱い。
+     * 黙って混ぜると、なぜその区間だけ表記が揺れるのかを後から追えなくなる。
+     */
+    engine: TranscribeEngine;
+    /** MAI を試して落ちたときだけ入る短い理由。利用者向けの文言ではない */
+    fallbackReason?: string;
 }
 
 /**

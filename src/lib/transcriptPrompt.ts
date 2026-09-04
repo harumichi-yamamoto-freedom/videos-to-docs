@@ -21,6 +21,22 @@ export const TRANSCRIPT_PROMPT_ID = '__builtin_transcript__';
 export const TRANSCRIPT_PROMPT_NAME = '全文文字起こし';
 
 /**
+ * 🔴 プレビュー版であることの断り（設計 §3.7・2026-09-04 東野裁定）。
+ *
+ * 主エンジンの `MAI-Transcribe-2` は **public preview で SLA が無い**。逐語:
+ * "This preview is provided without a service-level agreement, and is not recommended for
+ *  production workloads." 実測でも 408 / 503 `diarization_unavailable` / 500 / 接続断が出る。
+ * 落ちたチャンクは Gemini へ回すので**本文は出る**が、時間がかかったり結果が揺れたりする。
+ *
+ * 🔴 **「不安定」とだけ書かない。** 何が起きうるかと、そのとき利用者が何をすればよいかまで書く
+ * （§6.5「画面の案内は、画面にある操作と正本にある語だけで」）。
+ */
+export const TRANSCRIPT_PREVIEW_NOTICE =
+    '最新の文字起こしサービス（プレビュー版）を使っています。'
+    + '混み合っているときは時間がかかったり、一部の区間だけ精度が落ちることがあります。'
+    + 'うまくいかないときは、少し時間をおいてからもう一度お試しください。';
+
+/**
  * 組み込みプロンプトの実体。
  *
  * `content` は使われない（分割パイプラインは `transcription_config` で指示するため、
@@ -30,7 +46,9 @@ export const TRANSCRIPT_PROMPT: Prompt = {
     id: TRANSCRIPT_PROMPT_ID,
     name: TRANSCRIPT_PROMPT_NAME,
     content: '音声を分割して全文を文字起こしし、話者ラベルと時刻を付けた文書を作ります。',
-    model: 'gemini-3.5-transcribe',
+    // 🔴 表示用の名前。実際にどのエンジンが起こしたかはチャンクごとに変わる (設計 §3.7) ので、
+    //    ここに書いた値を「このモデルで起こした」という意味に使ってはいけない。
+    model: 'MAI-Transcribe-2',
     isDefault: false,
     ownerType: 'guest',
     ownerId: 'BUILTIN',

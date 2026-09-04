@@ -4,6 +4,7 @@ import React, { useId } from 'react';
 import { FileWithPrompts } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
 import { getGeminiModelLabel } from '@/constants/geminiModels';
+import { isTranscriptPrompt, TRANSCRIPT_PREVIEW_NOTICE } from '@/lib/transcriptPrompt';
 
 interface FilePromptSelectorProps {
   selectedFiles: FileWithPrompts[];
@@ -58,6 +59,12 @@ export const FilePromptSelector: React.FC<FilePromptSelectorProps> = ({
                     <span className="text-xs text-gray-600">
                       {getGeminiModelLabel(prompt.model)}
                     </span>
+                    {/* 🔴 主エンジンが public preview であることを、選ぶ場所で断る (設計 §3.7) */}
+                    {isTranscriptPrompt(prompt) && (
+                      <span className="mt-0.5 text-xs text-amber-800">
+                        {TRANSCRIPT_PREVIEW_NOTICE}
+                      </span>
+                    )}
                   </span>
                 </label>
               );

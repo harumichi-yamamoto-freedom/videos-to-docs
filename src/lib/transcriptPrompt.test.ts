@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+    TRANSCRIPT_PREVIEW_NOTICE,
     TRANSCRIPT_PROMPT,
     TRANSCRIPT_PROMPT_ID,
     TRANSCRIPT_PROMPT_NAME,
@@ -73,8 +74,17 @@ describe('withTranscriptPrompt — 一覧への差し込み', () => {
 });
 
 describe('組み込みプロンプトの素性', () => {
-    it('文字起こし専用モデルを指す', () => {
-        expect(TRANSCRIPT_PROMPT.model).toBe('gemini-3.5-transcribe');
+    it('文字起こし専用モデルを指す（主エンジン）', () => {
+        // 🔴 これは表示用の名前でしかない。実際に起こしたエンジンはチャンクごとに変わり
+        //    (MAI が落ちたら Gemini・設計 §3.7)、その正は応答の `engine` である。
+        expect(TRANSCRIPT_PROMPT.model).toBe('MAI-Transcribe-2');
+    });
+
+    it('🔴 プレビュー版の断りが、起きうることと利用者の打つ手まで書いてある', () => {
+        // 「不安定です」だけだと、利用者は何をすればよいか分からない (§6.5)
+        expect(TRANSCRIPT_PREVIEW_NOTICE).toContain('プレビュー版');
+        expect(TRANSCRIPT_PREVIEW_NOTICE).toContain('時間がかかったり');
+        expect(TRANSCRIPT_PREVIEW_NOTICE).toContain('もう一度お試しください');
     });
 
     it('利用者のものと混ざらない所有者を持つ', () => {
