@@ -5,7 +5,7 @@
  * 下流（下書き・保存・冪等）は分岐を知らないので、成功/失敗の判定はここが最後の砦。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { runTranscriptPipeline } from './transcriptPipelineAdapter';
+import { buildTranscriptionJobDeps, runTranscriptPipeline } from './transcriptPipelineAdapter';
 import type { VideoConverter } from '@/lib/ffmpeg';
 
 vi.mock('@/lib/logger', () => ({
@@ -96,5 +96,42 @@ describe('🔴 成功にしてはいけない場合', () => {
         });
         expect(r.success).toBe(false);
         expect(r.error).toContain('ffmpeg');
+    });
+});
+
+/**
+ * 🔴 本番の依存が実際に組まれていることの錠。
+ *
+ * 以前は `{ converter, ...deps } as TranscriptionJobDeps` と**型を黙らせて**いたため、
+ * `scanSilence` などが 1 つも配線されないまま tsc もテストも緑で、
+ * 本番だけ `scanSilence is not a function` で落ちていた（2026-09-04・実ブラウザで発見）。
+ */
+describe('🔴 buildTranscriptionJobDeps — 本番の配線', () => {
+    const converter = {
+        getFfmpeg: () => ({
+            writeFile: vi.fn(), exec: vi.fn(), deleteFile: vi.fn(), on: vi.fn(), off: vi.fn(),
+        }),
+        convertSegmentToMp3: vi.fn(),
+    } as unknown as Parameters<typeof buildTranscriptionJobDeps>[0];
+
+    it('必要な依存が 1 つ残らず関数として揃っている', () => {
+        const deps = buildTranscriptionJobDeps(converter);
+        for (const key of ['scanSilence', 'uploadChunk', 'deleteChunk', 'postChunk'] as const) {
+            expect(typeof deps[key], key).toBe('function');
+        }
+        expect(deps.converter).toBe(converter);
+    });
+
+    it('🔴 ffmpeg の取り出しは走査するときまで遅らせる（組み立てだけで load を要求しない）', async () => {
+        const spy = vi.fn(() => ({
+            writeFile: vi.fn(), exec: vi.fn(async () => undefined), deleteFile: vi.fn(),
+            on: vi.fn(), off: vi.fn(),
+        }));
+        const deps = buildTranscriptionJobDeps(
+            { getFfmpeg: spy } as unknown as Parameters<typeof buildTranscriptionJobDeps>[0],
+        );
+        expect(spy).not.toHaveBeenCalled();
+        await deps.scanSilence(new File([new Uint8Array(1)], 'a.mp3'), { durationSec: 10 }).catch(() => {});
+        expect(spy).toHaveBeenCalledTimes(1);
     });
 });
