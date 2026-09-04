@@ -53,6 +53,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { CONVERSION_QUEUE_WAIT_LIMIT_MS, useProcessingWorkflow } from './useProcessingWorkflow';
 import { canSendAudioAsIs } from '@/lib/mediaInput';
+import { TRANSCRIPT_PROMPT_ID } from '@/lib/transcriptPrompt';
 import { GENERATE_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
 
 const BITRATE = '192k';
@@ -252,6 +253,21 @@ describe('handleStartProcessing failure reporting', () => {
 
         expect(result.ok).toBe(false);
         expect(harness.statuses[0]).toMatchObject({ status: 'error', failedPhase: 'engine_init' });
+        expect(serviceMocks.convertVideoToAudioSegments).not.toHaveBeenCalled();
+    });
+
+    it('🔴 全文文字起こしを選んだら、入力が音声でも FFmpeg を読み込む', async () => {
+        // 実害 (2026-09-04): 本番で mp3 を上げると converter が null のまま分割パイプラインが
+        // 呼ばれ、「音声変換の準備ができていません」で必ず失敗していた。
+        // 分割パイプラインは入力が音声でもチャンクの切り出しと無音走査に FFmpeg を使う。
+        const harness = useWorkflowHarness();
+        const file = createFile('talk.mp3', 'audio/mpeg');
+        file.selectedPromptIds = [TRANSCRIPT_PROMPT_ID];
+
+        await harness.workflow.handleStartProcessing([file], ['f1'], BITRATE, SAMPLE_RATE);
+
+        expect(serviceMocks.ffmpegLoad).toHaveBeenCalled();
+        // 変換自体は要らない（そのまま送れる音声なので）
         expect(serviceMocks.convertVideoToAudioSegments).not.toHaveBeenCalled();
     });
 
