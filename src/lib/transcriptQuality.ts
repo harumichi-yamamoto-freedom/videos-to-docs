@@ -158,7 +158,21 @@ export const MAX_COVERAGE_RATIO = 1.05;
  */
 export const MAX_OUT_OF_RANGE_ANNOTATION_RATIO = 0.01;
 
-/** G7: 商談は最低この人数の話者が居るはず */
+/**
+ * G7: 商談は最低この人数の話者が居るはず。
+ *
+ * 🔴 **`warn` であって `fail` ではない（2026-09-04 改訂）。**
+ * 話者ラベルはメタデータであって本文ではない。落ちたチャンクを**捨てると本文ごと失われる**が、
+ * 話者が付かないだけなら本文は読める（G8 の「時刻の暴走は本文の欠陥ではない」と同じ考え方）。
+ *
+ * 実測でこれが効く: Gemini は 10 分窓 **9 走中 3 走で話者を 1 名も返さない**（silent fail-open）。
+ * G7 を fail のままにすると、**MAI が落ちて Gemini に回ったチャンクの約 3 割がゲートで捨てられ、
+ * フォールバックが用をなさない**（設計 §3.7）。MAI は 11 走すべてで 2〜3 名を返しており、
+ * 主エンジンが動いている限り警告は出ない。
+ *
+ * ⚠️ 警告が増えたら、それは「話者分離が効いていない」という**別の問題の合図**である。
+ * 件数を計器で数えること。
+ */
 export const MIN_SPEAKERS = 2;
 
 export interface QualityGateOptions {
@@ -523,12 +537,13 @@ export const evaluateChunkQuality = (
         });
     }
 
-    // G7: 話者の妥当性。商談は最低 2 話者。話者分離が有効なときだけ判定する
+    // G7: 話者の妥当性。🔴 warn 止まり — 本文は読めるので、チャンクごと捨てない（定数のコメント参照）
     if (diarizationEnabled && metrics.speakerCount < minSpeakers) {
         add({
             gate: 'G7',
-            severity: 'fail',
-            reason: `話者分離が有効なのに話者が ${metrics.speakerCount} 種類 — 商談として不自然`,
+            severity: 'warn',
+            reason: `話者分離が有効なのに話者が ${metrics.speakerCount} 種類 — `
+                + '話者ラベルが付かないだけで本文は読める（警告のみ・不合格にはしない）',
             observed: metrics.speakerCount,
             threshold: minSpeakers,
         });
