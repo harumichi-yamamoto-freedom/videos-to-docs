@@ -10,7 +10,14 @@
 import type { VideoConverter } from '@/lib/ffmpeg';
 import type { TranscriptionResult } from '@/lib/gemini';
 import { createLogger } from '@/lib/logger';
-import { runTranscriptionJob, type TranscriptionJobDeps } from '@/hooks/useTranscriptionJob';
+import {
+    createFfmpegSilenceScanner,
+    runTranscriptionJob,
+    type TranscriptionJobDeps,
+} from '@/hooks/useTranscriptionJob';
+import { deleteAudioFromStorage, uploadAudioToStorage } from '@/lib/storage';
+import { TRANSCRIBE_CHUNK_API_PATH, type TranscribeChunkResponseBody } from '@/lib/transcribeChunkContract';
+import { GENERATE_AUTH_HEADER } from '@/lib/generateApiContract';
 
 const logger = createLogger('transcriptPipeline');
 
@@ -24,6 +31,59 @@ export interface RunTranscriptPipelineInput {
     runJob?: typeof runTranscriptionJob;
 }
 
+/**
+ * 本番の依存一式。テストは個別に差し替えるので、ここは**実物だけ**を組む。
+ *
+ * 🔴 `converter` は `load()` 済みであること。別インスタンスを立てると wasm を再ロードする。
+ */
+export function buildTranscriptionJobDeps(converter: VideoConverter): TranscriptionJobDeps {
+    return {
+        converter,
+        // 🔴 無音走査は**同じ ffmpeg インスタンス**を使う（設計 §3.1）。
+        //    別に立てると wasm core をもう一度ロードする。
+        // 🔴 ffmpeg の取り出しは**走査するときまで遅らせる**。ここで呼ぶと、
+        //    走らせないのに load 済みであることを要求してしまう。
+        scanSilence: (file, options) => createFfmpegSilenceScanner(
+            converter.getFfmpeg(),
+            async (f) => new Uint8Array(await f.arrayBuffer()),
+        )(file, options),
+        uploadChunk: (blob, fileName) =>
+            uploadAudioToStorage(blob, fileName, {
+                originalFileName: fileName,
+                originalFileType: 'audio',
+            }),
+        deleteChunk: (storagePath) => deleteAudioFromStorage(storagePath),
+        postChunk: async (body, signal) => {
+            // 認証は既存の生成 API と同じ形。未ログイン (ゲスト) はヘッダを付けない
+            // 🔴 firebase はここで**遅延 import** する。モジュール先頭で読むと、
+            //    このアダプタを import しただけで Auth が初期化され、
+            //    鍵の無い環境（テスト・prerender）が `auth/invalid-api-key` で落ちる。
+            let token: string | null = null;
+            try {
+                const { auth } = await import('@/lib/firebase');
+                token = (await auth.currentUser?.getIdToken()) ?? null;
+            } catch {
+                token = null;
+            }
+            const headers: Record<string, string> = { 'content-type': 'application/json' };
+            if (token) headers[GENERATE_AUTH_HEADER] = `Bearer ${token}`;
+            const response = await fetch(TRANSCRIBE_CHUNK_API_PATH, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(body),
+                ...(signal ? { signal } : {}),
+            });
+            const json = (await response.json()) as TranscribeChunkResponseBody & { message?: string };
+            if (!response.ok) {
+                // 🔴 サーバの文言をそのまま使う。ここで作文すると、上限超過などの
+                //    「次に何をすればよいか」が書かれた文言が失われる
+                throw new Error(json.message ?? `チャンクの文字起こしに失敗しました (${response.status})`);
+            }
+            return json;
+        },
+    };
+}
+
 export async function runTranscriptPipeline(
     input: RunTranscriptPipelineInput,
 ): Promise<TranscriptionResult> {
@@ -35,9 +95,14 @@ export async function runTranscriptPipeline(
     }
 
     try {
+        // 🔴 **本番の依存をここで実際に組み立てる。**
+        //    以前は `{ converter, ...deps } as TranscriptionJobDeps` と**型を黙らせて**いたため、
+        //    `scanSilence` / `uploadChunk` / `deleteChunk` / `postChunk` が 1 つも配線されておらず、
+        //    本番で必ず `scanSilence is not a function` で落ちていた（2026-09-04・実ブラウザで発見）。
+        //    型アサーションで穴を塞ぐと、tsc もテストも緑のまま本番だけ壊れる。
         const job = await runJob(
             file,
-            { converter, ...(deps ?? {}) } as TranscriptionJobDeps,
+            { ...buildTranscriptionJobDeps(converter), ...(deps ?? {}) },
             { ...(signal ? { signal } : {}) },
         );
 
