@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { TranscribeChunkResponseBody } from '@/lib/transcribeChunkContract';
+import { TRANSCRIBE_CHUNK_MAX_AUDIO_SEC, type TranscribeChunkResponseBody } from '@/lib/transcribeChunkContract';
 import {
     createFfmpegSilenceScanner,
     DEFAULT_CHUNK_SEC,
@@ -13,6 +13,7 @@ import {
     shiftChunkRange,
     silenceThresholdDb,
     snapCutToSilence,
+    speechIntervalsBetween,
     speechSecBetween,
     type ChunkConverterLike,
     type FfmpegLike,
@@ -26,14 +27,33 @@ vi.mock('@/lib/firebase', () => ({ storage: {} }));
 vi.mock('firebase/storage', () => ({ deleteObject: vi.fn(), ref: vi.fn() }));
 vi.mock('@/lib/storage', () => ({ uploadAudioToStorage: vi.fn() }));
 
-const PLAN_OPTIONS = { chunkSec: DEFAULT_CHUNK_SEC, overlapSec: DEFAULT_OVERLAP_SEC };
+/**
+ * 🔴 分割の論理を測るテストは **既定値ではなく固定値** を使う。
+ * 既定のチャンク長は実測で動く値 (25 分 → 10 分・設計 §3.3) で、
+ * ここに既定値を入れると「既定が変わった」だけで論理のテストが全部落ち、
+ * 何が壊れたのか分からなくなる。既定値そのものは下の錠で別に測る。
+ */
+const TEST_CHUNK_SEC = 1500;
+const PLAN_OPTIONS = { chunkSec: TEST_CHUNK_SEC, overlapSec: DEFAULT_OVERLAP_SEC };
+
+describe('既定のチャンク長', () => {
+    it('🔴 既定は 10 分 — 時刻の暴走が長さに単調に依存する (設計 §1.11 / 117 走)', () => {
+        // 範囲外時刻を含む走: 5分以下 0% → 8〜12分 12% → 15分 20% → 20分 38%。
+        // 変えるときは設計 §3.3 を測り直してから。テストだけ直すのは禁止。
+        expect(DEFAULT_CHUNK_SEC).toBe(10 * 60);
+    });
+
+    it('既定のチャンク長 + オーバーラップは API の上限を超えない', () => {
+        expect(DEFAULT_CHUNK_SEC + DEFAULT_OVERLAP_SEC).toBeLessThanOrEqual(TRANSCRIBE_CHUNK_MAX_AUDIO_SEC);
+    });
+});
 
 // ---------------------------------------------------------------------------
 // 分割の境界計算
 // ---------------------------------------------------------------------------
 
 describe('planChunks', () => {
-    it('8,700 秒を 25 分チャンク・オーバーラップ 30 秒で 6 本に割る', () => {
+    it('8,700 秒を 25 分チャンク・オーバーラップ 30 秒で 6 本に割る (固定値・既定値ではない)', () => {
         const plan = planChunks(8700, PLAN_OPTIONS);
 
         expect(plan.map((entry) => [entry.startSec, entry.endSec])).toEqual([
@@ -149,6 +169,40 @@ describe('speechSecBetween', () => {
     it('区間に掛かる部分だけを引く', () => {
         expect(speechSecBetween([{ startSec: 90, endSec: 120 }], 100, 200)).toBe(80);
     });
+
+describe('speechIntervalsBetween (G6 の入力)', () => {
+    const silences = [
+        { startSec: 100, endSec: 200 },
+        { startSec: 500, endSec: 530 },
+    ];
+
+    it('無音の補集合を、チャンク先頭を 0 とした相対秒で返す', () => {
+        expect(speechIntervalsBetween(silences, 0, 600)).toEqual([[0, 100], [200, 500], [530, 600]]);
+    });
+
+    it('🔴 相対秒である — チャンクの開始点を引いてある (絶対秒を渡すと穴の位置がずれる)', () => {
+        expect(speechIntervalsBetween(silences, 100, 600)).toEqual([[100, 400], [430, 500]]);
+    });
+
+    it('無音が 1 件も無ければ全域が 1 区間', () => {
+        expect(speechIntervalsBetween([], 0, 600)).toEqual([[0, 600]]);
+    });
+
+    it('全域が無音なら空配列 (0 区間)', () => {
+        expect(speechIntervalsBetween([{ startSec: 0, endSec: 600 }], 0, 600)).toEqual([]);
+    });
+
+    it('🔴 区間の合計は speechSecBetween と一致する (別の走査で測っていないことの錠)', () => {
+        const intervals = speechIntervalsBetween(silences, 0, 600);
+        const total = intervals.reduce((sum, [start, end]) => sum + (end - start), 0);
+        expect(total).toBeCloseTo(speechSecBetween(silences, 0, 600), 6);
+    });
+
+    it('無音が順不同で来ても昇順・非重複で返す (サーバ側の検査に落ちない形)', () => {
+        const shuffled = [{ startSec: 500, endSec: 530 }, { startSec: 100, endSec: 200 }];
+        expect(speechIntervalsBetween(shuffled, 0, 600)).toEqual([[0, 100], [200, 500], [530, 600]]);
+    });
+});
 
     it('全区間が無音なら 0 (負にしない)', () => {
         expect(speechSecBetween([{ startSec: 0, endSec: 999 }], 100, 200)).toBe(0);
@@ -298,7 +352,10 @@ const failing = (over: Partial<TranscribeChunkResponseBody> = {}): TranscribeChu
 
 interface Harness {
     deps: TranscriptionJobDeps;
-    posted: Array<{ fileName: string; audioSec: number; speechSec: number; storagePath: string }>;
+    posted: Array<{
+        fileName: string; audioSec: number; speechSec: number; storagePath: string;
+        speechIntervals: Array<[number, number]>;
+    }>;
     deleted: string[];
     uploaded: string[];
     cutRanges: Array<{ index: number; startSec: number; endSec: number }>;
@@ -364,6 +421,7 @@ const makeHarness = (options: {
                 audioSec: body.audioSec,
                 speechSec: body.speechSec,
                 storagePath: body.storagePath,
+                speechIntervals: body.speechIntervals,
             });
             calls += 1;
             return respond(calls, body.fileName);
@@ -395,6 +453,23 @@ describe('runTranscriptionJob', () => {
         await runTranscriptionJob(FILE, harness.deps, PLAN_OPTIONS);
 
         expect(harness.posted.map((p) => p.speechSec)).toEqual([1500, 1530]);
+    });
+
+    it('🔴 発話区間も一緒に送る — 無いとサーバ側 G6 が走らず脱落を検査しない', async () => {
+        const harness = makeHarness({
+            durationSec: 3000,
+            silences: [{ startSec: 300, endSec: 400 }, { startSec: 1600, endSec: 1700 }],
+        });
+        await runTranscriptionJob(FILE, harness.deps, PLAN_OPTIONS);
+        // チャンク0 = [0,1500] の無音 [300,400] → 相対で [[0,300],[400,1500]]
+        expect(harness.posted[0]?.speechIntervals).toEqual([[0, 300], [400, 1500]]);
+        // チャンク1 = [1470,3000] の無音 [1600,1700] → 開始点 1470 を引いた相対秒
+        expect(harness.posted[1]?.speechIntervals).toEqual([[0, 130], [230, 1530]]);
+        // 総量と区間の合計が一致する (別の走査で測っていない)
+        for (const posted of harness.posted) {
+            const total = posted.speechIntervals.reduce((sum, [x, y]) => sum + (y - x), 0);
+            expect(total).toBeCloseTo(posted.speechSec, 6);
+        }
     });
 
     it('ゲート不合格 → 境界ずらし → 同一再投入 の順に 3 回試す', async () => {

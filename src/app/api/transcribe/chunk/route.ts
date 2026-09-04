@@ -14,11 +14,12 @@
 import {
     TRANSCRIBE_CHUNK_ALLOWED_MIME_PREFIXES,
     TRANSCRIBE_CHUNK_MAX_AUDIO_SEC,
+    TRANSCRIBE_CHUNK_MAX_SPEECH_INTERVALS,
     type TranscribeChunkRequestBody,
     type TranscribeChunkResponseBody,
 } from '@/lib/transcribeChunkContract';
 import { createLogger } from '@/lib/logger';
-import { evaluateChunkQuality } from '@/lib/transcriptQuality';
+import { evaluateChunkQuality, quarantineOutOfRangeAnnotations } from '@/lib/transcriptQuality';
 import { resolveRequestSubject } from '@/server/auth';
 import { GenerateApiError } from '@/server/errors';
 import { assertGeminiConfigured } from '@/server/geminiServer';
@@ -60,7 +61,7 @@ export function validateRequestBody(raw: unknown): TranscribeChunkRequestBody {
     const reload = 'ページを再読み込みして、もう一度お試しください。';
     if (!isRecord(raw)) throw invalid(`リクエストの形式が不正です。${reload}`);
 
-    const { storagePath, fileName, mimeType, audioSec, speechSec } = raw;
+    const { storagePath, fileName, mimeType, audioSec, speechSec, speechIntervals } = raw;
     if (typeof storagePath !== 'string' || !storagePath) throw invalid(`アップロード先の情報がありません。${reload}`);
     if (typeof fileName !== 'string' || !fileName) throw invalid(`ファイル名がありません。${reload}`);
     if (typeof mimeType !== 'string' || !TRANSCRIBE_CHUNK_ALLOWED_MIME_PREFIXES.some(p => mimeType.startsWith(p))) {
@@ -81,7 +82,31 @@ export function validateRequestBody(raw: unknown): TranscribeChunkRequestBody {
     }
     if (speechSec > audioSec + 1) throw invalid(`発話時間が音声の長さを超えています。${reload}`);
 
-    return { storagePath, fileName, mimeType, audioSec, speechSec };
+    // 🔴 発話区間は G6 (最長穴) の入力。**必須にする** — 省略を許すと G6 が静かに走らなくなり、
+    //    本文の脱落を誰も検査しないまま `passed: true` が返る (設計 §4.1)。
+    if (!Array.isArray(speechIntervals)) throw invalid(`発話区間の測定値がありません。${reload}`);
+    if (speechIntervals.length > TRANSCRIBE_CHUNK_MAX_SPEECH_INTERVALS) {
+        throw invalid(`発話区間が多すぎます。${reload}`);
+    }
+    const intervals: Array<[number, number]> = [];
+    let previousEnd = -Infinity;
+    for (const interval of speechIntervals) {
+        if (!Array.isArray(interval) || interval.length !== 2) throw invalid(`発話区間の形式が不正です。${reload}`);
+        const [start, end] = interval as [unknown, unknown];
+        if (typeof start !== 'number' || typeof end !== 'number'
+            || !Number.isFinite(start) || !Number.isFinite(end)) {
+            throw invalid(`発話区間の形式が不正です。${reload}`);
+        }
+        // 🔴 昇順・非重複・チャンク内であることまで確かめる。順不同や重なりを通すと
+        //    最長穴が実際より短く出て、G6 が静かに甘くなる。
+        if (start < 0 || end <= start || end > audioSec + 1 || start < previousEnd) {
+            throw invalid(`発話区間の範囲が不正です。${reload}`);
+        }
+        previousEnd = end;
+        intervals.push([start, end]);
+    }
+
+    return { storagePath, fileName, mimeType, audioSec, speechSec, speechIntervals: intervals };
 }
 
 function assertOwnership(storagePath: string, subject: Awaited<ReturnType<typeof resolveRequestSubject>>): void {
@@ -163,16 +188,23 @@ export async function POST(request: Request): Promise<Response> {
                 annotations,
                 audioSec: body.audioSec,
                 speechSec: body.speechSec,
+                speechIntervals: body.speechIntervals,
                 ...(result.outputTokens !== undefined && { outputTokens: result.outputTokens }),
             },
             { diarizationEnabled: true, timestampsEnabled: true },
         );
 
+        // 🔴 G8 の「隔離」を実際に効かせる。ゲートが warn を出しただけで注釈を返してしまうと、
+        //    範囲外の時刻がそのまま結合へ流れ、時刻リンクが音声の外を指す (設計 §4.1)。
+        //    **本文には触らない** — 時刻の暴走はメタデータの欠陥であって、本文を捨てる理由にならない。
+        const { kept: keptAnnotations, removed: quarantined } =
+            quarantineOutOfRangeAnnotations(annotations, body.audioSec);
+
         const elapsedMs = Date.now() - startedAt;
         const response: TranscribeChunkResponseBody = {
             status: result.status,
             text: result.text,
-            annotations,
+            annotations: keptAnnotations,
             quality: {
                 passed: quality.passed,
                 failedGates: quality.failedGates,
@@ -194,10 +226,16 @@ export async function POST(request: Request): Promise<Response> {
             indeterminateGates: quality.indeterminateGates,
             status: result.status,
             chars: result.text.length,
-            annotations: annotations.length,
+            annotations: keptAnnotations.length,
             droppedAnnotations: droppedCount,
+            // 🔴 隔離した本数を必ず残す。黙って捨てると、時刻リンクが減った理由が後から追えない
+            quarantinedAnnotations: quarantined.length,
             audioSec: body.audioSec,
             speechSec: body.speechSec,
+            speechIntervalCount: body.speechIntervals.length,
+            // 🔴 最長穴を必ず計器に載せる。合否だけだと、閾値 30 秒が正しいかを後から見直せない
+            longestSilentGapSec: quality.metrics.longestSilentGapSec,
+            outOfRangeAnnotations: quality.metrics.outOfRangeAnnotationCount,
             cachedTokens: result.cachedTokens,
             elapsedMs,
             subjectKind: subject.kind,

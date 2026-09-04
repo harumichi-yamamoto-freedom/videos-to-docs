@@ -42,8 +42,23 @@ const jobLogger = createLogger('transcriptionJob');
 // 定数 (すべて呼び出し側から上書きできる)
 // ---------------------------------------------------------------------------
 
-/** 既定のチャンク長 (秒)。25 分 + オーバーラップ 30 秒 = 25.5 分で公称上限 29 分の内側 */
-export const DEFAULT_CHUNK_SEC = 25 * 60;
+/**
+ * 既定のチャンク長 (秒)。10 分 + オーバーラップ 30 秒 = 10.5 分。
+ *
+ * 🔴 **2026-09-04 に 25 分から改訂した (設計 §3.3 / §1.11)。** 25 分を採った根拠は
+ * 「長いほど継ぎ目が減って有利」だったが、**長さの代償を測る計器を持っていなかった。**
+ * 正しい計器 (最長穴・範囲外時刻) で 117 走を測り直した結果:
+ *
+ * - **本文の脱落は長さにほとんど依存しない** — 最悪でも 43 秒の穴で、全長で同程度
+ * - **時刻の暴走だけが長さに単調に依存する** — 範囲外時刻を含む走が
+ *   5 分以下 0% → 8〜12 分 12% → 15 分 20% → **20 分 38%**
+ *
+ * 時刻シーク再生と結合の絶対時刻はどちらも時刻の正しさに乗るので、ここで決まる。
+ * 8〜12 分は最長穴が全走 24 秒以内で差が無く、その帯の中から
+ * 継ぎ目の本数 (60 分の商談で 6 本) と 1 リクエストの待ち時間の兼ね合いで 10 分を採る。
+ * 5 分以下は範囲外時刻 0% だが、60 分で 12 本以上の継ぎ目になり話者ラベルの通し番号付けが破綻する。
+ */
+export const DEFAULT_CHUNK_SEC = 10 * 60;
 
 /** 既定のオーバーラップ (秒)。切断線を跨ぐ発話を両側から拾えるだけの幅 */
 export const DEFAULT_OVERLAP_SEC = 30;
@@ -354,6 +369,28 @@ export const speechSecBetween = (
 };
 
 /**
+ * 🔴 発話**区間**。silencedetect の無音を抜いた補集合を、**チャンク先頭を 0 とした**相対秒で返す。
+ * サーバ側 G6 (最長穴) の入力。`speechSecBetween` と同じ走査から出すこと (別の閾値で測ると穴の位置がずれる)。
+ */
+export const speechIntervalsBetween = (
+    silences: readonly SilenceInterval[],
+    startSec: number,
+    endSec: number,
+): Array<[number, number]> => {
+    const intervals: Array<[number, number]> = [];
+    let cursor = startSec;
+    for (const silence of [...silences].sort((a, b) => a.startSec - b.startSec)) {
+        if (silence.endSec <= cursor || silence.startSec >= endSec) continue;
+        const silenceStart = Math.max(silence.startSec, startSec);
+        if (silenceStart > cursor) intervals.push([cursor - startSec, silenceStart - startSec]);
+        cursor = Math.max(cursor, Math.min(silence.endSec, endSec));
+        if (cursor >= endSec) break;
+    }
+    if (cursor < endSec) intervals.push([cursor - startSec, endSec - startSec]);
+    return intervals;
+};
+
+/**
  * 再試行 2 用に、チャンクの範囲を丸ごとずらす (長さは変えない)。
  * 前へずらせなければ後ろへ。どちらも音声の外へ出るなら**ずらさずに元の範囲を返す**
  * (チャンクが音声全体を覆っている場合。ここで縮めると別の失敗様式を混ぜてしまう)。
@@ -533,6 +570,8 @@ const runChunk = async (
         const audioSec = range.endSec - range.startSec;
         // 🔴 音声長ではなく silencedetect 由来の発話秒数。サーバ側 G6 の分母
         const speechSec = speechSecBetween(silences, range.startSec, range.endSec);
+        // 🔴 総量とは別に区間も渡す。総量だけだとサーバ側 G6 が走らず indeterminate になる
+        const speechIntervals = speechIntervalsBetween(silences, range.startSec, range.endSec);
         const record: ChunkAttemptRecord = {
             attempt,
             startSec: range.startSec,
@@ -569,6 +608,7 @@ const runChunk = async (
                     mimeType: CHUNK_MIME_TYPE,
                     audioSec,
                     speechSec,
+                    speechIntervals,
                 },
                 signal,
             );

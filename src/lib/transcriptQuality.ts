@@ -37,6 +37,15 @@ export interface ChunkResult {
     /** VAD (silencedetect / Silero VAD) で測った発話秒数 */
     speechSec: number;
     /**
+     * VAD で測った**発話区間**。チャンク先頭を 0 とした `[開始秒, 終了秒]` の並び。
+     *
+     * 🔴 **G6 はこれが無いと走らない (indeterminate になる)。** `speechSec` (総量) では代替できない。
+     * 2026-09-04 の較正で、`speechSec` を分母に使う旧 G6 が**分母の側で壊れていた**ことが分かった
+     * (背景音・移動音・衣擦れを発話と数え、発話率 77% の音源が最も成績が悪く見えた)。
+     * 区間で持てば「注釈が空いている連続区間」だけを見られるので、VAD が多少ノイズを拾っても判定が反転しない。
+     */
+    speechIntervals?: readonly (readonly [number, number])[];
+    /**
      * 出力トークン数。
      * 🔴 `usage.total_output_tokens` を使ってはいけない — **出力上限に到達した崩壊走でも常に 0 が返る** (実測)。
      * これを読むと G1 のトークン条件が永久に発火せず、静かに無効な検査になる。
@@ -87,26 +96,39 @@ export const MIN_UNITS_FOR_UNIQUE_RATIO = 40;
 export const MAX_COMPRESSION_RATIO = 8.0;
 
 /**
- * G6: 文字数 ÷ 発話秒数がこれ未満なら「黙った過少出力」の疑い。実測: 正常 4〜5.5 文字/秒、崩壊 0.03〜0.7。
- * 🔴 分母は音声長ではなく発話秒数。商談録音には移動・雑談・無音が実際に含まれ、
- * 音声長を分母にすると正常な静かな区間を誤検出する。
+ * G6 (2026-09-04 差し替え): **最長穴** — 発話区間のうち、注釈が 1 本も無い最長の連続秒数。
+ * これを超えたら「本文の脱落」として不合格。
  *
- * 🔴 **G6 は `warn` であって `fail` ではない — チャンクを不合格にしない。**
- * 疎な 10 分区間を `silencedetect` (ノイズフロア −45.2 dB / 無音率 76% / 発話 143.5 秒) で割り直すと
- * 123 文字 = 0.86 文字/秒で閾値を下回るが、これが「モデルの取りこぼし」なのか
- * 「silencedetect が移動音・衣擦れを発話と数えた」のかは正解データが無く判別できていない。
- * そして **G6 だけが捕まえる確認済みの真陽性がまだ 1 件も無い** (実測した過少出力の実例は
- * G2 が捕まえるか、キャッシュ由来の artifact だった)。
- * 真陽性が無く偽陽性の疑いだけがあるゲートを不合格判定に使わない。値は計算してレポートに載せるだけにする。
+ * 🔴 **旧 G6 (文字数 ÷ 発話秒数 < 1.5) は取り下げた。分母が壊れていたため** (設計 §1.11)。
+ * `silencedetect` が背景音を発話と数えており、音源ごとの成績が発話率と**逆相関**していた
+ * (発話率 77% の音源が最悪・49% の音源が最良)。決め手は次の矛盾:
+ * 「取りこぼし率 80%、なのに注釈が 1 本も無い最長の連続区間は 3〜22 秒」— 両立しない。
+ *
+ * 🔴 実測 (構成 A・117 走・raw 突合済み): **最悪 43 秒 / 中央 7〜14 秒**。
+ * 10 分チャンクでは 15/15 走が 24 秒以内。閾値 30 秒は正常側に余裕があり、
+ * 15 分以上で出はじめる 37〜43 秒の穴を捕まえる。
+ *
+ * この指標は発話秒の**総量**を分母に使わない。ノイズを発話と誤認しても、
+ * その区間に注釈が散っていれば穴として数えないので、**VAD の精度が多少悪くても判定が反転しない。**
+ */
+export const MAX_SILENT_GAP_SEC = 30;
+
+/**
+ * 旧 G6 の閾値。**判定には使わない** — 分布をログに残して後から見直すためだけに残している。
+ * @deprecated 設計 §1.11。分母 (`speechSec`) が信用できないため合否に使わないこと。
  */
 export const MIN_CHARS_PER_SPEECH_SEC = 1.5;
 
 /**
- * G8: 最終注釈時刻 ÷ 音声長がこれ未満なら「カバレッジ不足」。
- * 🔴 実測: `completed` を返しながら 30 分中 20.0 分までしか起こさない走が 2/2 (カバレッジ 67% / 74%)。
- * G1〜G7 のどれも捕まえられない (status は completed・本文の構造は正常) ので、G1 では代替できない。
- * 🔴 閾値は 0.90。**正常と判定した 30 分の走のカバレッジが 93.8%** (設計 §3.3 の長さ実測表) なので、
- * 0.95 に置くとこの正常サンプルが落ちる。正常の最小 93.8% と不合格の実例 74% の間に置く。
+ * 旧 G8 の下側 (最終注釈時刻 ÷ 音声長)。**判定には使わない。**
+ *
+ * 🔴 **端点判定なので両方向に誤る** (設計 §4.1・2026-09-04 改訂):
+ * - 偽陰性: 冒頭と末尾だけ起こして**中を丸ごと飛ばした**走がカバレッジ 0.995 で通る
+ * - 偽陽性: 取りこぼしゼロ・最長穴 5 秒・11,486 文字の**良好な走**が、
+ *   壊れた注釈 1 本のせいで `coverage = 85,581` になり不合格になった
+ *
+ * 脱落の検査は G6 (最長穴) が担う。ここは値をレポートに残すためだけに残している。
+ * @deprecated 設計 §1.11 / §4.1。
  */
 export const MIN_COVERAGE_RATIO = 0.9;
 
@@ -121,8 +143,20 @@ export const MIN_COVERAGE_RATIO = 0.9;
  *
  * 上限に 1.05 の余裕を持たせているのは、末尾の注釈が音声長をわずかに超えることがあるため
  * (境界の丸め)。実測の暴走は 39 倍・57 倍なので、この余裕では取り逃がさない。
+ *
+ * 🔴 **2026-09-04 改訂: 処分が変わった。** この倍率を超えた注釈は「走ごと不合格」ではなく
+ * **その注釈だけ隔離**する。時刻の暴走は**本文の欠陥ではなくメタデータの欠陥**であり、
+ * 良好な本文を捨てる理由にならない (上のコメントの実例)。走を落とすのは隔離が全体の
+ * `MAX_OUT_OF_RANGE_ANNOTATION_RATIO` を超えたときだけ。
  */
 export const MAX_COVERAGE_RATIO = 1.05;
+
+/**
+ * G8: 範囲外の注釈がこの割合を超えたら、時刻の並び全体が信用できないとして不合格にする。
+ * 🔴 実測 (117 走): 暴走は「注釈 1〜2 本だけが桁違い」という形で出る (2,365 本中 58 本 = 2.5% が最悪)。
+ * 1% は「数本の外れ値は隔離して本文と残りの時刻を使う / 並びごと壊れているなら捨てる」の境目。
+ */
+export const MAX_OUT_OF_RANGE_ANNOTATION_RATIO = 0.01;
 
 /** G7: 商談は最低この人数の話者が居るはず */
 export const MIN_SPEAKERS = 2;
@@ -134,8 +168,14 @@ export interface QualityGateOptions {
     minUniqueUnitRatio?: number;
     minUnitsForUniqueRatio?: number;
     maxCompressionRatio?: number;
+    /** @deprecated 旧 G6。判定には使わない (設計 §1.11) */
     minCharsPerSpeechSec?: number;
+    /** G6: 注釈が 1 本も無い最長の連続発話秒。既定 30 */
+    maxSilentGapSec?: number;
+    /** @deprecated 旧 G8 の下側。判定には使わない (設計 §4.1) */
     minCoverageRatio?: number;
+    /** G8: 範囲外の注釈がこの割合を超えたら不合格。既定 0.01 */
+    maxOutOfRangeAnnotationRatio?: number;
     /** G8 の上側。既定 1.05。時刻が音声長を超える暴走を捕まえる */
     maxCoverageRatio?: number;
     minSpeakers?: number;
@@ -186,8 +226,17 @@ export interface TranscriptQualityMetrics {
     compressionRatio: number | null;
     /** 文字数 ÷ 発話秒数。発話秒数が 0 以下なら null */
     charsPerSpeechSec: number | null;
-    /** 最終注釈時刻 ÷ 音声長。注釈 0 本 または 音声長 0 以下なら null */
+    /** 最終注釈時刻 ÷ 音声長。注釈 0 本 または 音声長 0 以下なら null。@deprecated 判定には使わない */
     coverageRatio: number | null;
+    /**
+     * G6: 発話区間のうち、注釈が 1 本も無い最長の連続秒数。
+     * `speechIntervals` が渡されなければ null (＝検査が走っていない。合格ではない)。
+     */
+    longestSilentGapSec: number | null;
+    /** G8: 音声長 × maxCoverageRatio を超える end_offset を持つ注釈の本数 */
+    outOfRangeAnnotationCount: number;
+    /** G8: 上の本数 ÷ 全注釈数。注釈 0 本なら null */
+    outOfRangeAnnotationRatio: number | null;
     /** 注釈の end_offset の最大値。注釈 0 本なら null */
     lastAnnotationEndSec: number | null;
     /** 注釈に出てきた話者ラベルの種類数 */
@@ -257,6 +306,62 @@ export const compressionRatio = (text: string): number | null => {
 
 export const utf8ByteLength = (text: string): number => Buffer.byteLength(text, 'utf8');
 
+/**
+ * 発話区間のうち、注釈が 1 本も覆っていない最長の連続秒数。
+ *
+ * 🔴 これが G6 の本体。**発話秒の総量を分母に使わない**のが要点で、
+ * VAD がノイズを発話と誤認しても、その区間に注釈が散っていれば穴として数えない。
+ * 注釈は重なり得るので、先に併合してから走査する。
+ */
+export const longestUncoveredSpeechSec = (
+    speechIntervals: readonly (readonly [number, number])[],
+    annotations: readonly TranscriptAnnotation[],
+): number => {
+    const merged: [number, number][] = [];
+    for (const [start, end] of annotations
+        .map((a): [number, number] => [a.startOffsetSec, Math.max(a.startOffsetSec, a.endOffsetSec)])
+        .sort((a, b) => a[0] - b[0])) {
+        const last = merged[merged.length - 1];
+        if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+        else merged.push([start, end]);
+    }
+
+    let worst = 0;
+    for (const [speechStart, speechEnd] of speechIntervals) {
+        let cursor = speechStart;
+        for (const [annStart, annEnd] of merged) {
+            if (annEnd <= cursor || annStart >= speechEnd) continue;
+            if (annStart > cursor) worst = Math.max(worst, annStart - cursor);
+            cursor = Math.max(cursor, annEnd);
+            if (cursor >= speechEnd) break;
+        }
+        if (cursor < speechEnd) worst = Math.max(worst, speechEnd - cursor);
+    }
+    return worst;
+};
+
+/**
+ * 範囲外の時刻を持つ注釈を落とす (G8 の「隔離」の実体)。
+ *
+ * 🔴 **本文には触らない。** 時刻の暴走はメタデータの欠陥であって、本文を捨てる理由にならない
+ * (実測: 取りこぼしゼロ・最長穴 5 秒・11,486 文字の走が、壊れた注釈 1 本で不合格になっていた)。
+ * 落とした本数は呼び出し側でログに残すこと — 時刻リンクが減った理由が後から追えなくなる。
+ */
+export const quarantineOutOfRangeAnnotations = (
+    annotations: readonly TranscriptAnnotation[],
+    audioSec: number,
+    maxCoverageRatio: number = MAX_COVERAGE_RATIO,
+): { kept: TranscriptAnnotation[]; removed: TranscriptAnnotation[] } => {
+    if (!(audioSec > 0)) return { kept: [...annotations], removed: [] };
+    const ceiling = audioSec * maxCoverageRatio;
+    const kept: TranscriptAnnotation[] = [];
+    const removed: TranscriptAnnotation[] = [];
+    for (const annotation of annotations) {
+        (annotation.endOffsetSec > ceiling ? removed : kept).push(annotation);
+    }
+    return { kept, removed };
+};
+
 /** 判定用の実測値だけを出す (ゲートを通さずに分布を取りたいとき用) */
 export const measureChunk = (
     chunk: ChunkResult,
@@ -267,6 +372,9 @@ export const measureChunk = (
     const uniqueUnitCount = new Set(units).size;
     const endOffsets = chunk.annotations.map((annotation) => annotation.endOffsetSec);
     const lastAnnotationEndSec = endOffsets.length > 0 ? Math.max(...endOffsets) : null;
+    const outOfRangeCeiling = chunk.audioSec * (options.maxCoverageRatio ?? MAX_COVERAGE_RATIO);
+    const outOfRange =
+        chunk.audioSec > 0 ? endOffsets.filter((end) => end > outOfRangeCeiling).length : 0;
     const speakers = new Set(
         chunk.annotations
             .map((annotation) => annotation.speaker)
@@ -283,6 +391,11 @@ export const measureChunk = (
         charsPerSpeechSec: chunk.speechSec > 0 ? chunk.text.length / chunk.speechSec : null,
         coverageRatio:
             lastAnnotationEndSec !== null && chunk.audioSec > 0 ? lastAnnotationEndSec / chunk.audioSec : null,
+        longestSilentGapSec: chunk.speechIntervals
+            ? longestUncoveredSpeechSec(chunk.speechIntervals, chunk.annotations)
+            : null,
+        outOfRangeAnnotationCount: outOfRange,
+        outOfRangeAnnotationRatio: chunk.annotations.length > 0 ? outOfRange / chunk.annotations.length : null,
         lastAnnotationEndSec,
         speakerCount: speakers.size,
         outputTokenRatio:
@@ -307,8 +420,8 @@ export const evaluateChunkQuality = (
     const minUniqueRatio = options.minUniqueUnitRatio ?? MIN_UNIQUE_UNIT_RATIO;
     const minUnitsForUnique = options.minUnitsForUniqueRatio ?? MIN_UNITS_FOR_UNIQUE_RATIO;
     const maxRatio = options.maxCompressionRatio ?? MAX_COMPRESSION_RATIO;
-    const minCharsPerSec = options.minCharsPerSpeechSec ?? MIN_CHARS_PER_SPEECH_SEC;
-    const minCoverage = options.minCoverageRatio ?? MIN_COVERAGE_RATIO;
+    const maxSilentGap = options.maxSilentGapSec ?? MAX_SILENT_GAP_SEC;
+    const maxOutOfRangeRatio = options.maxOutOfRangeAnnotationRatio ?? MAX_OUT_OF_RANGE_ANNOTATION_RATIO;
     const minSpeakers = options.minSpeakers ?? MIN_SPEAKERS;
     const diarizationEnabled =
         options.diarizationEnabled ?? chunk.annotations.some((annotation) => annotation.speaker !== null);
@@ -389,22 +502,24 @@ export const evaluateChunkQuality = (
         });
     }
 
-    // G6: 過少出力。分母は音声長ではなく発話秒数。🔴 warn 止まり — チャンクを不合格にしない (定数のコメント参照)
-    if (metrics.charsPerSpeechSec === null) {
+    // G6: 最長穴 (本文の脱落)。🔴 発話区間が要る — `speechSec` の総量では代替できない (定数のコメント参照)
+    if (metrics.longestSilentGapSec === null) {
         add({
             gate: 'G6',
             severity: 'indeterminate',
-            reason: `発話秒数が ${chunk.speechSec} — 過少出力を測れない (VAD の値を渡すこと)`,
+            reason:
+                '発話区間 (speechIntervals) が渡されていない — 本文の脱落を検査していない。' +
+                'VAD の区間をチャンク先頭を 0 とした [開始秒, 終了秒] の並びで渡すこと',
             observed: null,
-            threshold: minCharsPerSec,
+            threshold: maxSilentGap,
         });
-    } else if (metrics.charsPerSpeechSec < minCharsPerSec) {
+    } else if (metrics.longestSilentGapSec > maxSilentGap) {
         add({
             gate: 'G6',
-            severity: 'warn',
-            reason: `発話 1 秒あたり ${metrics.charsPerSpeechSec.toFixed(2)} 文字 — 過少出力の疑い (警告のみ・不合格にはしない)`,
-            observed: metrics.charsPerSpeechSec,
-            threshold: minCharsPerSec,
+            severity: 'fail',
+            reason: `注釈が 1 本も無い発話が ${metrics.longestSilentGapSec.toFixed(1)} 秒続く — 本文が脱落している`,
+            observed: metrics.longestSilentGapSec,
+            threshold: maxSilentGap,
         });
     }
 
@@ -419,36 +534,46 @@ export const evaluateChunkQuality = (
         });
     }
 
-    // G8: カバレッジ。🔴 G1 では代替できない — 実測したカバレッジ不足の走はいずれも status: completed
+    // G8: 時刻の暴走。🔴 走ごと落とすのではなく、範囲外の注釈だけ隔離する (定数のコメント参照)。
+    //     脱落の検査は G6 が担う — ここで端点カバレッジを見ると両方向に誤る (設計 §4.1)。
     if (timestampsEnabled) {
-        if (metrics.coverageRatio === null) {
+        if (chunk.annotations.length === 0) {
+            add({
+                gate: 'G8',
+                severity: 'fail',
+                reason: '単語タイムスタンプが有効なのに注釈が 0 本 — 話者ラベルも時刻シークも成立しない',
+                observed: 0,
+                threshold: '> 0',
+            });
+        } else if (chunk.audioSec <= 0) {
+            add({
+                gate: 'G8',
+                severity: 'indeterminate',
+                reason: `音声長が ${chunk.audioSec} — 時刻の範囲を判定できない`,
+                observed: null,
+                threshold: maxCoverage,
+            });
+        } else if (metrics.outOfRangeAnnotationRatio !== null && metrics.outOfRangeAnnotationRatio > maxOutOfRangeRatio) {
             add({
                 gate: 'G8',
                 severity: 'fail',
                 reason:
-                    chunk.annotations.length === 0
-                        ? '単語タイムスタンプが有効なのに注釈が 0 本 — カバレッジを測れない'
-                        : `音声長が ${chunk.audioSec} — カバレッジを測れない`,
-                observed: null,
-                threshold: minCoverage,
+                    `注釈 ${metrics.outOfRangeAnnotationCount}/${chunk.annotations.length} 本の時刻が音声長 ` +
+                    `${chunk.audioSec}s × ${maxCoverage} を超えている — 時刻の並びごと信用できない`,
+                observed: metrics.outOfRangeAnnotationRatio,
+                threshold: maxOutOfRangeRatio,
             });
-        } else if (metrics.coverageRatio < minCoverage) {
+        } else if (metrics.outOfRangeAnnotationCount > 0) {
+            // 🔴 数本だけなら本文は使える。隔離したことを必ず記録に残す —
+            //    黙って捨てると、時刻リンクが減った理由が後から追えない。
             add({
                 gate: 'G8',
-                severity: 'fail',
-                reason: `最終注釈 ${metrics.lastAnnotationEndSec}s / 音声長 ${chunk.audioSec}s = ${metrics.coverageRatio.toFixed(3)} — 途中で打ち切られている`,
-                observed: metrics.coverageRatio,
-                threshold: minCoverage,
-            });
-        } else if (metrics.coverageRatio > maxCoverage) {
-            // 🔴 上側。時刻が音声長を大きく超える走が実在する (定数のコメント参照)。
-            //    本文も構造も正常に見えるので、ここで落とさないと誰も捕まえられない。
-            add({
-                gate: 'G8',
-                severity: 'fail',
-                reason: `最終注釈 ${metrics.lastAnnotationEndSec}s / 音声長 ${chunk.audioSec}s = ${metrics.coverageRatio.toFixed(3)} — 時刻が音声の長さを超えている`,
-                observed: metrics.coverageRatio,
-                threshold: maxCoverage,
+                severity: 'warn',
+                reason:
+                    `注釈 ${metrics.outOfRangeAnnotationCount}/${chunk.annotations.length} 本の時刻が範囲外 — ` +
+                    'その注釈だけ隔離する (本文と残りの時刻は使う)',
+                observed: metrics.outOfRangeAnnotationCount,
+                threshold: maxOutOfRangeRatio,
             });
         }
     }

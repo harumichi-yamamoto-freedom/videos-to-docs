@@ -39,7 +39,18 @@ export interface TranscribeChunkRequestBody {
      * 音声長を分母にすると正常な静かな区間を誤検出する (設計 §4.1)。
      */
     speechSec: number;
+    /**
+     * VAD で測った**発話区間**。チャンク先頭を 0 とした `[開始秒, 終了秒]` の並び。
+     *
+     * 🔴 **G6 (最長穴) はこれが無いと走らない。** `speechSec` (総量) では代替できない —
+     * 2026-09-04 の較正で、総量を分母に使う旧 G6 が**分母の側で壊れていた**ことが分かった (設計 §1.11)。
+     * 区間で持てば「注釈が空いている連続区間」だけを見るので、VAD がノイズを拾っても判定が反転しない。
+     */
+    speechIntervals: Array<[number, number]>;
 }
+
+/** 送れる発話区間の上限。これを超える並びは分割が壊れている疑いがあるので弾く */
+export const TRANSCRIBE_CHUNK_MAX_SPEECH_INTERVALS = 5000;
 
 export interface TranscribeChunkQuality {
     /** fail が 0 件なら true (warn / indeterminate は合否に影響しない) */

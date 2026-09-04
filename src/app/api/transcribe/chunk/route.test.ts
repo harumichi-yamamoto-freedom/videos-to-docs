@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { normalizeAnnotations, validateRequestBody } from './route';
+import { quarantineOutOfRangeAnnotations } from '@/lib/transcriptQuality';
 import { TRANSCRIBE_CHUNK_MAX_AUDIO_SEC } from '@/lib/transcribeChunkContract';
 
 const validBody = {
@@ -15,7 +16,21 @@ const validBody = {
     mimeType: 'audio/mpeg',
     audioSec: 1500,
     speechSec: 900,
+    // 🔴 G6 (最長穴) の入力。省略できない — 省くと G6 が走らず、脱落を誰も検査しないまま合格が返る
+    speechIntervals: [[0, 400], [500, 1000]] as Array<[number, number]>,
 };
+
+describe('🔴 G8 の隔離が応答に効いている', () => {
+    it('範囲外の時刻を持つ注釈は応答から外れる (本文はそのまま)', () => {
+        const annotations = [
+            { text: '正', startOffsetSec: 0, endOffsetSec: 10, speaker: 'spk:0' },
+            { text: '暴走', startOffsetSec: 5, endOffsetSec: 70709.9, speaker: 'spk:1' },
+        ];
+        const { kept, removed } = quarantineOutOfRangeAnnotations(annotations, 1500);
+        expect(kept).toHaveLength(1);
+        expect(removed).toHaveLength(1);
+    });
+});
 
 describe('validateRequestBody', () => {
     it('正しい本文はそのまま通る', () => {
@@ -29,6 +44,34 @@ describe('validateRequestBody', () => {
         ['本文がオブジェクトでない', 'not-an-object'],
     ])('%s は 400 で弾く', (_label, body) => {
         expect(() => validateRequestBody(body)).toThrowError();
+    });
+
+    describe('🔴 発話区間 (G6 の入力) は形まで検査する', () => {
+        it.each([
+            ['そもそも無い', (() => { const { speechIntervals: _drop, ...rest } = validBody; return rest; })()],
+            ['配列でない', { ...validBody, speechIntervals: 'x' }],
+            ['要素が 2 要素でない', { ...validBody, speechIntervals: [[0]] }],
+            ['数値でない', { ...validBody, speechIntervals: [['0', '10']] }],
+            ['NaN', { ...validBody, speechIntervals: [[0, Number.NaN]] }],
+            ['負の開始', { ...validBody, speechIntervals: [[-1, 10]] }],
+            ['長さ 0', { ...validBody, speechIntervals: [[10, 10]] }],
+            ['終端が逆転', { ...validBody, speechIntervals: [[10, 5]] }],
+            ['チャンクの外へ出る', { ...validBody, speechIntervals: [[0, 1502]] }],
+            // 🔴 順不同・重なりを通すと、最長穴が実際より短く出て G6 が静かに甘くなる
+            ['降順', { ...validBody, speechIntervals: [[500, 600], [0, 100]] }],
+            ['重なり', { ...validBody, speechIntervals: [[0, 500], [400, 600]] }],
+        ])('%s は 400', (_label, body) => {
+            expect(() => validateRequestBody(body)).toThrowError();
+        });
+
+        it('空配列は通す (完全に無音のチャンクは実在する)', () => {
+            expect(validateRequestBody({ ...validBody, speechIntervals: [] }).speechIntervals).toEqual([]);
+        });
+
+        it('隣接する区間 (前の終端 = 次の開始) は通す', () => {
+            const body = { ...validBody, speechIntervals: [[0, 500], [500, 900]] };
+            expect(validateRequestBody(body).speechIntervals).toEqual([[0, 500], [500, 900]]);
+        });
     });
 
     describe('🔴 ゲートの分母になる値は、壊れたまま奥へ通さない', () => {

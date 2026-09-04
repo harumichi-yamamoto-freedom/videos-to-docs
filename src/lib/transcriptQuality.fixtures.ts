@@ -48,6 +48,9 @@ export const makeChunk = (text: string, overrides: Partial<ChunkResult> = {}): C
         text,
         audioSec,
         speechSec: audioSec * 0.8,
+        // 🔴 既定は「音声全体が発話」= G6 (最長穴) にとって最も厳しい形。
+        //    無音を混ぜて穴を隠さない。注釈のカバレッジを下げれば必ず穴として現れる。
+        speechIntervals: [[0, audioSec]],
         annotations: makeAnnotations(audioSec, 0.99),
         ...overrides,
     };
