@@ -571,3 +571,56 @@ describe('逆方向: Markdown から時刻を読む', () => {
         expect(parseTimestampHref(undefined)).toBeNull();
     });
 });
+
+/**
+ * 🔴 フォールバックした区間を**本文に出す**ことの錠（設計 §3.7）。
+ * ログにだけ残しても利用者には見えず、用語の表記が揺れている理由が分からない。
+ */
+describe('🔴 フォールバック区間の注記', () => {
+    const merged = {
+        segments: [
+            { startSec: 0, endSec: 5, speaker: 'spk:0', text: '前半です。' },
+            { startSec: 600, endSec: 605, speaker: 'spk:1', text: '後半です。' },
+        ],
+        gaps: [],
+    } as unknown as Parameters<typeof toTranscriptMarkdown>[0];
+
+    it('区間の開始位置に注記が入り、本文は残る', () => {
+        const md = toTranscriptMarkdown(merged, {
+            fallbackRanges: [{ startSec: 600, endSec: 1200 }],
+        });
+        expect(md).toContain('前半です。');
+        expect(md).toContain('後半です。');
+        expect(md).toContain('別の文字起こしサービスで処理しました');
+        // 注記は後半の手前に出る
+        expect(md.indexOf('別の文字起こし')).toBeLessThan(md.indexOf('後半です。'));
+    });
+
+    it('🔴 欠落の注記と文言を分ける — 「失敗した」と読ませない', () => {
+        const md = toTranscriptMarkdown(merged, { fallbackRanges: [{ startSec: 600, endSec: 1200 }] });
+        expect(md).not.toContain('文字起こしできませんでした');
+        expect(md).toContain('用語集の表記が反映されていない場合があります');
+    });
+
+    it('🔴 最後のチャンクがフォールバックしても注記が消えない', () => {
+        // 差し込みを「次の segment の手前」だけで行うと、末尾の区間で黙って落ちる
+        const md = toTranscriptMarkdown(merged, {
+            fallbackRanges: [{ startSec: 3000, endSec: 3600 }],
+        });
+        expect(md).toContain('別の文字起こしサービスで処理しました');
+    });
+
+    it('フォールバックが無ければ、注記は1つも出ない（既存の描画と同じ）', () => {
+        const withOption = toTranscriptMarkdown(merged, { fallbackRanges: [] });
+        const without = toTranscriptMarkdown(merged);
+        expect(withOption).toBe(without);
+        expect(withOption).not.toContain('別の文字起こしサービス');
+    });
+
+    it('複数区間を時刻順に出す', () => {
+        const md = toTranscriptMarkdown(merged, {
+            fallbackRanges: [{ startSec: 1200, endSec: 1800 }, { startSec: 600, endSec: 1200 }],
+        });
+        expect(md.indexOf('10:00')).toBeLessThan(md.indexOf('20:00'));
+    });
+});

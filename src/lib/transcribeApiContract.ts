@@ -34,8 +34,16 @@ export const TRANSCRIBE_MODE_TYPE = 'verbatim';
 export const TRANSCRIBE_DIARIZATION_MODE = 'speaker';
 export const TRANSCRIBE_TIMESTAMP_GRANULARITIES = ['word'] as const;
 
-/** 入力音声は Files API 経由に固定 (インラインは実務上約 20MB/15 分が上限で、25 分チャンクは入らない) */
-export type TranscribeTransport = 'files_api';
+/**
+ * 音声をどの経路で送ったか。
+ * - `files_api`: Gemini。インラインは実務上約 20MB/15 分が上限なので Files API 経由に固定
+ * - `mai_multipart`: MAI-Transcribe-2 (Azure)。multipart で直接送る
+ *
+ * 🔴 **どちらのエンジンが起こしたかを、ここで必ず区別できるようにしておく**（設計 §3.7）。
+ * 用語集は MAI でしか効かないので、フォールバックした区間だけ表記の揺れが残る。
+ * 記録が無いと、なぜその区間だけ揺れているのかを後から追えない。
+ */
+export type TranscribeTransport = 'files_api' | 'mai_multipart';
 
 /** リクエスト JSON の形 (実測で通る形をそのまま型にしたもの) */
 export interface TranscribeRequestBody {

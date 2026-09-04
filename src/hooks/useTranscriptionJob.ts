@@ -19,6 +19,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { uploadAudioToStorage, deleteAudioFromStorage } from '@/lib/storage';
 import { createLogger } from '@/lib/logger';
+import type { TranscribeEngine } from '@/lib/maiTranscribeContract';
 import {
     TRANSCRIBE_CHUNK_API_PATH,
     TRANSCRIBE_CHUNK_MAX_AUDIO_SEC,
@@ -459,12 +460,18 @@ export interface ChunkAttemptRecord {
     /** 🔴 0 でない = 暗黙キャッシュに当たった = 実際には測り直していない (設計 §3.3) */
     cachedTokens?: number;
     elapsedMs?: number;
+    /** この試行を実際に起こしたエンジン (設計 §3.7) */
+    engine?: TranscribeEngine;
+    /** MAI が落ちて Gemini に回ったときの理由 */
+    fallbackReason?: string;
     error?: string;
 }
 
 export interface TranscriptionChunkResult {
     index: number;
     status: 'completed' | 'failed';
+    /** この本文を起こしたエンジン。失敗したチャンクでは undefined */
+    engine?: TranscribeEngine;
     startSec: number;
     endSec: number;
     text: string;
@@ -497,6 +504,11 @@ export interface TranscriptionJobResult {
     failedChunkIndexes: number[];
     /** 🔴 暗黙キャッシュに当たった走。「再試行したが測り直していない」の証拠 */
     cachedRuns: { chunkIndex: number; attempt: number; cachedTokens: number }[];
+    /**
+     * 🔴 MAI が落ちて Gemini で起こしたチャンク（設計 §3.7）。
+     * 用語集は MAI でしか効かないので、**ここに出てくる区間だけ用語の反映が弱い**。
+     */
+    fallbackChunks: { chunkIndex: number; startSec: number; endSec: number; reason?: string }[];
     merged: MergedTranscript;
     invariants: MergeInvariantResult;
     markdown: string;
@@ -614,6 +626,8 @@ const runChunk = async (
             );
             record.quality = response.quality;
             record.cachedTokens = response.cachedTokens;
+            record.engine = response.engine;
+            if (response.fallbackReason !== undefined) record.fallbackReason = response.fallbackReason;
             record.elapsedMs = response.elapsedMs;
 
             if (response.quality.passed) {
@@ -626,6 +640,7 @@ const runChunk = async (
                     annotations: response.annotations,
                     attempts,
                     servedFromCache: (response.cachedTokens ?? 0) > 0,
+                    engine: response.engine,
                 };
             }
         } catch (error) {
@@ -734,6 +749,19 @@ export const runTranscriptionJob = async (
         const merged = mergeTranscriptChunks(mergeChunks);
         const invariants = checkMergeInvariants(merged, mergeChunks);
         const failedChunkIndexes = chunks.filter((c) => c.status === 'failed').map((c) => c.index);
+        // 🔴 フォールバックしたチャンクを必ず数える。用語集は MAI でしか効かないので、
+        //    ここに出てくる区間だけ用語の反映が弱い (設計 §3.7)。
+        const fallbackChunks = chunks
+            .filter((chunk) => chunk.status === 'completed' && chunk.engine === 'gemini')
+            .map((chunk) => {
+                const last = chunk.attempts[chunk.attempts.length - 1];
+                return {
+                    chunkIndex: chunk.index,
+                    startSec: chunk.startSec,
+                    endSec: chunk.endSec,
+                    ...(last?.fallbackReason !== undefined && { reason: last.fallbackReason }),
+                };
+            });
         const cachedRuns = chunks.flatMap((chunk) =>
             chunk.attempts
                 .filter((attempt) => (attempt.cachedTokens ?? 0) > 0)
@@ -753,9 +781,15 @@ export const runTranscriptionJob = async (
             chunks,
             failedChunkIndexes,
             cachedRuns,
+            fallbackChunks,
             merged,
             invariants,
-            markdown: toTranscriptMarkdown(merged, markdownOptions),
+            // 🔴 フォールバック区間は**本文に注記として出す**。ログだけだと利用者に見えず、
+            //    用語の表記が揺れている理由が分からない（設計 §3.7）
+            markdown: toTranscriptMarkdown(merged, {
+                ...markdownOptions,
+                fallbackRanges: fallbackChunks,
+            }),
         };
     } finally {
         // 🔴 チャンク音声は元音声より本数が増える。成功・失敗・中断のいずれでも消す

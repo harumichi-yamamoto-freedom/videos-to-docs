@@ -299,6 +299,15 @@ export interface TranscriptMarkdownOptions {
      * 同じ話者でもこの秒数より長く空いたら段落を分ける。既定は分けない（話者が変わったときだけ分ける）。
      */
     paragraphBreakGapSec?: number;
+    /**
+     * 🔴 主エンジン (MAI) が落ちて Gemini で起こした区間（設計 §3.7）。
+     *
+     * **用語集は MAI でしか効かない**ので、この区間だけ用語の反映が弱い。
+     * ログにだけ残しても利用者には見えないため、**本文に注記として出す**。
+     * 表記が揺れている理由が読み手に分かるようにするのが目的で、
+     * 欠落（`gaps`）とは別物なので文言も分ける。
+     */
+    fallbackRanges?: readonly { startSec: number; endSec: number }[];
 }
 
 interface Paragraph {
@@ -312,12 +321,25 @@ interface Paragraph {
 export const formatGapNote = (gap: MergedGap): string =>
     `　　　⚠ ${formatTimestamp(gap.startSec)} 〜 ${formatTimestamp(gap.endSec)} は文字起こしできませんでした。［再試行］`;
 
+/**
+ * フォールバック区間の注記。
+ * 🔴 欠落（`formatGapNote`）と混同させない — **本文は取れている**。
+ * 「失敗した」と読めると、利用者が要らない再試行をする。
+ */
+export const formatFallbackNote = (range: { startSec: number; endSec: number }): string =>
+    `　　　ⓘ ${formatTimestamp(range.startSec)} 〜 ${formatTimestamp(range.endSec)} は`
+    + `別の文字起こしサービスで処理しました。用語集の表記が反映されていない場合があります。`;
+
 /** 結合結果を、既存の文書としてそのまま保存できる Markdown にする */
 export const toTranscriptMarkdown = (
     merged: MergedTranscript,
     options: TranscriptMarkdownOptions = {},
 ): string => {
-    const { speakerLabels = {}, paragraphBreakGapSec = Number.POSITIVE_INFINITY } = options;
+    const {
+        speakerLabels = {},
+        paragraphBreakGapSec = Number.POSITIVE_INFINITY,
+        fallbackRanges = [],
+    } = options;
 
     const renderParagraph = (paragraph: Paragraph): string => {
         const label = paragraph.speaker
@@ -328,9 +350,11 @@ export const toTranscriptMarkdown = (
 
     // 失敗チャンクの注記は、その区間の位置（開始秒）に差し込む。注記は必ず段落を分ける
     const gaps = [...merged.gaps].sort((a, b) => a.startSec - b.startSec);
+    const fallbacks = [...fallbackRanges].sort((a, b) => a.startSec - b.startSec);
     const blocks: string[] = [];
     let current: Paragraph | null = null;
     let gapCursor = 0;
+    let fallbackCursor = 0;
 
     const flush = () => {
         if (current) blocks.push(renderParagraph(current));
@@ -342,6 +366,13 @@ export const toTranscriptMarkdown = (
             flush();
             blocks.push(formatGapNote(gaps[gapCursor]));
             gapCursor += 1;
+        }
+        // フォールバック区間の注記も、その区間の開始位置に差し込む
+        while (fallbackCursor < fallbacks.length
+            && fallbacks[fallbackCursor].startSec <= segment.startSec) {
+            flush();
+            blocks.push(formatFallbackNote(fallbacks[fallbackCursor]));
+            fallbackCursor += 1;
         }
         const continues =
             current !== null &&
@@ -361,9 +392,15 @@ export const toTranscriptMarkdown = (
         };
     }
     flush();
+    // 🔴 末尾に残った注記も必ず出す。ここを忘れると、最後のチャンクが
+    //    フォールバックしたときだけ注記が消える（黙って情報が落ちる）
     while (gapCursor < gaps.length) {
         blocks.push(formatGapNote(gaps[gapCursor]));
         gapCursor += 1;
+    }
+    while (fallbackCursor < fallbacks.length) {
+        blocks.push(formatFallbackNote(fallbacks[fallbackCursor]));
+        fallbackCursor += 1;
     }
 
     return blocks.join('\n\n');

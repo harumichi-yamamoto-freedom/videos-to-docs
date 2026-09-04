@@ -61,6 +61,8 @@ export async function runTranscriptPipeline(
             fileName: file.name,
             chunks: job.chunks.length,
             chars: job.markdown.length,
+            // 🔴 MAI (preview) が落ちて Gemini に回った区間。用語集が効いていないのはここ (設計 §3.7)
+            fallbackChunks: job.fallbackChunks.length,
             durationSec: job.durationSec,
             noiseFloorDb: job.noiseFloorDb,
             silenceThresholdDb: job.silenceThresholdDb,
@@ -77,10 +79,16 @@ export async function runTranscriptPipeline(
                 text: job.markdown,
             };
         }
+        // 🔴 「どのモデルで起こしたか」は 1 つに決まらない。チャンクごとに MAI か Gemini かが変わる
+        //    (設計 §3.7)。全部 MAI なら MAI、1 本でも落ちていれば両方を書く。
+        //    片方だけ書くと、用語集が効いていない区間がある事実が記録から消える。
+        const usedModel = job.fallbackChunks.length === 0
+            ? 'MAI-Transcribe-2'
+            : `MAI-Transcribe-2 + gemini-3.5-transcribe (${job.fallbackChunks.length}/${job.chunks.length} 区間)`;
         return {
             success: true,
             text: job.markdown,
-            usedModel: 'gemini-3.5-transcribe',
+            usedModel,
         };
     } catch (error) {
         logger.error('文字起こしで想定外のエラー', error, { fileName: file.name });

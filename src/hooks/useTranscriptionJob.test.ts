@@ -341,6 +341,7 @@ const passing = (over: Partial<TranscribeChunkResponseBody> = {}): TranscribeChu
     annotations: [],
     quality: { passed: true, failedGates: [], warnedGates: [], indeterminateGates: [] },
     elapsedMs: 1234,
+    engine: 'mai',
     ...over,
 });
 

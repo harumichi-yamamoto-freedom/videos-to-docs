@@ -25,7 +25,7 @@ import { GenerateApiError } from '@/server/errors';
 import { assertGeminiConfigured } from '@/server/geminiServer';
 import { downloadMedia, isOwnedBySubject, parseStoragePath, statMedia } from '@/server/mediaSource';
 import { clientIpFromHeaders, enforceRateLimit } from '@/server/rateLimit';
-import { TranscribeChunkClient } from '@/server/transcribeChunk';
+import { transcribeWithFallback } from '@/server/transcribeWithFallback';
 import type { TranscriptAnnotation as RawServerAnnotation } from '@/lib/transcribeApiContract';
 import type { TranscriptAnnotation as GateAnnotation } from '@/lib/transcriptQuality';
 
@@ -167,15 +167,17 @@ export async function POST(request: Request): Promise<Response> {
         const rate = await enforceRateLimit(subject, clientIpFromHeaders(request.headers));
         const media = await downloadMedia(info);
 
-        const client = new TranscribeChunkClient();
-        const result = await client.transcribe({
+        // 🔴 主エンジンは MAI-Transcribe-2、落ちたら Gemini（設計 §3.7）。
+        //    切り替えはチャンク単位で、ジョブ全体は巻き戻さない。
+        const outcome = await transcribeWithFallback({
             bytes: media.bytes,
             mimeType: body.mimeType,
             fileName: body.fileName,
             // 🔴 クライアントの実測を優先する。注釈から導くと末尾の無音が落ち、
-            //    G8 (カバレッジ) が常に甘くなる。
+            //    G6 (最長穴) と G8 (範囲外時刻) の分母が狂う。
             audioSec: body.audioSec,
         });
+        const result = outcome.result;
 
         const { annotations, droppedCount } = normalizeAnnotations(result.annotations);
 
@@ -213,6 +215,8 @@ export async function POST(request: Request): Promise<Response> {
             },
             ...(result.cachedTokens !== undefined && { cachedTokens: result.cachedTokens }),
             elapsedMs,
+            engine: outcome.engine,
+            ...(outcome.fallbackReason !== undefined && { fallbackReason: outcome.fallbackReason }),
         };
 
         // 計器: Vercel runtime logs で 1 行 JSON として拾えるようにする (logger の整形を通さない)。
@@ -233,6 +237,10 @@ export async function POST(request: Request): Promise<Response> {
             audioSec: body.audioSec,
             speechSec: body.speechSec,
             speechIntervalCount: body.speechIntervals.length,
+            // 🔴 preview の可用性はここでしか数えられない。engine と maiAttempted を必ず載せる
+            engine: outcome.engine,
+            maiAttempted: outcome.maiAttempted,
+            fallbackReason: outcome.fallbackReason,
             // 🔴 最長穴を必ず計器に載せる。合否だけだと、閾値 30 秒が正しいかを後から見直せない
             longestSilentGapSec: quality.metrics.longestSilentGapSec,
             outOfRangeAnnotations: quality.metrics.outOfRangeAnnotationCount,
