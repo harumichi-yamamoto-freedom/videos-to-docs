@@ -23,6 +23,8 @@ import {
 } from '@/lib/firestore';
 import { createLogger } from '@/lib/logger';
 import { MarkdownDocument } from '@/components/MarkdownDocument';
+import { TranscriptAudioBar, TranscriptAwareMarkdown } from '@/components/TranscriptDocumentView';
+import { renameSpeakerLabel } from '@/components/transcriptMarkdownComponents';
 import { DocumentPrintPortal } from '@/components/DocumentPrintPortal';
 import { PdfDocumentHeader } from './PdfDocumentHeader';
 import { useDocumentPrint } from '@/hooks/useDocumentPrint';
@@ -121,6 +123,7 @@ export function DocumentDetailPanelView({
     const [pdfFont, setPdfFont] = useState<PdfFontId>(DEFAULT_PDF_FONT_ID);
     const [, setDraftRevision] = useState(0);
     const rootRef = useRef<HTMLDivElement>(null);
+
     const selectedDocumentIdRef = useRef(document?.id ?? null);
     const currentDocumentRef = useRef(document);
     const currentTitleRef = useRef(editedTitle);
@@ -560,6 +563,7 @@ export function DocumentDetailPanelView({
         }).format(date);
     };
 
+
     return (
         <div
             ref={rootRef}
@@ -734,9 +738,12 @@ export function DocumentDetailPanelView({
                             {includeMetadata && (
                                 <PdfDocumentHeader document={document} />
                             )}
-                            <MarkdownDocument
+                            <TranscriptAwareMarkdown
                                 className="pdf-markdown"
                                 markdown={document.text}
+                                onRenameSpeaker={(from, to) => {
+                                    setEditedContent(current => renameSpeakerLabel(current, from, to));
+                                }}
                             />
                         </article>
                     </div>
@@ -752,6 +759,9 @@ export function DocumentDetailPanelView({
                     </div>
                 )}
             </div>
+
+            {/* 文書に従属する細い帯。時刻リンクを持たない文書では、この要素ごと null になる */}
+            <TranscriptAudioBar document={document} />
 
             {isEditable && !isViewMode && (
                 <div className="flex items-center justify-end space-x-3 p-4 border-t bg-white">

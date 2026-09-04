@@ -31,6 +31,17 @@ export class VideoConverter {
         this.ffmpeg = new FFmpeg();
     }
 
+    /**
+     * 内部の FFmpeg インスタンスを返す。
+     *
+     * 無音走査 (`silencedetect` / `volumedetect`) を同じインスタンスで行うために公開している。
+     * 🔴 別インスタンスを立てると **wasm core をもう一度ロードする**（`toBlobURL` は都度取得するため実コストがある）。
+     * 呼び出し側は `load()` 済みであることを保証すること。
+     */
+    getFfmpeg(): FFmpeg {
+        return this.ffmpeg;
+    }
+
     async load(): Promise<void> {
         if (this.isLoaded) return;
 
