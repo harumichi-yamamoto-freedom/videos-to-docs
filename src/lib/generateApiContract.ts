@@ -15,8 +15,8 @@ export const GENERATE_API_PATH = '/api/generate';
 /** サーバが受け付ける入力メディアの MIME (Storage 上の contentType ではなく、元ファイルの種別) */
 export const GENERATE_ALLOWED_MIME_PREFIXES = ['audio/', 'video/'] as const;
 
-/** Storage 上のファイルサイズ上限 (storage.rules の 100MB と一致させる) */
-export const GENERATE_MAX_MEDIA_BYTES = 100 * 1024 * 1024;
+/** Storage 上のファイルサイズ上限 (storage.rules の 500MB と一致させる) */
+export const GENERATE_MAX_MEDIA_BYTES = 500 * 1024 * 1024;
 
 export interface GenerateRequestPrompt {
     /** 監査ログ・エラー文言用の表示名 */

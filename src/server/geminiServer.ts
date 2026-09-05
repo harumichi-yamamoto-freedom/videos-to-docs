@@ -9,6 +9,7 @@ import { resolveGeminiModel } from '@/constants/geminiModels';
 import { resolveThinkingLevelForModel, type GeminiThinkingLevel } from '@/constants/geminiThinking';
 import type { GenerateTransport, GenerateUsage } from '@/lib/generateApiContract';
 import {
+    base64LengthForBytes,
     INLINE_REQUEST_BUDGET_BYTES,
     selectMediaTransport,
     utf8ByteLength,
@@ -241,18 +242,21 @@ export class GeminiServerClient {
                 'アップロードされたファイルが空です。ファイルを選び直して、もう一度変換してください。');
         }
 
-        const base64 = bytes.toString('base64');
-        const transport: GenerateTransport = selectMediaTransport(base64.length, promptBytes);
+        // 🔴 経路（inline / Files API）は Base64 の「長さ」だけで決める。全量を先に toString('base64') すると、
+        //    ~384MiB 超で Base64 文字列が Node の最大文字列長 (536,870,888) を超え ERR_STRING_TOO_LONG で落ちる。
+        //    上限を 500MB に上げた今、この範囲が実際に来る。実際の Base64 化は inline（≤20MB 予算）のときだけ行う。
+        const base64Length = base64LengthForBytes(bytes.length);
+        const transport: GenerateTransport = selectMediaTransport(base64Length, promptBytes);
         logger.info('送信経路を決定', {
             fileName, mimeType, transport, sizeBytes: bytes.length,
-            base64LengthChars: base64.length, promptBytes, budgetBytes: INLINE_REQUEST_BUDGET_BYTES,
+            base64LengthChars: base64Length, promptBytes, budgetBytes: INLINE_REQUEST_BUDGET_BYTES,
             modelName: targetModel, thinkingLevel: usedThinkingLevel, promptName: input.prompt.name,
         });
 
         let uploaded: UploadedRef | null = null;
         try {
             const mediaPart = transport === 'inline'
-                ? { inlineData: { mimeType, data: base64 } }
+                ? { inlineData: { mimeType, data: bytes.toString('base64') } }
                 : await (async () => {
                     uploaded = await this.uploadMedia(bytes, mimeType, fileName);
                     return { fileData: { fileUri: uploaded.fileUri, mimeType: uploaded.mimeType } };

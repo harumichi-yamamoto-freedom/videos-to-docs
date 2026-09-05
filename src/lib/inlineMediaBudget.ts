@@ -78,10 +78,14 @@ export const describeInlineBudgetExceeded = (bitrate?: string): string => {
 };
 
 /**
- * そのビットレートで扱える録音の長さ (分・切り捨て)。
+ * そのビットレートで「サイズ上限から逆算した」最長録音の長さ (分・切り捨て)。
  *
  * inline 予算 (estimateInlineLimitMinutes) は Files API へ迂回すれば超えられる内部の分岐点でしかなく、
- * 利用者が実際にぶつかる壁は Storage のサイズ上限 (100MB) のほう。画面にはこちらを出す。
+ * 利用者が実際にぶつかる壁は Storage のサイズ上限 (500MB) のほう。
+ * 🔴 これは純粋にサイズ由来。上限を 500MB に上げてからは、通常のビットレートではサイズより先に
+ *    全文文字起こしの時間上限 (4 時間 = AZURE_BATCH_MAX_AUDIO_SEC) にぶつかる。画面表示はその上限と
+ *    min を取ること（ConversionSettings）。ここでその上限を混ぜないのは、生のサイズ由来値を
+ *    テスト・他用途で使えるようにするため。
  */
 export const estimateMaxRecordingMinutes = (
     bitrate: string,

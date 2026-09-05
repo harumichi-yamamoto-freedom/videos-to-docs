@@ -24,10 +24,13 @@ service firebase.storage {
       }
 
       // 作成・更新:
-      //   - ファイルサイズ上限: 100MB
+      //   - ファイルサイズ上限: 500MB（GENERATE_MAX_MEDIA_BYTES と一致させる）
+      //   - 🔴 境界は <=（ちょうど 500MB を許可）。クライアントの事前チェック（> で拒否）と
+      //     canSendAudioAsIs（<= で「そのまま送る」）はちょうど 500MB を通すため、ここも <= に揃える。
+      //     < のままだと、ちょうど 500MB の圧縮済み音声が変換を飛ばして上がり storage/unauthorized になる。
       //   - content-type: audio/* のみ許可
       allow create, update: if isOwner()
-        && request.resource.size < 100 * 1024 * 1024
+        && request.resource.size <= 500 * 1024 * 1024
         && request.resource.contentType.matches('audio/.*');
 
       // 削除:

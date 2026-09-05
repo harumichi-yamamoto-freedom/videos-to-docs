@@ -17,11 +17,11 @@ const radios = (markup: string): string[] =>
     [...markup.matchAll(/<input\b[^>]*type="radio"[^>]*>/g)].map(match => match[0]);
 
 describe('ConversionSettings (S2-1: ビットレート選択)', () => {
-    it('既定は 96k (主用途の 2〜3 時間の商談が 128k では上限に届かない)', () => {
+    it('既定は 96k (音声認識には十分。サイズ上限 500MB では 4 時間の商談も余裕で収まる)', () => {
         expect(DEFAULT_AUDIO_BITRATE).toBe('96k');
         expect(AUDIO_BITRATE_OPTIONS.map(option => option.value)).toContain(DEFAULT_AUDIO_BITRATE);
-        // 既定は 2 時間の商談をそのまま扱えること (128k の約 109 分では足りない)
-        expect(estimateMaxRecordingMinutes(DEFAULT_AUDIO_BITRATE)).toBeGreaterThanOrEqual(120);
+        // 既定は主用途の 2〜3 時間の商談（〜4 時間の文字起こし上限）をサイズ上限内で扱えること
+        expect(estimateMaxRecordingMinutes(DEFAULT_AUDIO_BITRATE)).toBeGreaterThanOrEqual(240);
     });
 
     it('64 / 96 / 128 / 192 kbps を選べる', () => {
@@ -35,12 +35,14 @@ describe('ConversionSettings (S2-1: ビットレート選択)', () => {
         expect(checked[0]).toContain('value="64k"');
     });
 
-    it('各選択肢に Storage 上限 (100MB) から逆算した「扱える録音の長さ」を出す', () => {
+    it('「扱える録音の長さ」は全文文字起こしの上限 (4時間) で頭打ちにする (500MB では全ビットレートがサイズより先に時間上限へ)', () => {
         const markup = render('96k');
-        expect(markup).toContain('約3時間38分までの録音に対応');
-        expect(markup).toContain('約2時間25分までの録音に対応');
-        expect(markup).toContain('約1時間49分までの録音に対応');
-        expect(markup).toContain('約1時間12分までの録音に対応');
+        // 500MB のサイズ上限では全ビットレートが 4 時間ぶんを超える → 表示は文字起こしの上限 4 時間で頭打ち
+        expect(markup).toContain('約4時間までの録音に対応');
+        // サイズ由来の生の長さ (18/12/9/6 時間) は出さない: 文字起こしできない長さを「対応」と誤認させないため
+        for (const stale of ['約18時間', '約12時間', '約9時間', '約6時間']) {
+            expect(markup).not.toContain(stale);
+        }
     });
 
     it('inline 予算 (Files API へ迂回すれば超えられる内部の分岐点) の分数は出さない', () => {

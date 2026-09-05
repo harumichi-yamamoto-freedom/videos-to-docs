@@ -135,12 +135,13 @@ describe('describeInlineBudgetExceeded (実行可能な文言)', () => {
 });
 
 describe('estimateMaxRecordingMinutes (画面に出す「扱える録音の長さ」)', () => {
-    it('Storage 上限 100MB から逆算する (inline 予算 16MB ではない)', () => {
-        // 100MB / (kbps*1000/8) / 60 の切り捨て。inline 予算由来の 26/17/13/8 分とは別物
-        expect(estimateMaxRecordingMinutes('64k')).toBe(218);
-        expect(estimateMaxRecordingMinutes('96k')).toBe(145);
-        expect(estimateMaxRecordingMinutes('128k')).toBe(109);
-        expect(estimateMaxRecordingMinutes('192k')).toBe(72);
+    it('Storage 上限 500MB から逆算する (inline 予算 16MB ではない)', () => {
+        // 500MB / (kbps*1000/8) / 60 の切り捨て。inline 予算由来の分数とは別物。
+        // 🔴 これは「サイズ上限から逆算した最長」。画面表示は別途、文字起こしの上限(4時間)と min を取る（ConversionSettings）。
+        expect(estimateMaxRecordingMinutes('64k')).toBe(1092);
+        expect(estimateMaxRecordingMinutes('96k')).toBe(728);
+        expect(estimateMaxRecordingMinutes('128k')).toBe(546);
+        expect(estimateMaxRecordingMinutes('192k')).toBe(364);
     });
 
     it('inline 予算の目安より必ず長い (Files API 迂回のぶん実際に扱える)', () => {
