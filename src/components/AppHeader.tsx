@@ -13,6 +13,7 @@ import AuthModal from './AuthModal';
 import PasswordChangeModal from './PasswordChangeModal';
 import DisplayNameModal from './DisplayNameModal';
 import { useAccountDeletionFlow } from './AccountDeletionFlow';
+import { ServiceContactNotice } from './ServiceContactNotice';
 import { subscribeToPendingSubordinateRelationships } from '@/lib/relationships';
 import { useSystemNotifications } from '@/hooks/useSystemNotifications';
 import { Button } from '@/components/ui/Button';
@@ -471,11 +472,14 @@ export const AppHeader: React.FC = () => {
                                 )}
                             </IconButton>
 
+                            {/* 高さの上限は「画面 − ヘッダー」。ヘッダーは連絡先バーの分だけ 5rem より高く、
+                                バーが折り返すと更に伸びるので、定数ではなく包含ブロック(sticky な header)の
+                                高さ = 100% を引く。絶対配置の子では % が包含ブロックの高さに解決する。 */}
                             <div
                                 id="app-header-mobile-menu"
                                 aria-hidden={!showMobileMenu}
                                 inert={!showMobileMenu}
-                                className={`absolute inset-x-0 top-full z-50 max-h-[calc(100dvh-5rem)] overflow-y-auto overscroll-contain border-y border-border bg-surface shadow-elevation-overlay transition-all duration-150 ease-out motion-reduce:transition-none ${showMobileMenu
+                                className={`absolute inset-x-0 top-full z-50 max-h-[calc(100dvh-100%)] overflow-y-auto overscroll-contain border-y border-border bg-surface shadow-elevation-overlay transition-all duration-150 ease-out motion-reduce:transition-none ${showMobileMenu
                                     ? 'visible translate-y-0 opacity-100'
                                     : 'invisible pointer-events-none -translate-y-1 opacity-0'
                                     }`}
@@ -650,6 +654,10 @@ export const AppHeader: React.FC = () => {
                     </div>
                 </div>
             </div>
+
+            {/* サービス不具合の連絡先。スクロールしても見えるよう sticky なヘッダーの中に置き、
+                読み上げ順ではナビとアカウント操作の後・本文の前に 1 回だけ現れる。 */}
+            <ServiceContactNotice />
 
             <AuthModal
                 isOpen={showAuthModal}
