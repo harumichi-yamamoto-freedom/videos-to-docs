@@ -52,12 +52,19 @@ export async function createProcessingDocument(input: CreateProcessingDocInput):
     return ref.id;
 }
 
-/** 文書作成後に採番されたジョブを紐付ける。削除済み・所有者変更済みの文書は触らない。 */
+/**
+ * 文書作成後に採番されたジョブを紐付ける。削除済み・所有者変更済みの文書は触らない。
+ * 🔴 存在・所有者確認と書込みを**同一トランザクション**で行う。get→set の隙に文書が削除されると、
+ *    `{ jobId }` だけの文書が再作成され「削除済み文書は触らない」不変条件を破るため（他の書込みと同じ規律）。
+ */
 export async function attachJobToDocument(docId: string, jobId: string, expectedOwnerId: string): Promise<void> {
-    const ref = getAdminFirestore().collection(TRANSCRIPTIONS_COLLECTION).doc(docId);
-    const snap = await ref.get();
-    if (!snap.exists || snap.data()?.ownerId !== expectedOwnerId) return;
-    await ref.set({ jobId }, { merge: true });
+    const db = getAdminFirestore();
+    const ref = db.collection(TRANSCRIPTIONS_COLLECTION).doc(docId);
+    await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists || snap.data()?.ownerId !== expectedOwnerId) return;
+        tx.set(ref, { jobId }, { merge: true });
+    });
 }
 
 /** 完了: 本文を書き込み、status を completed にする。 */

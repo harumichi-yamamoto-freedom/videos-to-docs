@@ -27,9 +27,16 @@ beforeEach(() => {
         exists: doubles.document !== undefined,
         data: () => doubles.document,
     }));
-    doubles.set.mockImplementation(async (data, options) => {
+    doubles.set.mockImplementation((data, options) => {
         doubles.document = options?.merge ? { ...doubles.document, ...data } : data;
     });
+    // runTransaction は tx.get / tx.set を同じ doubles.document に対して動かす（本物の意味論を模す）
+    doubles.runTransaction.mockImplementation(async (fn) => fn({
+        get: doubles.get,
+        set: (_ref: unknown, data: Record<string, unknown>, options?: { merge?: boolean }) => {
+            doubles.set(data, options);
+        },
+    }));
 });
 
 describe('attachJobToDocument', () => {
@@ -40,7 +47,8 @@ describe('attachJobToDocument', () => {
         expect(doubles.document).toEqual({
             ownerId: 'synthetic-owner', title: '合成の文書', status: 'processing', jobId: 'synthetic-job',
         });
-        expect(doubles.runTransaction).not.toHaveBeenCalled();
+        // 🔴 存在確認と書込みは同一トランザクション（get→set の隙での再作成を防ぐ）
+        expect(doubles.runTransaction).toHaveBeenCalledTimes(1);
     });
 
     it.each([
