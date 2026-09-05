@@ -4,7 +4,6 @@ import { GeminiClient } from '@/lib/gemini';
 import { FileWithPrompts, FileProcessingStatus, DebugErrorMode } from '@/types/processing';
 import { convertVideoToAudioSegments, resumeVideoConversion } from '@/lib/videoConversionService';
 import { canSendAudioAsIs } from '@/lib/mediaInput';
-import { TRANSCRIPT_PROMPT_ID } from '@/lib/transcriptPrompt';
 import type { JobClaim, TranscriptionJobRef } from '@/hooks/useVideoProcessing';
 import { createLogger } from '@/lib/logger';
 
@@ -161,18 +160,11 @@ export const useProcessingWorkflow = ({
         const releaseAll = () => claims.forEach(claim => claim.release());
 
         try {
-            // H6: エンジンの初期化も失敗を捕捉できる位置に置き、
-            //     音声のみの場合は FFmpeg を読み込まない
-            // 🔴 FFmpeg が要る条件は 2 つあり、**どちらか一方でも当てはまれば読み込む**。
-            //  (1) 変換が要る入力（動画、または上限を超える音声）
-            //  (2) 🔴 **全文文字起こしを選んでいる**。分割パイプラインは入力が音声でも
-            //      チャンクの切り出しと無音走査に FFmpeg を使う（設計 §3.1）。
-            //      ここを (1) だけにすると、mp3 を上げたときに converter が null のまま
-            //      呼ばれ、「音声変換の準備ができていません」で必ず失敗する。
-            //      実害 (2026-09-04): 本番で音声入力の全文文字起こしが一度も動いていなかった。
+            // H6: エンジンの初期化も失敗を捕捉できる位置に置く。
+            // バッチ経路は音声を分割せず、そのまま送れる入力に FFmpeg は不要。
+            // 動画や上限を超える音声など、実際に MP3 変換する入力だけ読み込む。
             const needsFfmpeg = !sendVideoDirectly
-                && selectedFiles.some(file =>
-                    !canSendAudioAsIs(file.file) || file.selectedPromptIds.includes(TRANSCRIPT_PROMPT_ID));
+                && selectedFiles.some(file => !canSendAudioAsIs(file.file));
 
             try {
                 await prepareEngines(needsFfmpeg);

@@ -14,6 +14,26 @@ const serviceMocks = vi.hoisted(() => ({
     ffmpegLoad: vi.fn(),
 }));
 
+const ffmpegMocks = vi.hoisted(() => ({
+    exec: vi.fn().mockResolvedValue(0),
+}));
+
+vi.mock('@ffmpeg/ffmpeg', () => ({
+    FFmpeg: class FFmpeg {
+        load = vi.fn().mockResolvedValue(undefined);
+        exec = ffmpegMocks.exec;
+        writeFile = vi.fn().mockResolvedValue(undefined);
+        readFile = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
+        deleteFile = vi.fn().mockResolvedValue(undefined);
+        on = vi.fn();
+        off = vi.fn();
+    },
+}));
+vi.mock('@ffmpeg/util', () => ({
+    fetchFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
+    toBlobURL: vi.fn().mockResolvedValue('blob:synthetic-ffmpeg'),
+}));
+
 vi.mock('react', () => ({
     useCallback: <T extends (...args: never[]) => unknown>(callback: T) => callback,
     useState: <T>(initialValue: T) => {
@@ -180,6 +200,33 @@ beforeEach(() => {
     serviceMocks.ffmpegLoad.mockResolvedValue(undefined);
 });
 
+describe('Azure batch 用の MP3 変換', () => {
+    it.each(['whole', 'segment'] as const)('%s 変換は指定した bitrate / sampleRate を保ち mono を出力する', async (mode) => {
+        const { VideoConverter } = await vi.importActual<typeof import('@/lib/ffmpeg')>('@/lib/ffmpeg');
+        const converter = new VideoConverter();
+        const file = createFile('synthetic.mp4', 'video/mp4').file;
+        const options = { bitrate: '96k', sampleRate: 16000 };
+
+        const result = mode === 'segment'
+            ? await converter.convertSegmentToMp3(file, 5, 20, 0, options)
+            : await converter.convertToMp3(file, options);
+
+        expect(result.success).toBe(true);
+        expect(result.outputBlob?.type).toBe('audio/mpeg');
+        expect(ffmpegMocks.exec).toHaveBeenCalledOnce();
+        expect(ffmpegMocks.exec).toHaveBeenCalledWith([
+            ...(mode === 'segment' ? ['-ss', '5', '-to', '20'] : []),
+            '-i', expect.stringMatching(/^input_.*\.mp4$/),
+            '-vn',
+            '-acodec', 'libmp3lame',
+            '-ac', '1',
+            '-ab', '96k',
+            '-ar', '16000',
+            '-y', expect.stringMatching(/^output_.*\.mp3$/),
+        ]);
+    });
+});
+
 describe('handleStartProcessing cancellation', () => {
     it('writes a terminal status for files still waiting when the run is canceled', async () => {
         const harness = useWorkflowHarness();
@@ -256,19 +303,21 @@ describe('handleStartProcessing failure reporting', () => {
         expect(serviceMocks.convertVideoToAudioSegments).not.toHaveBeenCalled();
     });
 
-    it('🔴 全文文字起こしを選んだら、入力が音声でも FFmpeg を読み込む', async () => {
-        // 実害 (2026-09-04): 本番で mp3 を上げると converter が null のまま分割パイプラインが
-        // 呼ばれ、「音声変換の準備ができていません」で必ず失敗していた。
-        // 分割パイプラインは入力が音声でもチャンクの切り出しと無音走査に FFmpeg を使う。
+    it('全文文字起こしでも、そのまま送れる音声には FFmpeg を読み込まない', async () => {
+        // バッチ経路では分割・無音走査をせず、元の音声をそのままアップロードする。
         const harness = useWorkflowHarness();
         const file = createFile('talk.mp3', 'audio/mpeg');
         file.selectedPromptIds = [TRANSCRIPT_PROMPT_ID];
+        serviceMocks.ffmpegLoad.mockRejectedValue(new Error('wasm unavailable'));
 
-        await harness.workflow.handleStartProcessing([file], ['f1'], BITRATE, SAMPLE_RATE);
+        const result = await harness.workflow.handleStartProcessing([file], ['f1'], BITRATE, SAMPLE_RATE);
 
-        expect(serviceMocks.ffmpegLoad).toHaveBeenCalled();
-        // 変換自体は要らない（そのまま送れる音声なので）
+        expect(result.ok).toBe(true);
+        expect(serviceMocks.ffmpegLoad).not.toHaveBeenCalled();
         expect(serviceMocks.convertVideoToAudioSegments).not.toHaveBeenCalled();
+        expect(harness.processTranscription).toHaveBeenCalledWith(
+            expect.objectContaining({ file }), file.file, BITRATE, SAMPLE_RATE
+        );
     });
 
     it('does not load FFmpeg when every input is audio', async () => {
@@ -496,7 +545,9 @@ describe('conversion queue wait limit (V8)', () => {
         } finally {
             vi.useRealTimers();
         }
-    });
+    // 🔴 フェイクタイマー間の実マイクロタスクが全体実行時の並列負荷で遅延する。
+    //    既定 5000ms は超えることがある（単体では約 1s）。余裕を持たせる。
+    }, 20_000);
 });
 
 

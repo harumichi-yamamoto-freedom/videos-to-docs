@@ -14,7 +14,7 @@ import {
 } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
 import { isTranscriptPrompt } from '@/lib/transcriptPrompt';
-import { runTranscriptPipeline } from '@/hooks/transcriptPipelineAdapter';
+import { runBatchTranscription } from '@/hooks/batchTranscriptionClient';
 import { validatePromptPermission } from '@/lib/promptPermissions';
 import { getCurrentUserId } from '@/lib/auth';
 import { createLogger } from '@/lib/logger';
@@ -62,6 +62,19 @@ export const resolveMediaMimeType = (
     blobType: string,
     originalFileType: 'video' | 'audio',
 ): string => blobType || (originalFileType === 'video' ? 'video/mp4' : 'audio/mpeg');
+
+/**
+ * 音声長（秒）の見積り。ffmpeg も Audio API も使わず、**サイズ ÷ ビットレート**で出す。
+ * 🔴 これは非同期バッチ提出時の「240 分上限」判定と記録のためだけの概算。
+ *    正確な長さは Azure の結果（durationMilliseconds）が正で、文書側はそちらを使う。
+ * bitrate は '96k' のような表記。読めなければ 96k とみなす（保守的に長めに出る側）。
+ */
+export const estimateAudioSec = (blob: Blob | null, bitrate: string | undefined): number => {
+    if (!blob || blob.size <= 0) return 0;
+    const kbps = Number.parseInt(bitrate ?? '', 10);
+    const bitsPerSec = (Number.isFinite(kbps) && kbps > 0 ? kbps : 96) * 1000;
+    return Math.round((blob.size * 8) / bitsPerSec);
+};
 
 export interface JobClaim {
     signal: AbortSignal;
@@ -585,6 +598,55 @@ export const useVideoProcessing = (
             const runPrompt = async (prompt: Prompt) => {
                 const promptId = prompt.id!;
                 const idempotencyKey = `${fileId}::${promptId}`;
+
+                // 🔴 全文文字起こしは**非同期バッチ経路**（設計 §3.7 改訂・2026-09-05）。
+                //    音声を分割せず Azure バッチへ 1 本投げ、状態確認で完了を拾う。
+                //    文書はサーバが作って完成させる（タブ非依存）ので、ここでは saveTranscription を呼ばない。
+                //    従来の同期チャンク方式（runTranscriptPipeline）が抱えていたタイムアウト・分割・
+                //    無音での全滅・部分結果破棄は、この経路では構造的に起きない。
+                if (isTranscriptPrompt(prompt)) {
+                    if (!savedKeysRef.current.has(idempotencyKey)) {
+                        throwIfAborted();
+                        const media = uploadedMedia;
+                        if (!media) {
+                            throw new PromptPhaseError(
+                                'upload',
+                                '送信用の音声データが準備されていません。音声変換からやり直してください。'
+                            );
+                        }
+                        markPromptState(fileId, promptId, 'generating');
+                        const result = await runBatchTranscription({
+                            storagePath: media.storagePath,
+                            fileName: file.file.name,
+                            mimeType: media.mimeType,
+                            audioSec: estimateAudioSec(audioBlob, bitrate),
+                            promptName: prompt.name,
+                            originalFileType,
+                            signal,
+                        });
+                        if (!result.success) {
+                            // 🔴 失敗しても文書は消えない（サーバが理由つきで残す）。ここでは経過を伝える。
+                            throw new PromptPhaseError(
+                                'text_generation',
+                                result.pending
+                                    ? '文字起こしがまだ完了していません。しばらくしてから文書一覧でご確認ください。'
+                                    : (result.error || '文字起こしに失敗しました。')
+                            );
+                        }
+                        savedKeysRef.current.add(idempotencyKey);
+                    }
+                    savedPromptIds.push(promptId);
+                    updateStatus(fileId, status => ({
+                        ...withPromptStates(status, { ...status.promptStates, [promptId]: 'saved' }),
+                        transcriptionCount: status.transcriptionCount + 1,
+                        completedPromptIds: status.completedPromptIds.includes(promptId)
+                            ? status.completedPromptIds
+                            : [...status.completedPromptIds, promptId],
+                    }));
+                    onDocumentSaved?.();
+                    return;
+                }
+
                 let draft = draftsRef.current.get(idempotencyKey);
 
                 if (!draft) {
@@ -602,24 +664,19 @@ export const useVideoProcessing = (
                     //    ここで分けると、**下流の下書き・保存・冪等・中断はすべて既存のまま効く**。
                     //    戻り値を TranscriptionResult に揃えてあるので、以降の処理は分岐を知らない。
                     //    中止は fetch に渡して切る。サーバ側の処理は継続し得る (仕様として許容)
-                    const transcriptionResult = isTranscriptPrompt(prompt)
-                        ? await runTranscriptPipeline({
-                            file: file.file,
-                            converter: converterRef.current,
-                            signal,
-                        })
-                        : await geminiClientRef.current!.generateDocument({
-                            storagePath: media.storagePath,
-                            fileName: file.file.name,
-                            mimeType: media.mimeType,
-                            prompt: {
-                                name: prompt.name,
-                                content: prompt.content,
-                                model: prompt.model,
-                                thinkingLevel: prompt.thinkingLevel,
-                            },
-                            signal,
-                        });
+                    // 全文文字起こしは上の非同期バッチ経路で処理済み。ここは通常の文書生成のみ。
+                    const transcriptionResult = await geminiClientRef.current!.generateDocument({
+                        storagePath: media.storagePath,
+                        fileName: file.file.name,
+                        mimeType: media.mimeType,
+                        prompt: {
+                            name: prompt.name,
+                            content: prompt.content,
+                            model: prompt.model,
+                            thinkingLevel: prompt.thinkingLevel,
+                        },
+                        signal,
+                    });
 
                     videoProcessingLogger.info('文書生成 API の応答', {
                         fileId,
