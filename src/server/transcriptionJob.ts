@@ -16,7 +16,15 @@ const logger = createLogger('server/transcriptionJob');
 
 export const TRANSCRIPTION_JOBS_COLLECTION = 'transcriptionJobs';
 
-export type TranscriptionJobStatus = 'running' | 'succeeded' | 'failed';
+/**
+ * `finalizing` は確定処理中の一時状態（内部用）。
+ * 🔴 並行に status が 2 回叩かれても確定を 1 回にするための CAS ロック（設計 §3.7・冪等性）。
+ *    利用者向けの公開ステータスは running / succeeded / failed の 3 値だけ（finalizing は running 相当に見せる）。
+ */
+export type TranscriptionJobStatus = 'running' | 'finalizing' | 'succeeded' | 'failed';
+
+/** finalizing のまま放置されたジョブ（確定中にプロセスが落ちた等）を再確定できるようにするリース期限 */
+export const FINALIZE_LEASE_MS = 3 * 60 * 1000;
 
 export interface TranscriptionJob {
     id: string;
@@ -66,7 +74,7 @@ const parseJob = (id: string, data: FirebaseFirestore.DocumentData | undefined):
         ownerType: data.ownerType === 'user' ? 'user' : 'guest',
         docId: data.docId,
         azureSelfUrl: data.azureSelfUrl,
-        status: (['running', 'succeeded', 'failed'] as const).includes(data.status) ? data.status : 'running',
+        status: (['running', 'finalizing', 'succeeded', 'failed'] as const).includes(data.status) ? data.status : 'running',
         audioSec: typeof data.audioSec === 'number' ? data.audioSec : 0,
         storagePath: String(data.storagePath ?? ''),
         promptName: String(data.promptName ?? ''),
@@ -93,6 +101,24 @@ export async function createTranscriptionJob(input: CreateTranscriptionJobInput)
 export async function getTranscriptionJob(jobId: string): Promise<TranscriptionJob | null> {
     const snap = await db().collection(TRANSCRIPTION_JOBS_COLLECTION).doc(jobId).get();
     return parseJob(jobId, snap.exists ? snap.data() : undefined);
+}
+
+/** 確定権を取得する。処理中のリースが切れた場合だけ、別リクエストで再取得できる。 */
+export async function claimJobForFinalize(jobId: string): Promise<TranscriptionJob | null> {
+    const firestore = db();
+    const ref = firestore.collection(TRANSCRIPTION_JOBS_COLLECTION).doc(jobId);
+    return firestore.runTransaction(async tx => {
+        const snap = await tx.get(ref);
+        const job = parseJob(jobId, snap.exists ? snap.data() : undefined);
+        if (!job || job.status === 'succeeded' || job.status === 'failed') return null;
+
+        const nowMs = Date.now();
+        if (job.status === 'finalizing' && nowMs - job.updatedAtMs <= FINALIZE_LEASE_MS) return null;
+
+        tx.update(ref, { status: 'finalizing', updatedAt: FieldValue.serverTimestamp() });
+        // serverTimestamp は commit 時に確定するため、戻り値には取得時刻を使う。
+        return { ...job, status: 'finalizing', updatedAtMs: nowMs };
+    });
 }
 
 export async function updateTranscriptionJob(

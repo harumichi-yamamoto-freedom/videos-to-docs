@@ -32,8 +32,8 @@ export const dynamic = 'force-dynamic';
 
 const logger = createLogger('api/transcribe/submit');
 
-/** 署名 URL の有効期限。ジョブが完了して結果を取り終えるまで持てば十分（余裕をみて） */
-const SIGNED_URL_TTL_MS = 6 * 60 * 60 * 1000;
+/** Azure batch は完了まで最大24時間。長尺は内部再試行で音源取得が6時間を超え得るため、24時間有効にする。 */
+const SIGNED_URL_TTL_MS = 24 * 60 * 60 * 1000;
 
 const jsonResponse = (body: unknown, status: number, extraHeaders: Record<string, string> = {}): Response =>
     new Response(JSON.stringify(body), {

@@ -156,7 +156,10 @@ export async function fetchBatchResult(selfUrl: string, credentials: AzureCreden
 /** ジョブと結果ファイルを削除する（TTL でも消えるが、取り終えたら即消す）。失敗は無視。 */
 export async function deleteBatchJob(selfUrl: string, credentials: AzureCredentials): Promise<void> {
     try {
-        await azureFetch(withApiVersion(selfUrl), credentials, { method: 'DELETE' });
+        const { status } = await azureFetch(withApiVersion(selfUrl), credentials, { method: 'DELETE' });
+        if ((status < 200 || status >= 300) && status !== 404) {
+            logger.warn('バッチジョブの削除に失敗（TTL に任せる）', { status });
+        }
     } catch (error) {
         logger.warn('バッチジョブの削除に失敗（TTL に任せる）', {
             reason: error instanceof Error ? error.message : String(error),
@@ -191,8 +194,13 @@ export function parseBatchResult(result: AzureBatchResult): ParsedBatch {
     let droppedPhrases = 0;
 
     for (const phrase of phrases) {
-        const offsetMs = num(phrase.offsetMilliseconds);
-        const durationMs = num(phrase.durationMilliseconds);
+        const offsetTicks = num(asRecord(phrase)?.offsetInTicks);
+        const durationTicks = num(asRecord(phrase)?.durationInTicks);
+        // Azure の ticks は 100 ns 単位。ms が読めなければ ticks から補う。
+        const offsetMs = num(phrase.offsetMilliseconds)
+            ?? (offsetTicks !== undefined ? offsetTicks / 10_000 : undefined);
+        const durationMs = num(phrase.durationMilliseconds)
+            ?? (durationTicks !== undefined ? durationTicks / 10_000 : undefined);
         if (offsetMs === undefined || durationMs === undefined) {
             droppedPhrases += 1;
             continue;

@@ -55,31 +55,64 @@ export async function completeTranscriptionDocument(
     docId: string,
     transcription: string,
     generatedByModel: string,
+    expectedOwnerId: string,
 ): Promise<void> {
-    await getAdminFirestore().collection(TRANSCRIPTIONS_COLLECTION).doc(docId).set(
-        {
+    const db = getAdminFirestore();
+    const ref = db.collection(TRANSCRIPTIONS_COLLECTION).doc(docId);
+    const completed = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) {
+            logger.warn('削除済みの文書の完成をスキップ', { docId });
+            return false;
+        }
+        const doc = snap.data();
+        if (doc?.ownerId !== expectedOwnerId) {
+            logger.warn('所有者が異なる文書の完成をスキップ', { docId });
+            return false;
+        }
+        if (doc.status !== 'processing') {
+            logger.warn('処理中でない文書の完成をスキップ', { docId });
+            return false;
+        }
+        tx.set(ref, {
             transcription,
             generatedByModel,
             status: 'completed' satisfies TranscriptionDocStatus,
             updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-    );
-    logger.info('文書を完成', { docId, chars: transcription.length });
+        }, { merge: true });
+        return true;
+    });
+    if (completed) logger.info('文書を完成', { docId, chars: transcription.length });
 }
 
 /**
  * 失敗: 文書は消さず、理由を本文に残して status を failed にする（件数だけの警報にしない）。
  * 🔴 「何も無い」より「なぜ失敗したかが読める」方が利用者にとって良い（L2-D1・設計 §4.4）。
  */
-export async function failTranscriptionDocument(docId: string, reason: string): Promise<void> {
-    await getAdminFirestore().collection(TRANSCRIPTIONS_COLLECTION).doc(docId).set(
-        {
+export async function failTranscriptionDocument(docId: string, reason: string, expectedOwnerId: string): Promise<void> {
+    const db = getAdminFirestore();
+    const ref = db.collection(TRANSCRIPTIONS_COLLECTION).doc(docId);
+    const failed = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists) {
+            logger.warn('削除済みの文書の失敗更新をスキップ', { docId });
+            return false;
+        }
+        const doc = snap.data();
+        if (doc?.ownerId !== expectedOwnerId) {
+            logger.warn('所有者が異なる文書の失敗更新をスキップ', { docId });
+            return false;
+        }
+        if (doc.status !== 'processing') {
+            logger.warn('処理中でない文書の失敗更新をスキップ', { docId });
+            return false;
+        }
+        tx.set(ref, {
             transcription: `文字起こしに失敗しました。\n\n理由: ${reason}\n\nお手数ですが、もう一度お試しください。`,
             status: 'failed' satisfies TranscriptionDocStatus,
             updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-    );
-    logger.warn('文書を失敗として記録', { docId, reason: reason.slice(0, 200) });
+        }, { merge: true });
+        return true;
+    });
+    if (failed) logger.warn('文書を失敗として記録', { docId, reason: reason.slice(0, 200) });
 }

@@ -282,6 +282,8 @@ export class VideoConverter {
                     '-i', inputFileName,
                     '-vn', // ビデオストリームを無効化
                     '-acodec', 'libmp3lame',
+                    // Azure batch の diarization は mono 音声でのみ有効。stereo だと話者ラベルが付かない
+                    '-ac', '1',
                     '-ab', bitrate,
                     '-ar', sampleRate.toString(),
                     '-y', // 出力ファイルを上書き
@@ -507,6 +509,8 @@ export class VideoConverter {
                     '-i', inputFileName,
                     '-vn', // ビデオストリームを無効化
                     '-acodec', 'libmp3lame',
+                    // Azure batch の diarization は mono 音声でのみ有効。stereo だと話者ラベルが付かない
+                    '-ac', '1',
                     '-ab', bitrate,
                     '-ar', sampleRate.toString(),
                     '-y', // 出力ファイルを上書き
