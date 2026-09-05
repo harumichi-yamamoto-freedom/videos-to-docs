@@ -210,7 +210,8 @@ const defaultWait = (ms: number) => new Promise<void>((resolve) => setTimeout(re
  *    サーバ側は確定処理が途中で落ちても finalizing のリース切れ後に**次の poll で再確定**できる設計
  *    （commitTerminalOutcome）。ここで一度の失敗で抜けると、その回復経路に永遠に到達せず、
  *    文書が「処理中」のまま固まり、利用者が別ジョブを再提出して二重課金になる（再レビュー major）。
- *    だから状態確認の失敗は飲み込んで待ち、次の周回で再試行する。中止（abort）は即座に投げる。
+ *    一時障害は間隔を延ばして再試行し、429 は Retry-After を尊重する。
+ *    401/403/404 は確認待ちとして返す。中止（abort）はそのまま投げる。
  */
 export async function pollBatchStatus(jobId: string, options: PollOptions = {}): Promise<TranscribeStatusResponse> {
     const {
@@ -218,17 +219,29 @@ export async function pollBatchStatus(jobId: string, options: PollOptions = {}):
     } = options;
     const startedAt = Date.now();
     let lastStatus: TranscribeStatusResponse | null = null;
+    let consecutiveFailures = 0;
     for (;;) {
         if (signal?.aborted) throw abortReason(signal);
         let status: TranscribeStatusResponse | null = null;
+        let waitMs = intervalMs;
         try {
             status = await fetchBatchStatus(jobId, signal, docId);
         } catch (error) {
-            // 中止はそのまま伝える。それ以外（502・回線断）は一時障害として次の周回で再試行。
-            if (signal?.aborted) throw signal.reason ?? error;
-            status = null;
+            if (signal?.aborted) throw abortReason(signal);
+            const httpStatus = error instanceof TranscribeStatusError ? error.httpStatus : undefined;
+            if (httpStatus === 401 || httpStatus === 403 || httpStatus === 404) {
+                return lastStatus ?? { status: 'running', docId: docId ?? '' };
+            }
+            consecutiveFailures += 1;
+            const retryAfterMs = error instanceof TranscribeStatusError && httpStatus === 429
+                ? error.retryAfterMs
+                : undefined;
+            const backoffMs = STATUS_RETRY_INTERVALS_MS[Math.min(consecutiveFailures, STATUS_RETRY_INTERVALS_MS.length) - 1]
+                ?? intervalMs;
+            waitMs = retryAfterMs ?? backoffMs;
         }
         if (status) {
+            consecutiveFailures = 0;
             lastStatus = status;
             onTick?.(status);
             if (status.status !== 'running') return status;
@@ -237,7 +250,7 @@ export async function pollBatchStatus(jobId: string, options: PollOptions = {}):
             // ジョブは Azure 側で継続中。文書は「処理中」のまま残り、後で開けば確定できる。
             return lastStatus ?? { status: 'running', docId: docId ?? '' };
         }
-        await wait(intervalMs);
+        await wait(waitMs);
     }
 }
 
@@ -261,7 +274,7 @@ export interface RunBatchTranscriptionInput {
 
 /**
  * 提出→確認の結果。
- * 🔴 `pending` は失敗ではない（仕様 §A4）。確認の上限に達しただけで、ジョブはサーバ側で継続し、
+ * 🔴 `pending` は失敗ではない（仕様 §A4）。確認が停止してもジョブはサーバ側で継続し、
  *    文書は「処理中」で残る。呼出元はこれを赤い失敗として描かず、「確認待ち」として扱う。
  */
 export type RunBatchTranscriptionResult =
@@ -307,7 +320,7 @@ export async function resumeBatchTranscription(
     if (final.status === 'failed') {
         return { outcome: 'failed', success: false, jobId, docId, ...(final.error ? { error: final.error } : {}) };
     }
-    // running のまま上限に達した: 失敗ではない。文書は処理中で残る。
+    // running のまま確認が停止した: 失敗ではない。文書は処理中で残る。
     return { outcome: 'pending', success: false, pending: true, jobId, docId, lastStatus };
 }
 
@@ -494,6 +507,8 @@ export interface DocumentStatusWatchSnapshot {
     consecutiveFailures: number;
     /** 自動確認の起点（上限判定用） */
     startedAtMs: number;
+    /** Retry-After が指定した再送可能時刻（ms）。手動確認・環境復帰でもこの時刻まで待つ */
+    notBeforeMs?: number;
 }
 
 /** 可視性・回線・時計・タイマーの差し替え口（テストと、document の無い環境のため） */
@@ -519,7 +534,7 @@ export interface DocumentStatusWatchOptions {
 }
 
 export interface DocumentStatusWatch {
-    /** 手動「状態を確認」。実行中なら同じリクエストを返し、重複送信しない */
+    /** 手動「状態を確認」。実行中はリクエストを共有し、Retry-After の待機中は送信せず null を返す */
     checkNow: () => Promise<TranscribeStatusResponse | null>;
     /** 選択変更・画面離脱・owner 変更で呼ぶ。タイマーと購読を解き、以後 onChange を呼ばない */
     stop: () => void;
@@ -621,9 +636,19 @@ export function startDocumentStatusWatch(
         if (inflight) return inflight;
         if (snapshot.mode === 'terminal') return Promise.resolve(snapshot.lastResponse);
         clearTimer();
+        const now = env.now();
         // 上限で止まった後の手動確認は「同じジョブの確認を再開する」操作。上限の時計を仕切り直す。
-        const startedAtMs = manual && snapshot.mode === 'stopped_limit' ? env.now() : snapshot.startedAtMs;
-        publish({ mode: 'checking', startedAtMs });
+        const startedAtMs = manual && snapshot.mode === 'stopped_limit' ? now : snapshot.startedAtMs;
+        if (now - startedAtMs > maxDurationMs) {
+            publish({ mode: 'stopped_limit' });
+            return Promise.resolve(null);
+        }
+        snapshot = { ...snapshot, startedAtMs };
+        if (snapshot.notBeforeMs !== undefined && now < snapshot.notBeforeMs) {
+            schedule(snapshot.notBeforeMs - now);
+            return Promise.resolve(null);
+        }
+        publish({ mode: 'checking', notBeforeMs: undefined });
 
         const request = fetchStatusShared({ docId }, docId, controller.signal)
             .then((response): TranscribeStatusResponse | null => {
@@ -651,9 +676,14 @@ export function startDocumentStatusWatch(
                 if (disposed) return null;
                 const consecutiveFailures = snapshot.consecutiveFailures + 1;
                 const httpStatus = error instanceof TranscribeStatusError ? error.httpStatus : undefined;
+                const failedAtMs = env.now();
+                const retryAfterMs = error instanceof TranscribeStatusError && httpStatus === 429
+                    ? error.retryAfterMs
+                    : undefined;
                 snapshot = {
                     ...snapshot,
                     consecutiveFailures,
+                    notBeforeMs: retryAfterMs !== undefined ? failedAtMs + retryAfterMs : undefined,
                     lastError: {
                         message: describeStatusFailure(error),
                         ...(httpStatus !== undefined && { httpStatus }),
@@ -667,9 +697,10 @@ export function startDocumentStatusWatch(
                     publish({ mode: 'stopped_not_found' });
                     return null;
                 }
-                const retryAfterMs = error instanceof TranscribeStatusError && httpStatus === 429
-                    ? error.retryAfterMs
-                    : undefined;
+                if (failedAtMs - snapshot.startedAtMs > maxDurationMs) {
+                    publish({ mode: 'stopped_limit' });
+                    return null;
+                }
                 const backoffMs = retryIntervalsMs[Math.min(consecutiveFailures, retryIntervalsMs.length) - 1]
                     ?? intervalMs;
                 schedule(retryAfterMs ?? backoffMs);

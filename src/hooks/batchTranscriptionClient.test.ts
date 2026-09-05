@@ -239,6 +239,99 @@ describe('pollBatchStatus', () => {
         expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
+    it.each([
+        { retryAfterSec: 20, expectedWaitMs: 20_000 },
+        { retryAfterSec: 0, expectedWaitMs: 0 },
+        { retryAfterSec: undefined, expectedWaitMs: 30_000 },
+    ])('429 の Retry-After $retryAfterSec 秒を待ち、指定が無ければバックオフする', async ({ retryAfterSec, expectedWaitMs }) => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(jsonResponse({ error: 'rate_limited', message: '混雑', retryAfterSec }, false, 429))
+            .mockResolvedValueOnce(jsonResponse({ status: 'succeeded', docId: 'd1' }));
+        const wait = vi.fn(noWait);
+
+        expect(await pollBatchStatus('j1', { docId: 'd1', wait })).toEqual({ status: 'succeeded', docId: 'd1' });
+        expect(wait).toHaveBeenCalledExactlyOnceWith(expectedWaitMs);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('502・503・回線断の連続失敗は 30→60→60 秒で再試行し、running の成功で失敗数を戻す', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(jsonResponse({ error: 'upstream_error', message: '一時エラー' }, false, 502))
+            .mockResolvedValueOnce(jsonResponse({ error: 'upstream_error', message: '一時エラー' }, false, 503))
+            .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+            .mockResolvedValueOnce(jsonResponse({ status: 'running', docId: 'd1', stage: 'transcribing' }))
+            .mockResolvedValueOnce(jsonResponse({ error: 'upstream_error', message: '一時エラー' }, false, 502))
+            .mockResolvedValueOnce(jsonResponse({ status: 'succeeded', docId: 'd1' }));
+        const waits: number[] = [];
+        const onTick = vi.fn();
+
+        const result = await pollBatchStatus('j1', { docId: 'd1', wait: async ms => { waits.push(ms); }, onTick });
+
+        expect(result.status).toBe('succeeded');
+        expect(waits).toEqual([30_000, 60_000, 60_000, 15_000, 30_000]);
+        expect(fetchMock).toHaveBeenCalledTimes(6);
+        expect(onTick.mock.calls.map(([status]) => status.status)).toEqual(['running', 'succeeded']);
+    });
+
+    describe.each([401, 403, 404])('HTTP %s で確認を停止する', (httpStatus) => {
+        it('有効な応答が無ければ docId 付きの running を返し、再試行しない', async () => {
+            const fetchMock = vi.spyOn(globalThis, 'fetch')
+                .mockResolvedValueOnce(jsonResponse({ error: 'unavailable', message: '確認できません' }, false, httpStatus))
+                .mockResolvedValue(jsonResponse({ status: 'succeeded', docId: 'd1' }));
+            const wait = vi.fn(noWait);
+            const onTick = vi.fn();
+
+            expect(await pollBatchStatus('j1', { docId: 'd1', wait, onTick })).toEqual({ status: 'running', docId: 'd1' });
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(wait).not.toHaveBeenCalled();
+            expect(onTick).not.toHaveBeenCalled();
+        });
+
+        it('最後の有効応答と onTick の観測を保持し、エラー後は再試行しない', async () => {
+            const lastStatus: TranscribeStatusResponse = { status: 'running', docId: 'd1', stage: 'transcribing' };
+            const fetchMock = vi.spyOn(globalThis, 'fetch')
+                .mockResolvedValueOnce(jsonResponse(lastStatus))
+                .mockResolvedValueOnce(jsonResponse({ error: 'unavailable', message: '確認できません' }, false, httpStatus))
+                .mockResolvedValue(jsonResponse({ status: 'succeeded', docId: 'd1' }));
+            const wait = vi.fn(noWait);
+            const onTick = vi.fn();
+
+            expect(await pollBatchStatus('j1', { docId: 'd1', wait, onTick })).toBe(lastStatus);
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+            expect(wait).toHaveBeenCalledExactlyOnceWith(15_000);
+            expect(onTick).toHaveBeenCalledExactlyOnceWith(lastStatus);
+        });
+    });
+
+    it('有効な応答が無いままバックオフ中に上限へ達したら、docId 付きの running を返す', async () => {
+        let now = 1_000_000;
+        vi.spyOn(Date, 'now').mockImplementation(() => now);
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            jsonResponse({ error: 'upstream_error', message: '一時エラー' }, false, 502));
+        const waits: number[] = [];
+
+        const result = await pollBatchStatus('j1', {
+            docId: 'd1', timeoutMs: 20_000,
+            wait: async ms => { waits.push(ms); now += ms; },
+        });
+
+        expect(result).toEqual({ status: 'running', docId: 'd1' });
+        expect(waits).toEqual([30_000]);
+        expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2);
+    });
+
+    it('バックオフ待機中の中止理由を投げ、次の問い合わせを送らない', async () => {
+        const controller = new AbortController();
+        const reason = new Error('aborted-during-backoff');
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            jsonResponse({ error: 'upstream_error', message: '一時エラー' }, false, 502));
+        const wait = vi.fn(async () => { controller.abort(reason); });
+
+        await expect(pollBatchStatus('j1', { signal: controller.signal, wait })).rejects.toBe(reason);
+        expect(wait).toHaveBeenCalledExactlyOnceWith(30_000);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('🔴 一時エラーが続いてもタイムアウトまで諦めない', async () => {
         vi.spyOn(globalThis, 'fetch').mockResolvedValue(
             jsonResponse({ error: 'upstream_error', message: '一時エラー' }, false, 502));
@@ -279,6 +372,22 @@ describe('resumeBatchTranscription（提出済みジョブの確認再開）', (
             outcome: 'failed', success: false, jobId: 'j1', docId: 'd1', error: '音声が長すぎます',
         });
     });
+
+    it('403 で確認を止め、最後の観測を outcome:pending に渡す', async () => {
+        const lastStatus: TranscribeStatusResponse = { status: 'running', docId: 'd1', stage: 'importing' };
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(jsonResponse(lastStatus))
+            .mockResolvedValueOnce(jsonResponse({ error: 'forbidden', message: '確認できません' }, false, 403))
+            .mockResolvedValue(jsonResponse({ status: 'succeeded', docId: 'd1' }));
+        const onTick = vi.fn();
+
+        expect(await resumeBatchTranscription({ jobId: 'j1', docId: 'd1', pollIntervalMs: 1, onTick })).toEqual({
+            outcome: 'pending', success: false, pending: true, jobId: 'j1', docId: 'd1', lastStatus,
+        });
+        expect(onTick).toHaveBeenCalledExactlyOnceWith(lastStatus);
+        expect(statusRequestBodies(fetchMock)).toEqual([{ jobId: 'j1' }, { jobId: 'j1' }]);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
 });
 
 describe('runBatchTranscription', () => {
@@ -310,6 +419,20 @@ describe('runBatchTranscription', () => {
         const onSubmitted = vi.fn();
         await runBatchTranscription({ ...input, onSubmitted });
         expect(onSubmitted).toHaveBeenCalledExactlyOnceWith({ jobId: 'j1', docId: 'd1' });
+    });
+
+    it('提出直後の 404 で outcome:pending を返し、再提出も再確認もしない', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(jsonResponse({ jobId: 'j1', docId: 'd1' }))
+            .mockResolvedValueOnce(jsonResponse({ error: 'media_not_found', message: '確認できません' }, false, 404))
+            .mockResolvedValue(jsonResponse({ status: 'succeeded', docId: 'd1' }));
+        const onSubmitted = vi.fn();
+
+        expect(await runBatchTranscription({ ...input, onSubmitted })).toEqual({
+            outcome: 'pending', success: false, pending: true, jobId: 'j1', docId: 'd1', lastStatus: null,
+        });
+        expect(onSubmitted).toHaveBeenCalledExactlyOnceWith({ jobId: 'j1', docId: 'd1' });
+        expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([TRANSCRIBE_SUBMIT_PATH, TRANSCRIBE_STATUS_PATH]);
     });
 
     it('🔴 確認上限の pending は失敗ではなく outcome:pending（最後の有効応答つき）で返す', async () => {
@@ -503,6 +626,49 @@ describe('startDocumentStatusWatch（選択中文書の継続確認・仕様 §A
         watch.stop();
     });
 
+    it.each(['manual', 'visible', 'online', 'timer'] as const)(
+        '429 の待機中は %s から確認しても再送せず、期限後に送信する', async (entrance) => {
+            const fetchMock = vi.spyOn(globalThis, 'fetch')
+                .mockResolvedValueOnce(jsonResponse({ error: 'rate_limited', message: '混雑', retryAfterSec: 20 }, false, 429))
+                .mockResolvedValue(jsonResponse(running()));
+            const env = createEnvironment();
+            const watch = startDocumentStatusWatch('d1', { environment: env.environment });
+            await waitForMode(watch, 'waiting');
+            expect(watch.getSnapshot().notBeforeMs).toBe(1_020_000);
+            expect(env.timers.map(timer => timer.ms)).toEqual([20_000]);
+
+            env.state.now += 5_000;
+            if (entrance === 'manual') {
+                await watch.checkNow();
+                await watch.checkNow();
+            } else if (entrance === 'timer') {
+                // タイマーの早期発火も同じ待機期限で防ぐ。
+                env.fireNext();
+            } else {
+                env.state[entrance] = false;
+                env.notify();
+                expect(watch.getSnapshot().mode).toBe(entrance === 'visible' ? 'paused_hidden' : 'paused_offline');
+                expect(env.timers).toHaveLength(0);
+                env.state[entrance] = true;
+                env.notify();
+            }
+
+            await waitForMode(watch, 'waiting');
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(env.timers.map(timer => timer.ms)).toEqual([15_000]);
+            expect(watch.getSnapshot()).toMatchObject({ notBeforeMs: 1_020_000, consecutiveFailures: 1 });
+
+            env.state.now += 15_000;
+            env.fireNext();
+            expect(watch.getSnapshot().notBeforeMs).toBeUndefined();
+            await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+            await waitForMode(watch, 'waiting');
+            expect(watch.getSnapshot()).toMatchObject({ lastError: null, consecutiveFailures: 0 });
+            expect(env.timers.map(timer => timer.ms)).toEqual([15_000]);
+            watch.stop();
+        },
+    );
+
     it.each([401, 403])('%s は自動確認を止め（stopped_auth）、タイマーを積まない', async (httpStatus) => {
         const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
             jsonResponse({ error: 'forbidden', message: '権限がありません' }, false, httpStatus));
@@ -606,6 +772,81 @@ describe('startDocumentStatusWatch（選択中文書の継続確認・仕様 §A
         resolveFetch(jsonResponse(running()));
         await manual;
         await waitForMode(watch, 'waiting');
+        expect(env.timers.map(timer => timer.ms)).toEqual([15_000]);
+        watch.stop();
+    });
+
+    it.each([
+        new TranscribeStatusError('一時エラー', { httpStatus: 502 }),
+        new TypeError('Failed to fetch'),
+    ])('失敗が続き上限を超えて戻った $name は stopped_limit にしてタイマーを残さない', async (failure) => {
+        let rejectFetch!: (reason: unknown) => void;
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockRejectedValueOnce(failure)
+            .mockImplementationOnce(() => new Promise<Response>((_resolve, reject) => { rejectFetch = reject; }));
+        const env = createEnvironment();
+        const watch = startDocumentStatusWatch('d1', { environment: env.environment, maxDurationMs: 40_000 });
+        await waitForMode(watch, 'waiting');
+        expect(env.timers.map(timer => timer.ms)).toEqual([30_000]);
+
+        env.state.now += 30_000;
+        env.fireNext();
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+        env.state.now += 10_001;
+        rejectFetch(failure);
+
+        await waitForMode(watch, 'stopped_limit');
+        expect(watch.getSnapshot()).toMatchObject({ lastResponse: null, consecutiveFailures: 2 });
+        expect(env.timers).toHaveLength(0);
+        watch.stop();
+    });
+
+    it('失敗後のタイマーが上限を超えて発火しても再送せず stopped_limit にする', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            jsonResponse({ error: 'upstream_error', message: '一時エラー' }, false, 502));
+        const env = createEnvironment();
+        const watch = startDocumentStatusWatch('d1', { environment: env.environment, maxDurationMs: 40_000 });
+        await waitForMode(watch, 'waiting');
+        expect(env.timers.map(timer => timer.ms)).toEqual([30_000]);
+
+        env.state.now += 40_001;
+        env.fireNext();
+
+        await waitForMode(watch, 'stopped_limit');
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(env.timers).toHaveLength(0);
+        watch.stop();
+    });
+
+    it('上限超過後の 429 は待機期限を保持し、手動再開で起点を戻しても Retry-After を守る', async () => {
+        let resolveFetch!: (response: Response) => void;
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockImplementationOnce(() => new Promise<Response>(resolve => { resolveFetch = resolve; }))
+            .mockResolvedValue(jsonResponse(running()));
+        const env = createEnvironment();
+        const watch = startDocumentStatusWatch('d1', { environment: env.environment, maxDurationMs: 30_000 });
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+        env.state.now += 40_000;
+        resolveFetch(jsonResponse({ error: 'rate_limited', message: '混雑', retryAfterSec: 20 }, false, 429));
+        await waitForMode(watch, 'stopped_limit');
+        expect(watch.getSnapshot()).toMatchObject({ startedAtMs: 1_000_000, notBeforeMs: 1_060_000 });
+        expect(env.timers).toHaveLength(0);
+
+        env.state.now += 5_000;
+        await watch.checkNow();
+        expect(watch.getSnapshot()).toMatchObject({
+            mode: 'waiting', startedAtMs: 1_045_000, notBeforeMs: 1_060_000,
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(env.timers.map(timer => timer.ms)).toEqual([15_000]);
+
+        env.state.now += 15_000;
+        env.fireNext();
+        await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+        await waitForMode(watch, 'waiting');
+        expect(watch.getSnapshot().notBeforeMs).toBeUndefined();
+        expect(watch.getSnapshot().startedAtMs).toBe(1_045_000);
         expect(env.timers.map(timer => timer.ms)).toEqual([15_000]);
         watch.stop();
     });
