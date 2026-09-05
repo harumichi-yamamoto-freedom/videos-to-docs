@@ -220,6 +220,82 @@ describe('GeminiServerClient.generate — files_api', () => {
     });
 });
 
+describe('uploadMedia — Blob へ渡すバイト列', () => {
+    /**
+     * 🔴 Buffer → Blob のコピーを 1 段外した (旧: `new Blob([new Uint8Array(bytes)])`)。
+     *    旧実装は Buffer の全量コピー + Blob 自身のコピーでピーク常駐がサイズの 3 倍になっていた
+     *    (200MB のファイルで実測 600MB → 400MB)。
+     *    錠は 2 種類ある: (a) 送るバイト列が変わっていないこと、(b) コピーが復活していないこと。
+     *    (a) だけだと旧実装も緑のまま通る (バイト列は同じなので) ＝ 改修でコピーが黙って戻る。
+     *    (b) は Blob へ渡した BlobPart が元 Buffer と **同じ backing buffer** を指しているかで見る。
+     */
+    const uploadedBlob = (): Blob => doubles.filesUpload.mock.calls[0][0].file as Blob;
+
+    /** Blob の構築を捕まえる。本物へ委譲するので Blob の振る舞いは変わらない */
+    const captureBlobParts = async (run: () => Promise<unknown>): Promise<BlobPart[]> => {
+        const RealBlob = globalThis.Blob;
+        const parts: BlobPart[] = [];
+        class RecordingBlob extends RealBlob {
+            constructor(blobParts: BlobPart[] = [], options?: BlobPropertyBag) {
+                parts.push(...blobParts);
+                super(blobParts, options);
+            }
+        }
+        globalThis.Blob = RecordingBlob as unknown as typeof Blob;
+        try {
+            await run();
+        } finally {
+            globalThis.Blob = RealBlob;
+        }
+        return parts;
+    };
+
+    beforeEach(() => {
+        doubles.filesUpload.mockResolvedValue({
+            name: 'files/x', state: 'ACTIVE', uri: 'https://files/x', mimeType: 'audio/mpeg',
+        });
+    });
+
+    it('元の Buffer と同一のバイト列・MIME を渡す', async () => {
+        const bytes = Buffer.from('audio-bytes-0123456789');
+        await new GeminiServerClient().uploadMedia(bytes, 'audio/mpeg', 'a.mp3');
+        const blob = uploadedBlob();
+        expect(blob.type).toBe('audio/mpeg');
+        expect(blob.size).toBe(bytes.length);
+        expect(Buffer.from(await blob.arrayBuffer()).equals(bytes)).toBe(true);
+    });
+
+    it('🔴 Blob には元 Buffer と同じ backing buffer のビューを渡す (全量コピーを復活させない)', async () => {
+        // Buffer.from は共有プール上に載るので byteOffset != 0 になり、buffer 同一性と範囲の両方を見られる
+        const bytes = Buffer.from('audio-bytes-0123456789');
+        const parts = await captureBlobParts(
+            () => new GeminiServerClient().uploadMedia(bytes, 'audio/mpeg', 'a.mp3'),
+        );
+
+        expect(parts).toHaveLength(1);
+        const view = parts[0] as Uint8Array;
+        expect(ArrayBuffer.isView(view)).toBe(true);
+        // 🔴 ここが本題: コピー (`new Uint8Array(bytes)`) は別の ArrayBuffer になるので、同一性で落ちる
+        expect(view.buffer).toBe(bytes.buffer);
+        expect(view.byteOffset).toBe(bytes.byteOffset);
+        expect(view.byteLength).toBe(bytes.byteLength);
+        // 委譲しているので Blob 自体は本物のまま
+        expect(uploadedBlob().size).toBe(bytes.length);
+    });
+
+    it('🔴 byteOffset != 0 の Buffer (共有プール上のビュー) でも同一 — 周囲のバイトを含めない', async () => {
+        const backing = Buffer.alloc(64, 0x9);
+        const bytes = backing.subarray(8, 24);
+        bytes.write('sliced-payload!!');
+        expect(bytes.byteOffset).toBeGreaterThan(0);
+
+        await new GeminiServerClient().uploadMedia(bytes, 'audio/mpeg', 'a.mp3');
+        const got = Buffer.from(await uploadedBlob().arrayBuffer());
+        expect(got.length).toBe(bytes.length);
+        expect(got.equals(bytes)).toBe(true);
+    });
+});
+
 describe('classifyGeminiError', () => {
     it.each([
         ['API_KEY_INVALID: x', 'not_configured', 503],

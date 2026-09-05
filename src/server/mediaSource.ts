@@ -2,7 +2,7 @@
  * storagePath の形式検査・所有権判定・Storage からの取得。
  * 形式は `audio/{ownerId}/{name}` (storage.rules の match と同じ 2 段) で、それ以外は 400。
  */
-import { GENERATE_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
+import { GENERATE_MAX_MEDIA_BYTES, GENERATE_SYNC_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
 import { createLogger } from '@/lib/logger';
 import { GUEST_OWNER_ID, type RequestSubject } from './auth';
 import { GenerateApiError } from './errors';
@@ -57,8 +57,30 @@ export interface FetchedMedia extends MediaObjectInfo {
 
 const NOT_FOUND_MESSAGE =
     'ファイルが見つかりません。アップロードをやり直して、もう一度変換してください。';
-const TOO_LARGE_MESSAGE =
-    `ファイルが大きすぎます (上限 ${Math.floor(GENERATE_MAX_MEDIA_BYTES / 1024 / 1024)}MB)。ビットレートを下げるか、ファイルを分割してから再試行してください。`;
+
+/** 上限の表示用。既存の表記に合わせて 1MB = 1024*1024 バイトで切り捨てる */
+const limitMb = (bytes: number): number => Math.floor(bytes / 1024 / 1024);
+
+/**
+ * 上限超のときに利用者へ見せる文。**経路ごとに「次に何ができるか」が違う**ので呼び出し側が決める。
+ * (同期の文書生成を超えただけなら全文文字起こしは使えるが、バッチ経路の上限を超えたときは使えない)
+ */
+export type TooLargeMessage = (sizeBytes: number, maxBytes: number) => string;
+
+const defaultTooLargeMessage: TooLargeMessage = (_sizeBytes, maxBytes) =>
+    `ファイルが大きすぎます (上限 ${limitMb(maxBytes)}MB)。ビットレートを下げるか、ファイルを分割してから再試行してください。`;
+
+/**
+ * 同期の文書生成の上限 (GENERATE_SYNC_MAX_MEDIA_BYTES) を超えたときの文。
+ * 🔴 「アップロードできない」と誤読させないこと: このサイズでも **全文文字起こしは動く**
+ *    (非同期バッチは署名 URL 経由で、サーバは本文をメモリに載せない)。止まるのは文書生成だけ。
+ * サイズは切り上げる。切り捨てだと 200MB をわずかに超えたファイルが
+ * 「約200MB で、上限 200MB を超えています」と矛盾して読める。
+ */
+export const syncGenerateTooLargeMessage: TooLargeMessage = (sizeBytes, maxBytes) =>
+    `このファイルは 約${Math.ceil(sizeBytes / 1024 / 1024)}MB で、議事録などの文書生成に送れる上限 ${limitMb(maxBytes)}MB を超えています。`
+    + '全文文字起こしはこのままご利用いただけます。'
+    + '文書生成も必要な場合は、ビットレートを下げるか録音を分割してから、もう一度お試しください。';
 
 const toSizeBytes = (value: unknown): number => {
     const n = typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;
@@ -67,12 +89,16 @@ const toSizeBytes = (value: unknown): number => {
 
 /**
  * 存在とサイズだけ確認する (本文は取らない)。無ければ 404、上限超なら 413。
- * 🔴 `maxBytes` を渡せる。文書生成（Gemini）経路は 500MB (GENERATE_MAX_MEDIA_BYTES)、
- *    非同期バッチ経路は Azure の 1GB (AZURE_BATCH_MAX_AUDIO_BYTES) と、上限が違うため。
+ * 🔴 `maxBytes` と文言を渡せる。**上限は経路ごとに違う**:
+ *    - 同期の文書生成 (Gemini): 200MB (GENERATE_SYNC_MAX_MEDIA_BYTES)。本文を丸ごとメモリに載せるため。
+ *    - 非同期バッチ (Azure): 1GB (AZURE_BATCH_MAX_AUDIO_BYTES)。署名 URL を渡すだけなので大きくてよい。
+ *    既定は Storage 側の上限 (GENERATE_MAX_MEDIA_BYTES = 500MB) ＝ storage.rules を超える物は無いという
+ *    最後の網でしかない。経路の上限は呼び出し側が明示すること。
  */
 export async function statMedia(
     storagePath: string,
     maxBytes: number = GENERATE_MAX_MEDIA_BYTES,
+    tooLargeMessage: TooLargeMessage = defaultTooLargeMessage,
 ): Promise<MediaObjectInfo> {
     const file = getAdminBucket().file(storagePath);
     const [exists] = await file.exists();
@@ -85,8 +111,7 @@ export async function statMedia(
     const contentType = typeof metadata?.contentType === 'string' ? metadata.contentType : undefined;
     if (sizeBytes > maxBytes) {
         logger.warn('Storage 上のファイルが上限超', { storagePath, sizeBytes, limit: maxBytes });
-        throw new GenerateApiError('media_too_large',
-            `ファイルが大きすぎます (上限 ${Math.floor(maxBytes / 1024 / 1024)}MB)。`);
+        throw new GenerateApiError('media_too_large', tooLargeMessage(sizeBytes, maxBytes));
     }
     return { storagePath, sizeBytes, contentType };
 }
@@ -106,13 +131,23 @@ export async function getSignedReadUrl(storagePath: string, ttlMs: number): Prom
     return url;
 }
 
-/** 本文を Buffer で取る。ダウンロード後のサイズも再検査する (メタと実体がずれた時の保険) */
-export async function downloadMedia(info: MediaObjectInfo): Promise<FetchedMedia> {
+/**
+ * 本文を Buffer で取る。ダウンロード後のサイズも再検査する (メタと実体がずれた時の保険)。
+ * 🔴 ここは **メディア全体をサーバのメモリに載せる唯一の経路**。既定の上限は Storage 側の 500MB ではなく
+ *    同期の文書生成用 (GENERATE_SYNC_MAX_MEDIA_BYTES)。ここに 500MB を持ち込むと OOM になる。
+ */
+export async function downloadMedia(
+    info: MediaObjectInfo,
+    maxBytes: number = GENERATE_SYNC_MAX_MEDIA_BYTES,
+    tooLargeMessage: TooLargeMessage = syncGenerateTooLargeMessage,
+): Promise<FetchedMedia> {
     const file = getAdminBucket().file(info.storagePath);
     const [bytes] = await file.download();
-    if (bytes.length > GENERATE_MAX_MEDIA_BYTES) {
-        logger.warn('ダウンロード後のサイズが上限超', { storagePath: info.storagePath, sizeBytes: bytes.length });
-        throw new GenerateApiError('media_too_large', TOO_LARGE_MESSAGE);
+    if (bytes.length > maxBytes) {
+        logger.warn('ダウンロード後のサイズが上限超', {
+            storagePath: info.storagePath, sizeBytes: bytes.length, limit: maxBytes,
+        });
+        throw new GenerateApiError('media_too_large', tooLargeMessage(bytes.length, maxBytes));
     }
     logger.info('Storage からメディアを取得', {
         storagePath: info.storagePath,

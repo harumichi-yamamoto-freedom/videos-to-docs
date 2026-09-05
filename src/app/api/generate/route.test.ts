@@ -4,7 +4,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_GEMINI_MODEL } from '@/constants/geminiModels';
-import { GENERATE_MAX_MEDIA_BYTES, type GenerateRequestBody } from '@/lib/generateApiContract';
+import {
+    GENERATE_MAX_MEDIA_BYTES, GENERATE_SYNC_MAX_MEDIA_BYTES, type GenerateRequestBody,
+} from '@/lib/generateApiContract';
 import { INLINE_REQUEST_BUDGET_BYTES } from '@/lib/inlineMediaBudget';
 
 const doubles = vi.hoisted(() => ({
@@ -238,12 +240,41 @@ describe('POST エラー分岐', () => {
         expect(doubles.rateDocs.size).toBe(0);
     });
 
-    it('413: 100MB 超', async () => {
-        doubles.files.set('audio/GUEST/huge.mp3', { bytes: Buffer.from('x'), size: String(GENERATE_MAX_MEDIA_BYTES + 1) });
+    // 🔴 この経路 (同期) だけメディアを丸ごとメモリに載せるので、上限は Storage の 500MB ではなく 200MB。
+    //    500MB を持ち込むと Buffer + Blob でピークが 1GB 超になり OOM する。
+    it('413: 同期の文書生成の上限 (200MB) 超。上限カウントは消費しない', async () => {
+        doubles.files.set('audio/GUEST/huge.mp3', {
+            bytes: Buffer.from('x'), size: String(GENERATE_SYNC_MAX_MEDIA_BYTES + 1),
+        });
         const res = await post({ ...baseBody(), storagePath: 'audio/GUEST/huge.mp3' });
         expect(res.status).toBe(413);
-        expect((await res.json()).error).toBe('media_too_large');
+        const json = await res.json();
+        // 🔴 コードは media_too_large のまま。画面側の「サイズ由来の失敗 → 再変換の導線」がこれで判定する
+        expect(json.error).toBe('media_too_large');
+        // 🔴 「アップロードできない」と誤読させない。全文文字起こしはこのサイズでも使える
+        expect(json.message).toContain('全文文字起こしはこのままご利用いただけます');
+        expect(json.message).toContain('200MB');
+        expect(json.message).not.toContain('アップロード');
         expect(doubles.rateDocs.size).toBe(0);
+        expect(doubles.generateContent).not.toHaveBeenCalled();
+    });
+
+    it('413: Storage の上限 (500MB) 内でも同期の文書生成は拒否する', async () => {
+        doubles.files.set('audio/GUEST/400mb.mp3', {
+            bytes: Buffer.from('x'), size: String(GENERATE_MAX_MEDIA_BYTES - 1),
+        });
+        const res = await post({ ...baseBody(), storagePath: 'audio/GUEST/400mb.mp3' });
+        expect(res.status).toBe(413);
+        expect((await res.json()).error).toBe('media_too_large');
+    });
+
+    it('200: 同期の上限ちょうどは通る (境界は「超えたら拒否」)', async () => {
+        doubles.files.set('audio/GUEST/edge.mp3', {
+            bytes: Buffer.from('edge-audio'), size: String(GENERATE_SYNC_MAX_MEDIA_BYTES),
+        });
+        const res = await post({ ...baseBody(), storagePath: 'audio/GUEST/edge.mp3' });
+        expect(res.status).toBe(200);
+        expect(doubles.generateContent).toHaveBeenCalledTimes(1);
     });
 
     it('429: 設定上限 (3) を超えた 4 件目。retryAfterSec と Retry-After ヘッダ、Gemini は呼ばない', async () => {

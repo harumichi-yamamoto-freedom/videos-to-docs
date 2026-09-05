@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { GENERATE_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
+import { GENERATE_MAX_MEDIA_BYTES, GENERATE_SYNC_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
 
 const doubles = vi.hoisted(() => ({
     files: new Map<string, { bytes: Buffer; size?: string; contentType?: string }>(),
@@ -20,7 +20,9 @@ vi.mock('./firebaseAdmin', () => ({
     }),
 }));
 
-import { downloadMedia, isOwnedBySubject, parseStoragePath, statMedia } from './mediaSource';
+import {
+    downloadMedia, isOwnedBySubject, parseStoragePath, statMedia, syncGenerateTooLargeMessage,
+} from './mediaSource';
 import { GenerateApiError } from './errors';
 
 describe('parseStoragePath', () => {
@@ -87,6 +89,28 @@ describe('statMedia / downloadMedia', () => {
         await expect(statMedia('audio/GUEST/edge.mp3')).resolves.toMatchObject({ sizeBytes: GENERATE_MAX_MEDIA_BYTES });
     });
 
+    it('🔴 同期の文書生成の上限 (200MB) を渡すと、Storage 上限 (500MB) 内でも 413', async () => {
+        doubles.files.set('audio/GUEST/300mb.mp3', {
+            bytes: Buffer.from('tiny'), size: String(GENERATE_SYNC_MAX_MEDIA_BYTES + 1),
+        });
+        const error = await statMedia(
+            'audio/GUEST/300mb.mp3', GENERATE_SYNC_MAX_MEDIA_BYTES, syncGenerateTooLargeMessage,
+        ).catch(e => e);
+        expect(error).toMatchObject({ code: 'media_too_large', status: 413 });
+        // 🔴 「アップロードできない」と読ませない: 全文文字起こしは使えることを文言に含める
+        expect(error.message).toContain('全文文字起こしはこのままご利用いただけます');
+        expect(error.message).toContain('200MB');
+        expect(error.message).not.toContain('アップロード');
+    });
+
+    it('🔴 同期の上限ちょうどは通る (境界は「超えたら拒否」)', async () => {
+        doubles.files.set('audio/GUEST/sync-edge.mp3', {
+            bytes: Buffer.from('x'), size: String(GENERATE_SYNC_MAX_MEDIA_BYTES),
+        });
+        await expect(statMedia('audio/GUEST/sync-edge.mp3', GENERATE_SYNC_MAX_MEDIA_BYTES, syncGenerateTooLargeMessage))
+            .resolves.toMatchObject({ sizeBytes: GENERATE_SYNC_MAX_MEDIA_BYTES });
+    });
+
     it('存在すればサイズと contentType を返し、download で本文を取る', async () => {
         doubles.files.set('audio/uid-1/a.mp3', { bytes: Buffer.from('hello'), contentType: 'audio/mpeg' });
         const info = await statMedia('audio/uid-1/a.mp3');
@@ -96,9 +120,31 @@ describe('statMedia / downloadMedia', () => {
         expect(media.sizeBytes).toBe(5);
     });
 
-    it('メタが小さくても実体が上限超なら 413', async () => {
-        doubles.files.set('audio/uid-1/lie.mp3', { bytes: Buffer.alloc(GENERATE_MAX_MEDIA_BYTES + 1), size: '10' });
+    // 🔴 既定を GENERATE_MAX_MEDIA_BYTES (500MB) から同期経路の 200MB に下げたので、期待値も下げる。
+    //    500MB のままだと「200MB〜500MB の実体」が素通りして、この経路が丸ごとメモリに載せてしまう。
+    it('メタが小さくても実体が同期の上限超なら 413 (既定の上限は同期経路のもの)', async () => {
+        doubles.files.set('audio/uid-1/lie.mp3', {
+            bytes: Buffer.alloc(GENERATE_SYNC_MAX_MEDIA_BYTES + 1), size: '10',
+        });
         const info = await statMedia('audio/uid-1/lie.mp3');
-        await expect(downloadMedia(info)).rejects.toBeInstanceOf(GenerateApiError);
+        const error = await downloadMedia(info).catch(e => e);
+        expect(error).toBeInstanceOf(GenerateApiError);
+        expect(error.code).toBe('media_too_large');
+        expect(error.message).toContain('全文文字起こしはこのままご利用いただけます');
+    });
+
+    it('渡した上限で再検査する (メタは通っても実体が超えていれば 413)', async () => {
+        doubles.files.set('audio/uid-1/small.mp3', { bytes: Buffer.alloc(100), size: '10' });
+        const info = await statMedia('audio/uid-1/small.mp3');
+        await expect(downloadMedia(info, 99)).rejects.toMatchObject({ code: 'media_too_large', status: 413 });
+        await expect(downloadMedia(info, 100)).resolves.toMatchObject({ sizeBytes: 100 });
+    });
+
+    it('文言はサイズを切り上げて出す (上限ちょうどに丸めて矛盾させない)', () => {
+        const justOver = GENERATE_SYNC_MAX_MEDIA_BYTES + 1;
+        expect(syncGenerateTooLargeMessage(justOver, GENERATE_SYNC_MAX_MEDIA_BYTES))
+            .toContain('約201MB');
+        expect(syncGenerateTooLargeMessage(justOver, GENERATE_SYNC_MAX_MEDIA_BYTES))
+            .toContain('上限 200MB');
     });
 });

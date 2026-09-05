@@ -32,6 +32,15 @@ export interface TranscriptionResult {
     transport?: GenerateTransport;
     /** サーバ側の処理時間 (ms・観測用) */
     elapsedMs?: number;
+    /**
+     * 🔴 失敗の**種別**。呼び出し側が「サイズ超過か」を判断するために使う。
+     *    ここを落として message だけ返すと、上位は文言の部分一致で分類するしかなくなり、
+     *    サーバが文言を変えた瞬間に静かに壊れる (実際に一度そうなっていた)。
+     * 契約どおりの本文が無いときは 'unknown'。
+     */
+    errorCode?: GenerateErrorCode | 'unknown';
+    /** 失敗時の HTTP status。契約本文が無い応答でも種別を判断できるようにする */
+    errorStatus?: number;
 }
 
 export interface GenerateDocumentInput {
@@ -238,7 +247,12 @@ export class GeminiClient {
                 code: apiError.code,
                 retryAfterSec: apiError.retryAfterSec,
             });
-            return { success: false, error: apiError.message };
+            return {
+                success: false,
+                error: apiError.message,
+                errorCode: apiError.code,
+                errorStatus: apiError.status,
+            };
         }
 
         if (!isResponseBody(payload)) {

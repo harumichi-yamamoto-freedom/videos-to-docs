@@ -6,6 +6,7 @@
  */
 import {
     GENERATE_ALLOWED_MIME_PREFIXES,
+    GENERATE_SYNC_MAX_MEDIA_BYTES,
     type GenerateErrorBody,
     type GenerateRequestBody,
     type GenerateResponseBody,
@@ -14,7 +15,9 @@ import { createLogger } from '@/lib/logger';
 import { resolveRequestSubject, type RequestSubject } from '@/server/auth';
 import { GenerateApiError } from '@/server/errors';
 import { assertGeminiConfigured, GeminiServerClient } from '@/server/geminiServer';
-import { downloadMedia, isOwnedBySubject, parseStoragePath, statMedia } from '@/server/mediaSource';
+import {
+    downloadMedia, isOwnedBySubject, parseStoragePath, statMedia, syncGenerateTooLargeMessage,
+} from '@/server/mediaSource';
 import { clientIpFromHeaders, enforceRateLimit } from '@/server/rateLimit';
 
 export const runtime = 'nodejs';
@@ -102,9 +105,12 @@ export async function POST(request: Request): Promise<Response> {
         assertOwnership(body.storagePath, subject);
         assertGeminiConfigured();
 
-        const info = await statMedia(body.storagePath);
+        // 🔴 この経路はメディアを丸ごとメモリに載せる (download → Blob) ので、ピークはサイズの数倍になる。
+        //    Storage 側の 500MB (GENERATE_MAX_MEDIA_BYTES) ではなく、同期経路の上限で門を立てる。
+        //    超えても全文文字起こしは使えるので、文言でそれを伝える (syncGenerateTooLargeMessage)。
+        const info = await statMedia(body.storagePath, GENERATE_SYNC_MAX_MEDIA_BYTES, syncGenerateTooLargeMessage);
         const rate = await enforceRateLimit(subject, clientIpFromHeaders(request.headers));
-        const media = await downloadMedia(info);
+        const media = await downloadMedia(info, GENERATE_SYNC_MAX_MEDIA_BYTES, syncGenerateTooLargeMessage);
 
         const client = new GeminiServerClient();
         const generated = await client.generate({

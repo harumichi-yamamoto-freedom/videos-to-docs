@@ -240,7 +240,36 @@ describe('GeminiClient.generateDocument エラー応答', () => {
         expect(result).toEqual({
             success: false,
             error: 'このファイルは別の利用者のものです。ログインし直してください。',
+            errorCode: 'forbidden',
+            errorStatus: 403,
         });
+    });
+
+    /**
+     * 🔴 失敗の**種別**を message だけに畳まない。呼び出し側 (useVideoProcessing) は
+     *    「サイズ超過か」をここで返るコードと status だけで判断する。落とすと、
+     *    文言の部分一致に頼るしかなくなり、サーバが言い回しを変えた瞬間に静かに壊れる。
+     */
+    it('🔴 413 (media_too_large) は契約コードと status を落とさずに返す', async () => {
+        testDoubles.fetchImpl.mockResolvedValue(
+            jsonResponse(413, errorBody('media_too_large', 'このファイルは 約300MB で、上限 200MB を超えています。')),
+        );
+
+        const result = await createClient().generateDocument(baseInput());
+
+        expect(result).toMatchObject({
+            success: false,
+            errorCode: 'media_too_large',
+            errorStatus: 413,
+        });
+    });
+
+    it('契約どおりの本文が無い 413 でも status は残る（文言に頼らず種別を判断できる）', async () => {
+        testDoubles.fetchImpl.mockResolvedValue(jsonResponse(413, { nonsense: true }));
+
+        const result = await createClient().generateDocument(baseInput());
+
+        expect(result).toMatchObject({ success: false, errorCode: 'unknown', errorStatus: 413 });
     });
 
     it('503 (not_configured) もサーバの文言をそのまま返し、エラーログに status と code を残す', async () => {
