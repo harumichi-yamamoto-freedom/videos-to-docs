@@ -102,7 +102,7 @@ vi.mock('@/server/transcriptionJob', async (importActual) => {
 
 vi.mock('@/server/reviewCandidates', async (importActual) => {
     const actual = await importActual<typeof import('@/server/reviewCandidates')>();
-    return { ...actual, buildReviewCandidates: vi.fn(actual.buildReviewCandidates) };
+    return { ...actual, buildReviewCandidatesSafe: vi.fn(actual.buildReviewCandidatesSafe) };
 });
 
 import { POST as submitPOST } from './submit/route';
@@ -114,7 +114,7 @@ import { attachJobToDocument, createProcessingDocument, writeProcessingProgress 
 import { claimJobForFinalize, commitTerminalOutcome, recordAzureObservation, type TranscriptionJob, FINALIZE_LEASE_MS, createTranscriptionJob, getTranscriptionJob, getTranscriptionJobByDocId, updateTranscriptionJob } from '@/server/transcriptionJob';
 import { getTranscriptionDocuments, getTranscriptions, getTranscriptionsByOwnerId, restoreTranscription } from '@/lib/firestore';
 import * as finalization from '@/server/finalizeTranscription';
-import { buildReviewCandidates, phraseIdFor } from '@/server/reviewCandidates';
+import { buildReviewCandidatesSafe, buildUnavailableReview, measureReviewJsonBytes, phraseIdFor } from '@/server/reviewCandidates';
 import type { TranscriptReview } from '@/lib/transcriptReviewContract';
 
 const syntheticNowMs = 1_788_000_000_000;
@@ -142,6 +142,15 @@ const mergeFirestorePatch = (data: Record<string, unknown> | undefined, patch: R
         } else result[key] = value;
     }
     return result;
+};
+
+/** Firestore Admin SDK は undefined 値を拒否する。保存する review に undefined のキーが無いことの検査用 */
+const hasUndefinedDeep = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(hasUndefinedDeep);
+    if (value && typeof value === 'object') {
+        return Object.values(value as Record<string, unknown>).some((v) => v === undefined || hasUndefinedDeep(v));
+    }
+    return false;
 };
 
 const guest = { kind: 'guest' as const };
@@ -853,10 +862,11 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         const res = await statusPOST(req({ jobId: 'job-1' }));
         expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
 
-        // 抽出側には全句の品質素材を元 index 順で渡す（判定はこちらでしない）
-        expect(buildReviewCandidates).toHaveBeenCalledTimes(1);
-        const [phrases, sourceJobId, sourceTextHash] = vi.mocked(buildReviewCandidates).mock.calls[0];
+        // 抽出側（安全版）には全句の品質素材を元 index 順で渡す（判定はこちらでしない）。音声長は >0 のときだけ渡す
+        expect(buildReviewCandidatesSafe).toHaveBeenCalledTimes(1);
+        const [phrases, sourceJobId, sourceTextHash, options] = vi.mocked(buildReviewCandidatesSafe).mock.calls[0];
         expect(sourceJobId).toBe('job-1');
+        expect(options).toEqual({ threshold: 0.75, audioSec: 60 });
         expect(phrases.map((p) => p.index)).toEqual([0, 1, 2, 3]);
         expect(phrases[1]).toMatchObject({ text: 'ええと。', confidence: 0.4, recognitionStatus: 'Success', speaker: 'spk:1', startSec: 2, endSec: 3 });
         expect(phrases[3]).toMatchObject({ text: '', recognitionStatus: 'NoMatch', speaker: 'spk:2' });
@@ -867,6 +877,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         expect(sourceTextHash).toBe(finalization.sourceTextHashOf(outcome.transcription));
         expect(review).toMatchObject({ version: 1, sourceJobId: 'job-1', sourceTextHash, availability: 'complete' });
         expect(review.summary.totalPhrases).toBe(4);
+        expect(hasUndefinedDeep(review)).toBe(false);
         // 低信頼句（index 1）は 1 段落目（1 行目）、非 Success（index 3）は 2 段落目（3 行目）
         const lines = outcome.transcription.split('\n');
         expect(lines[0]).toContain('ええと。');
@@ -888,27 +899,72 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         expect(deleteBatchJob).toHaveBeenCalledTimes(1);
     });
 
-    it('🔴 候補生成が失敗しても本文が読めれば completed にし、unavailable と理由だけを保存する（設計 B4）', async () => {
-        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
-        vi.mocked(fetchBatchResult).mockResolvedValue(reviewAzureResult());
-        vi.mocked(buildReviewCandidates).mockImplementationOnce(() => { throw new Error('合成の抽出エラー'); });
-        const res = await statusPOST(req({ jobId: 'job-1' }));
-        expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
-        expect(documentDb.data).toMatchObject({
-            status: 'completed',
-            transcription: expect.stringContaining('よろしくお願いします'),
-            transcriptReview: {
-                version: 1, threshold: 0.75, sourceJobId: 'job-1', availability: 'unavailable',
-                unavailableReason: 'internal_error', candidates: [],
-            },
-        });
-        const saved = documentDb.data?.transcriptReview as TranscriptReview;
-        expect(saved.sourceTextHash).toBe(finalization.sourceTextHashOf(documentDb.data?.transcription as string));
-        expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
-        expect(documentDb.jobData).not.toHaveProperty('transcriptReview');
-        expect(deleteBatchJob).toHaveBeenCalledTimes(1);
-        expect(documentDb.warn).toHaveBeenCalledWith('要確認候補の生成に失敗（本文は完成させる）', { jobId: 'job-1', reason: '合成の抽出エラー' });
-    });
+    it.each(['抽出側が例外を投げる', '抽出側が unavailable を返す'] as const)(
+        '🔴 %s場合も本文が読めれば completed にし、unavailable と理由だけを保存する（設計 B4）', async (failure) => {
+            vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+            vi.mocked(fetchBatchResult).mockResolvedValue(reviewAzureResult());
+            if (failure === '抽出側が例外を投げる') {
+                vi.mocked(buildReviewCandidatesSafe).mockImplementationOnce(() => { throw new Error('合成の抽出エラー'); });
+            } else {
+                vi.mocked(buildReviewCandidatesSafe).mockImplementationOnce((_phrases, jobId, hash) =>
+                    buildUnavailableReview(jobId, hash, 'internal_error'));
+            }
+            const res = await statusPOST(req({ jobId: 'job-1' }));
+            expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
+            expect(documentDb.data).toMatchObject({
+                status: 'completed',
+                transcription: expect.stringContaining('よろしくお願いします'),
+                transcriptReview: {
+                    version: 1, threshold: 0.75, sourceJobId: 'job-1', availability: 'unavailable',
+                    unavailableReason: 'internal_error', candidates: [],
+                },
+            });
+            const saved = documentDb.data?.transcriptReview as TranscriptReview;
+            expect(saved.sourceTextHash).toBe(finalization.sourceTextHashOf(documentDb.data?.transcription as string));
+            expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+            expect(documentDb.jobData).not.toHaveProperty('transcriptReview');
+            expect(deleteBatchJob).toHaveBeenCalledTimes(1);
+            expect(documentDb.warn).toHaveBeenCalledWith(
+                failure === '抽出側が例外を投げる' ? '要確認候補の生成に失敗（本文は完成させる）' : '要確認候補を作れなかった（本文は完成させる）',
+                { jobId: 'job-1', reason: failure === '抽出側が例外を投げる' ? '合成の抽出エラー' : 'internal_error' },
+            );
+        },
+    );
+
+    it.each(['minimal', 'omitted'] as const)(
+        '🔴 本文が長く文書全体の保存予算に候補が収まらないときは %s にし、本文は切り詰めず completed にする', async (mode) => {
+            // 本文サイズ = 1 MiB − 見込み − 余白。minimal: 最小形だけ収まる余白／omitted: 最小形も収まらない
+            const minimalBytes = measureReviewJsonBytes(buildUnavailableReview('job-1', 'x'.repeat(64), 'storage_budget', 0.75));
+            const limit = finalization.FIRESTORE_MAX_DOCUMENT_BYTES - finalization.DOCUMENT_OVERHEAD_HEADROOM_BYTES;
+            const prefix = '[00:00](#t=0) **spk:1** ';
+            const bodyChars = mode === 'minimal' ? limit - (minimalBytes + 100) - prefix.length : limit - prefix.length + 1;
+            vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+            vi.mocked(fetchBatchResult).mockResolvedValue({
+                durationMilliseconds: 60_000,
+                recognizedPhrases: [{
+                    offsetMilliseconds: 0, durationMilliseconds: 2000, speaker: 1, recognitionStatus: 'Success',
+                    nBest: [{ display: 'a'.repeat(bodyChars), confidence: 0.4 }],
+                }],
+            });
+            const res = await statusPOST(req({ jobId: 'job-1' }));
+            expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
+            expect(documentDb.data).toMatchObject({ status: 'completed' });
+            expect((documentDb.data?.transcription as string).length).toBe(prefix.length + bodyChars);
+            if (mode === 'minimal') {
+                expect(documentDb.data?.transcriptReview).toMatchObject({
+                    availability: 'unavailable', unavailableReason: 'storage_budget', candidates: [], sourceJobId: 'job-1',
+                });
+                expect(documentDb.warn).toHaveBeenCalledWith('要確認候補が文書の保存予算に収まらないため最小形にする',
+                    expect.objectContaining({ jobId: 'job-1', candidates: 1 }));
+            } else {
+                expect(documentDb.data).not.toHaveProperty('transcriptReview');
+                expect(documentDb.warn).toHaveBeenCalledWith('最小形でも収まらないため要確認候補を省く（本文は保存する）',
+                    expect.objectContaining({ jobId: 'job-1' }));
+            }
+            expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+            expect(deleteBatchJob).toHaveBeenCalledTimes(1);
+        },
+    );
 
     it('commit 失敗後の再確定でも要確認候補は同じ入力から同じ内容になる（append しない）', async () => {
         vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });

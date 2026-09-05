@@ -30,12 +30,13 @@ import {
 import {
     buildTranscriptWithAnchors,
     describeBatchModel,
-    fitReviewToDocumentBudget,
+    reviewFitsDocument,
     sourceTextHashOf,
     withParagraphAnchors,
 } from '@/server/finalizeTranscription';
 import {
-    buildReviewCandidates,
+    applyReviewBudget,
+    buildReviewCandidatesSafe,
     buildUnavailableReview,
     phraseIdFor,
     type ReviewPhraseInput,
@@ -143,9 +144,13 @@ const toReviewPhrases = (parsed: ParsedBatch): ReviewPhraseInput[] =>
         .sort((a, b) => a.index - b.index);
 
 /**
- * 要確認候補を作る（設計 B2/B4）。判定ロジックは抽出側（reviewCandidates）のものを呼ぶだけ。
- * 🔴 候補の生成・アンカー付与・保存予算で何が起きても**本文は完成させる**: 例外は availability='unavailable'＋理由に落とし、
- *    予算に収まらなければ review 自体を省く（undefined＝フィールドを書かない）。文書を failed にするのは本文側の失敗だけ。
+ * 要確認候補を作る（設計 B2/B4・lead 裁定 2026-09-05）。判定・候補予算の規則は抽出側（reviewCandidates）のものを呼ぶだけ。
+ * 手順: buildReviewCandidatesSafe → withParagraphAnchors → applyReviewBudget → 文書全体の保存見積り。
+ * 🔴 applyReviewBudget はアンカーを補った**後**に再適用する（1 件あたり数十バイト増えるので、抽出時に上限ぎりぎりだと
+ *    最終形で 128 KiB を超え得る）。予算規則は applyReviewBudget が単一の正（ここで独自に候補を選び直さない）。
+ * 🔴 候補側で何が起きても**本文は完成させる**: 例外は unavailable（internal_error）、文書全体の予算に収まらなければ
+ *    最小形（storage_budget）、最小形でも収まらなければ review 自体を省く（undefined＝フィールドを書かない）。
+ *    文書を failed にするのは本文側の失敗だけ。
  */
 function buildReviewForDocument(
     job: TranscriptionJob,
@@ -156,35 +161,36 @@ function buildReviewForDocument(
     const sourceTextHash = sourceTextHashOf(markdown);
     let review: TranscriptReview;
     try {
-        const extracted = buildReviewCandidates(toReviewPhrases(parsed), job.id, sourceTextHash, {
+        const extracted = buildReviewCandidatesSafe(toReviewPhrases(parsed), job.id, sourceTextHash, {
             threshold: LOW_CONFIDENCE_THRESHOLD,
-            // 結果音声長を超える不正時刻を再生に使わない（0 は長さ不明として無視される）
-            audioSec: parsed.audioSec,
+            // 結果音声長を超える不正時刻を再生に使わない。長さ不明（0）は渡さない
+            ...(parsed.audioSec > 0 && { audioSec: parsed.audioSec }),
         });
+        if (extracted.availability === 'unavailable') {
+            logger.warn('要確認候補を作れなかった（本文は完成させる）', { jobId: job.id, reason: extracted.unavailableReason });
+        }
         // 段落アンカーは句 index → phraseId で引く（抽出側の採番関数を使う。ID 形式は推測しない）
         const lineByPhraseId = new Map<string, number>();
         for (const [phraseIndex, line] of phraseLineByIndex) lineByPhraseId.set(phraseIdFor(phraseIndex), line);
-        review = withParagraphAnchors(extracted, lineByPhraseId);
+        review = applyReviewBudget(withParagraphAnchors(extracted, lineByPhraseId));
     } catch (error) {
         logger.warn('要確認候補の生成に失敗（本文は完成させる）', {
             jobId: job.id, reason: error instanceof Error ? error.message : String(error),
         });
         review = buildUnavailableReview(job.id, sourceTextHash, 'internal_error', LOW_CONFIDENCE_THRESHOLD);
     }
-    try {
-        const fitted = fitReviewToDocumentBudget(review, Buffer.byteLength(markdown, 'utf8'));
-        if (fitted.adjustment !== 'none') {
-            logger.warn('要確認候補を保存予算に合わせて調整', {
-                jobId: job.id, adjustment: fitted.adjustment, candidates: review.candidates.length,
-            });
-        }
-        return fitted.review;
-    } catch (error) {
-        logger.warn('要確認候補の保存予算の判定に失敗（候補を省いて本文を完成させる）', {
-            jobId: job.id, reason: error instanceof Error ? error.message : String(error),
+    const markdownBytes = Buffer.byteLength(markdown, 'utf8');
+    if (!reviewFitsDocument(review, markdownBytes)) {
+        logger.warn('要確認候補が文書の保存予算に収まらないため最小形にする', {
+            jobId: job.id, candidates: review.candidates.length, markdownBytes,
         });
-        return undefined;
+        review = buildUnavailableReview(job.id, sourceTextHash, 'storage_budget', LOW_CONFIDENCE_THRESHOLD);
+        if (!reviewFitsDocument(review, markdownBytes)) {
+            logger.warn('最小形でも収まらないため要確認候補を省く（本文は保存する）', { jobId: job.id, markdownBytes });
+            return undefined;
+        }
     }
+    return review;
 }
 
 /**

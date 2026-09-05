@@ -14,7 +14,7 @@ import {
     buildTranscriptWithAnchors,
     DOCUMENT_OVERHEAD_HEADROOM_BYTES,
     FIRESTORE_MAX_DOCUMENT_BYTES,
-    fitReviewToDocumentBudget,
+    reviewFitsDocument,
     sourceTextHashOf,
     withParagraphAnchors,
 } from './finalizeTranscription';
@@ -226,59 +226,27 @@ describe('withParagraphAnchors', () => {
     });
 });
 
-describe('fitReviewToDocumentBudget', () => {
-    it('予算内なら内容そのまま（none）。undefined 値だけ落とす（Admin SDK は undefined を拒否する）', () => {
-        const review = reviewOf([candidate('p0', { paragraphStartLine: 3, confidence: undefined })]);
-        const fitted = fitReviewToDocumentBudget(review, 10_000);
-        expect(fitted.adjustment).toBe('none');
-        expect(fitted.review).toEqual(reviewOf([candidate('p0', { paragraphStartLine: 3 })]));
-        expect(fitted.review?.candidates[0]).not.toHaveProperty('confidence');
-        expect(JSON.stringify(fitted.review)).toBe(JSON.stringify(review));
-    });
+describe('reviewFitsDocument', () => {
+    const limit = FIRESTORE_MAX_DOCUMENT_BYTES - DOCUMENT_OVERHEAD_HEADROOM_BYTES;
 
-    it('🔴 アンカー込みで 128 KiB を超えるなら抽出側の規則で末尾候補を落とし partial にする（総件数とアンカーは保つ）', () => {
-        // 抽出側の予算（アンカー無し）ちょうど 128 KiB に合わせ、アンカーを足すと超える形を作る
-        const base = Array.from({ length: 100 }, (_, i) => candidate(`p${i}`, { excerpt: 'あ'.repeat(100), startSec: i, endSec: i + 1 }));
-        const padding = REVIEW_MAX_JSON_BYTES - jsonBytes(reviewOf(base));
-        expect(padding).toBeGreaterThan(0);
-        const padded = reviewOf(base.map((c, i) => i === 0 ? { ...c, excerpt: c.excerpt + 'x'.repeat(padding) } : c));
-        expect(jsonBytes(padded)).toBe(REVIEW_MAX_JSON_BYTES);
-        const anchored = withParagraphAnchors(padded, new Map(base.map((c, i) => [c.phraseId, i * 2 + 1] as const)));
-        expect(jsonBytes(anchored)).toBeGreaterThan(REVIEW_MAX_JSON_BYTES);
-
-        const fitted = fitReviewToDocumentBudget(anchored, 10_000);
-        expect(fitted.adjustment).toBe('trimmed');
-        const saved = fitted.review!;
-        expect(saved.availability).toBe('partial');
-        expect(saved.candidates.length).toBeLessThan(100);
-        expect(saved.candidates.length).toBeGreaterThan(0);
-        expect(saved.summary.savedCandidates).toBe(saved.candidates.length);
-        expect(saved.summary.candidateTotal).toBe(100);
-        // 先頭からの並びを保ち、残った候補のアンカーは残る
-        expect(saved.candidates.map((c) => c.phraseId)).toEqual(anchored.candidates.slice(0, saved.candidates.length).map((c) => c.phraseId));
-        expect(saved.candidates.every((c) => typeof c.paragraphStartLine === 'number')).toBe(true);
-        expect(jsonBytes(saved)).toBeLessThanOrEqual(REVIEW_MAX_JSON_BYTES);
-    });
-
-    it('unavailable はそのまま通す（summary(0) を complete に化けさせない）', () => {
-        const unavailable = buildUnavailableReview('synthetic-job', 'f'.repeat(64), 'internal_error');
-        expect(fitReviewToDocumentBudget(unavailable, 10_000)).toEqual({ review: unavailable, adjustment: 'none' });
-    });
-
-    it('本文＋候補＋見込みが Firestore 上限を超えるなら unavailable（storage_budget）。本文は切り詰めない', () => {
+    it('本文＋候補 JSON＋見込みが 1 MiB 以内なら収まる。1 バイト超えると収まらない', () => {
         const review = reviewOf([candidate('p0', { paragraphStartLine: 1 })]);
-        const limit = FIRESTORE_MAX_DOCUMENT_BYTES - DOCUMENT_OVERHEAD_HEADROOM_BYTES;
-        // ちょうど収まる
-        expect(fitReviewToDocumentBudget(review, limit - jsonBytes(review)).adjustment).toBe('none');
-        // 1 バイト超えると最小形へ
-        const fitted = fitReviewToDocumentBudget(review, limit - jsonBytes(review) + 1);
-        expect(fitted.adjustment).toBe('unavailable');
-        expect(fitted.review).toEqual(buildUnavailableReview('synthetic-job', 'f'.repeat(64), 'storage_budget', LOW_CONFIDENCE_THRESHOLD));
+        expect(reviewFitsDocument(review, limit - jsonBytes(review))).toBe(true);
+        expect(reviewFitsDocument(review, limit - jsonBytes(review) + 1)).toBe(false);
     });
 
-    it('最小形でも収まらなければ review 自体を省く（omitted）', () => {
-        const review = reviewOf([candidate('p0')]);
-        const fitted = fitReviewToDocumentBudget(review, FIRESTORE_MAX_DOCUMENT_BYTES - DOCUMENT_OVERHEAD_HEADROOM_BYTES);
-        expect(fitted).toEqual({ review: undefined, adjustment: 'omitted' });
+    it('候補を全部載せられない本文長でも unavailable の最小形なら収まる（最小形も無理なら false）', () => {
+        const full = reviewOf(Array.from({ length: 50 }, (_, i) => candidate(`p${i}`, { excerpt: 'あ'.repeat(100) })));
+        const minimal = buildUnavailableReview('synthetic-job', 'f'.repeat(64), 'storage_budget', LOW_CONFIDENCE_THRESHOLD);
+        const markdownBytes = limit - jsonBytes(minimal);
+        expect(reviewFitsDocument(full, markdownBytes)).toBe(false);
+        expect(reviewFitsDocument(minimal, markdownBytes)).toBe(true);
+        expect(reviewFitsDocument(minimal, markdownBytes + 1)).toBe(false);
+    });
+
+    it('候補の予算（200 件・128 KiB）はここでは判定しない（applyReviewBudget が単一の正）', () => {
+        const huge = reviewOf(Array.from({ length: 300 }, (_, i) => candidate(`p${i}`, { excerpt: 'い'.repeat(300) })));
+        expect(jsonBytes(huge)).toBeGreaterThan(REVIEW_MAX_JSON_BYTES);
+        expect(reviewFitsDocument(huge, 10_000)).toBe(true);
     });
 });
