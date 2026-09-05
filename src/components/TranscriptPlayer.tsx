@@ -9,6 +9,11 @@
  * 本文（Markdown）側の時刻リンクとこの帯は別ファイルに分かれているため、両者はこのモジュールの
  * 小さなストアで繋ぐ。Provider を足すと lead 側の配線点が増えるので、
  * モジュール内シングルトン + useSyncExternalStore にした（同時に開く文書は常に 1 本）。
+ *
+ * 仕様 B3（要確認箇所）で足したもの:
+ * - `audio`: 音声の可用性。`ready`（コントローラ接続）とは別に、URL の取得と音声要素のロード状態を持つ。
+ *   要確認カードの「音声を再生」はこれが `'ready'` のときだけ押せる（押しても無反応なボタンを出さない）。
+ * - `playbackBlocked`: ブラウザが再生を拒否した（自動再生ポリシー等）。再生済みの見た目にせず、案内を出す。
  */
 
 import React, {
@@ -20,6 +25,16 @@ import React, {
 import { Crosshair, Pause, Play } from 'lucide-react';
 import { formatTimestamp } from '@/lib/transcriptMerge';
 
+/**
+ * 音声の可用性。
+ * - `none`: 文字起こし UI が載っていない（通常の文書・切替直後）
+ * - `loading`: URL の取得中、または音声要素がまだメタデータを読めていない
+ * - `ready`: 音声要素が読めた（再生・シークできる）
+ * - `unavailable`: 音声参照が無い／URL 取得失敗／音声要素のロード失敗（本文の確認・編集はできる）
+ */
+export type TranscriptAudioStatus = 'none' | 'loading' | 'ready' | 'unavailable';
+export type TranscriptAudioUnavailableReason = 'no_audio' | 'url_failed' | 'media_failed';
+
 export interface TranscriptPlaybackSnapshot {
     /** 現在の再生位置（秒） */
     currentSec: number;
@@ -28,8 +43,14 @@ export interface TranscriptPlaybackSnapshot {
     playing: boolean;
     /** 再生中の行へスクロール追従するか。利用者が止められる */
     follow: boolean;
-    /** 音声付きのプレイヤーが実際に載っているか。音声が無い文書ではずっと false */
+    /** 音声付きのプレイヤーが実際に載っているか（コントローラの接続）。音声ロード成功の保証ではない */
     ready: boolean;
+    /** 音声の可用性（URL 取得と音声要素のロード状態を含む） */
+    audio: TranscriptAudioStatus;
+    /** `audio === 'unavailable'` のときの理由。再試行の要否の判断に使う */
+    audioReason: TranscriptAudioUnavailableReason | null;
+    /** 直前の再生要求をブラウザが拒否した（自動再生の拒否）。再生が始まると解ける */
+    playbackBlocked: boolean;
 }
 
 /** 音声要素を持つ側（＝TranscriptPlayer）が登録する実操作 */
@@ -45,6 +66,9 @@ const INITIAL_SNAPSHOT: TranscriptPlaybackSnapshot = {
     playing: false,
     follow: true,
     ready: false,
+    audio: 'none',
+    audioReason: null,
+    playbackBlocked: false,
 };
 
 const createTranscriptPlaybackStore = () => {
@@ -86,6 +110,14 @@ const createTranscriptPlaybackStore = () => {
             controller.seek(Math.max(0, sec));
         },
         setFollow: (follow: boolean): void => patch({ follow }),
+        /** 音声の可用性を置く（URL の取得側とプレイヤーの両方から呼ぶ） */
+        setAudio: (audio: TranscriptAudioStatus, reason: TranscriptAudioUnavailableReason | null = null): void =>
+            patch({ audio, audioReason: audio === 'unavailable' ? reason : null }),
+        /** 音声要素が読めた。`loading` からだけ進める（ロード失敗の後に届く suspend 等で戻さない） */
+        markAudioReady: (): void => {
+            if (state.audio !== 'loading') return;
+            patch({ audio: 'ready', audioReason: null });
+        },
         attach: (next: TranscriptPlaybackController): (() => void) => {
             controller = next;
             patch({ ready: true });
@@ -115,8 +147,25 @@ export const useTranscriptPlayback = (): TranscriptPlaybackSnapshot =>
         transcriptPlayback.getSnapshot,
     );
 
+/**
+ * スクロールの寄せ方。動きを減らす設定（prefers-reduced-motion）ではアニメーションを止める。
+ * matchMedia の無い実行環境（jsdom・SSR）では従来どおり smooth。
+ */
+export const scrollBehaviorForMotion = (): ScrollBehavior => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'smooth';
+    try {
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    } catch {
+        return 'smooth';
+    }
+};
+
 const safeDuration = (value: number | undefined): number =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+
+/** 自動再生ポリシーによる拒否だけを「案内対象」にする。pause() による中断（AbortError）等は含めない */
+const isNotAllowedError = (error: unknown): boolean =>
+    typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'NotAllowedError';
 
 export interface TranscriptPlayerProps {
     /** 再生する音声の URL。無い文書では未指定になり、この帯ごと消える */
@@ -124,6 +173,8 @@ export interface TranscriptPlayerProps {
     /** 総尺が分かっていれば渡す（metadata 読み込み前の表示に使う） */
     durationSec?: number;
     className?: string;
+    /** 音声要素のロード失敗（URL は取れたが再生できない）。呼び出し側が帯を状態表示へ差し替える */
+    onMediaError?: () => void;
 }
 
 /**
@@ -134,6 +185,7 @@ export function TranscriptPlayer({
     audioUrl,
     durationSec,
     className,
+    onMediaError,
 }: TranscriptPlayerProps): React.ReactElement | null {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const snapshot = useTranscriptPlayback();
@@ -144,11 +196,21 @@ export function TranscriptPlayer({
         if (!element) return;
         try {
             const started: unknown = element.play();
-            if (started && typeof (started as Promise<void>).catch === 'function') {
-                void (started as Promise<void>).catch(() => undefined);
+            if (started && typeof (started as Promise<void>).then === 'function') {
+                void (started as Promise<void>).then(
+                    () => transcriptPlayback.patch({ playing: true, playbackBlocked: false }),
+                    (error: unknown) => {
+                        // 🔴 拒否されたのに「再生中」の見た目にしない。自動再生の拒否だけを案内する
+                        transcriptPlayback.patch(
+                            isNotAllowedError(error)
+                                ? { playing: false, playbackBlocked: true }
+                                : { playing: false },
+                        );
+                    },
+                );
             }
         } catch {
-            // 自動再生の拒否や、音声要素を持たない実行環境。帯の状態表示だけ進める
+            // 音声要素を持たない実行環境。帯の状態表示だけ進める
         }
         transcriptPlayback.patch({ playing: true });
     }, []);
@@ -167,6 +229,9 @@ export function TranscriptPlayer({
     useEffect(() => {
         if (!hasAudio) return;
         transcriptPlayback.patch({ durationSec: safeDuration(durationSec) });
+        // 音声要素のロード状態。メタデータが読めていれば ready、まだなら loading（要素のイベントで進める）
+        const element = audioRef.current;
+        transcriptPlayback.setAudio(element && element.readyState >= 1 ? 'ready' : 'loading');
         return transcriptPlayback.attach({
             seek: (sec: number) => {
                 const element = audioRef.current;
@@ -191,6 +256,12 @@ export function TranscriptPlayer({
     };
     const onLoadedMetadata = (event: React.SyntheticEvent<HTMLAudioElement>): void => {
         transcriptPlayback.patch({ durationSec: safeDuration(event.currentTarget.duration) });
+        transcriptPlayback.markAudioReady();
+    };
+    const onMediaLoaded = (): void => transcriptPlayback.markAudioReady();
+    const onError = (): void => {
+        transcriptPlayback.setAudio('unavailable', 'media_failed');
+        onMediaError?.();
     };
 
     return (
@@ -210,7 +281,12 @@ export function TranscriptPlayer({
                 className="hidden"
                 onTimeUpdate={onTimeUpdate}
                 onLoadedMetadata={onLoadedMetadata}
-                onPlay={() => transcriptPlayback.patch({ playing: true })}
+                onLoadedData={onMediaLoaded}
+                onCanPlay={onMediaLoaded}
+                // preload を尊重しないブラウザは読み込みを中断（suspend）する。押せば読み込みが始まるので待たせない
+                onSuspend={onMediaLoaded}
+                onError={onError}
+                onPlay={() => transcriptPlayback.patch({ playing: true, playbackBlocked: false })}
                 onPause={() => transcriptPlayback.patch({ playing: false })}
                 onEnded={() => transcriptPlayback.patch({ playing: false })}
             />

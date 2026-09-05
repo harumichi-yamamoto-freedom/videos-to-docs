@@ -39,6 +39,8 @@ import { createLogger } from '@/lib/logger';
 import { MarkdownDocument } from '@/components/MarkdownDocument';
 import { TranscriptAudioBar, TranscriptAwareMarkdown } from '@/components/TranscriptDocumentView';
 import { renameSpeakerLabel } from '@/components/transcriptMarkdownComponents';
+import { TranscriptReviewPanel } from '@/components/TranscriptReviewPanel';
+import { shouldShowTranscriptReviewPanel } from '@/lib/transcriptDocument';
 import { DocumentPrintPortal } from '@/components/DocumentPrintPortal';
 import { PdfDocumentHeader } from './PdfDocumentHeader';
 import { useDocumentPrint } from '@/hooks/useDocumentPrint';
@@ -580,6 +582,27 @@ export function DocumentDetailPanelView({
         void printPdf();
     };
 
+    // 要確認箇所（仕様 B3）。完成した文字起こし文書だけに置く（時刻リンクの無い通常の議事録には出ない）。
+    // 🔴 パネルは独立コンポーネント（フックはそちらで走る）。ここでは要素を 1 つ置くだけ。
+    //    本文編集中（表示モードでない）は本文アンカーを無効化し、確定した本文（document.text）で照合する。
+    const reviewPanel = !isProcessingDocument && shouldShowTranscriptReviewPanel(document) ? (
+        <TranscriptReviewPanel
+            key={document.id ?? 'document'}
+            documentId={document.id ?? 'document'}
+            review={document.transcriptReview}
+            bodyText={document.text}
+            bodyState={isViewMode ? 'view' : 'editing'}
+            canEdit={isEditable && !saving}
+            onEditBody={isEditable
+                ? () => {
+                    setSaveError(null);
+                    setIsViewMode(false);
+                }
+                : undefined}
+            className={isViewMode ? 'mb-3' : 'max-h-[40%] shrink-0 overflow-y-auto'}
+        />
+    ) : null;
+
     const formatDate = (timestamp: Date | { toDate: () => Date } | undefined): string => {
         if (!timestamp) return '';
         const date = 'toDate' in timestamp ? timestamp.toDate() : timestamp;
@@ -769,21 +792,41 @@ export function DocumentDetailPanelView({
                         onCheck={onCheckProcessingStatus}
                     />
                 ) : isViewMode ? (
-                    <div
-                        className={`pdf-preview pdf-preview--reading pdf-theme-${pdfTheme} pdf-font-${resolvedPdfFont} shadow`}
-                    >
-                        <article className="pdf-document">
-                            {includeMetadata && (
-                                <PdfDocumentHeader document={document} />
-                            )}
-                            <TranscriptAwareMarkdown
-                                className="pdf-markdown"
-                                markdown={document.text}
-                                onRenameSpeaker={(from, to) => {
-                                    setEditedContent(current => renameSpeakerLabel(current, from, to));
-                                }}
+                    <>
+                        {/* 要確認箇所は PDF 本文領域（pdf-preview）の外。印刷・コピー・Markdown 保存に操作 UI や信頼度の色を混ぜない */}
+                        {reviewPanel}
+                        <div
+                            className={`pdf-preview pdf-preview--reading pdf-theme-${pdfTheme} pdf-font-${resolvedPdfFont} shadow`}
+                        >
+                            <article className="pdf-document">
+                                {includeMetadata && (
+                                    <PdfDocumentHeader document={document} />
+                                )}
+                                <TranscriptAwareMarkdown
+                                    className="pdf-markdown"
+                                    markdown={document.text}
+                                    documentId={document.id}
+                                    review={document.transcriptReview}
+                                    onRenameSpeaker={(from, to) => {
+                                        setEditedContent(current => renameSpeakerLabel(current, from, to));
+                                    }}
+                                />
+                            </article>
+                        </div>
+                    </>
+                ) : reviewPanel ? (
+                    // 編集中も候補の生成時抜粋を参照できるように残す（本文アンカーはパネル側で無効化される）
+                    <div className="flex h-full flex-col gap-3">
+                        {reviewPanel}
+                        <div className="min-h-0 flex-1">
+                            <textarea
+                                value={editedContent}
+                                onChange={(e) => setEditedContent(e.target.value)}
+                                className="w-full h-full min-h-0 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent font-mono text-sm resize-none"
+                                placeholder="コンテンツを入力"
+                                disabled={saving}
                             />
-                        </article>
+                        </div>
                     </div>
                 ) : (
                     <div className="h-full">

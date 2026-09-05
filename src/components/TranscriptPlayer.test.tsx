@@ -349,3 +349,98 @@ describe('本文の読み取り（純関数）', () => {
         expect(parseClockDisplay('12')).toBeNull();
     });
 });
+
+describe('音声の可用性（仕様 B3）', () => {
+    it('プレイヤーが載ると loading、メタデータが読めたら ready、外れると none に戻る', async () => {
+        await render(<TranscriptPlayer audioUrl="https://example.test/a.m4a" />);
+        expect(transcriptPlayback.getSnapshot().audio).toBe('loading');
+        expect(transcriptPlayback.getSnapshot().ready).toBe(true);
+
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('loadedmetadata'));
+        });
+        expect(transcriptPlayback.getSnapshot().audio).toBe('ready');
+
+        await render(<TranscriptPlayer audioUrl={null} />);
+        expect(transcriptPlayback.getSnapshot().audio).toBe('none');
+        expect(transcriptPlayback.getSnapshot().ready).toBe(false);
+    });
+
+    it('preload を尊重しない環境（suspend）でも ready にして、押せば読み込みが始まる形にする', async () => {
+        await render(<TranscriptPlayer audioUrl="https://example.test/a.m4a" />);
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('suspend'));
+        });
+        expect(transcriptPlayback.getSnapshot().audio).toBe('ready');
+    });
+
+    it('音声要素のロード失敗は unavailable(media_failed)。その後の suspend で ready に戻さない', async () => {
+        const onMediaError = vi.fn();
+        await render(<TranscriptPlayer audioUrl="https://example.test/a.m4a" onMediaError={onMediaError} />);
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('error'));
+        });
+        expect(transcriptPlayback.getSnapshot().audio).toBe('unavailable');
+        expect(transcriptPlayback.getSnapshot().audioReason).toBe('media_failed');
+        expect(onMediaError).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('suspend'));
+        });
+        expect(transcriptPlayback.getSnapshot().audio).toBe('unavailable');
+    });
+
+    it('🔴 再生がブラウザに拒否されたら（NotAllowedError）再生中の見た目にせず、playbackBlocked を立てる', async () => {
+        const blocked = new Error('play() failed because the user didn\'t interact with the document first.');
+        blocked.name = 'NotAllowedError';
+        vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(async () => {
+            throw blocked;
+        });
+        await render(<TranscriptPlayer audioUrl="https://example.test/a.m4a" durationSec={60} />);
+        await click(container.querySelector('button[aria-label="再生"]'));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(transcriptPlayback.getSnapshot().playing).toBe(false);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(true);
+        expect(container.querySelector('button[aria-label="再生"]')).not.toBeNull();
+
+        // 実際に再生が始まれば解ける
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('play'));
+        });
+        expect(transcriptPlayback.getSnapshot().playing).toBe(true);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(false);
+    });
+
+    it('pause() による中断（AbortError）は拒否として案内しない', async () => {
+        const aborted = new Error('The play() request was interrupted by a call to pause().');
+        aborted.name = 'AbortError';
+        vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(async () => {
+            throw aborted;
+        });
+        await render(<TranscriptPlayer audioUrl="https://example.test/a.m4a" durationSec={60} />);
+        await click(container.querySelector('button[aria-label="再生"]'));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(transcriptPlayback.getSnapshot().playing).toBe(false);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(false);
+    });
+
+    it('時刻リンクからの seek も同じ経路（拒否されれば blocked）', async () => {
+        const blocked = new Error('blocked');
+        blocked.name = 'NotAllowedError';
+        vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(async () => {
+            throw blocked;
+        });
+        await render(transcriptView(TRANSCRIPT, { audioUrl: 'https://example.test/a.m4a' }));
+        await click(container.querySelector('a[data-timestamp-sec="12"]'));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(transcriptPlayback.getSnapshot().currentSec).toBe(12);
+        expect(transcriptPlayback.getSnapshot().playing).toBe(false);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(true);
+    });
+});

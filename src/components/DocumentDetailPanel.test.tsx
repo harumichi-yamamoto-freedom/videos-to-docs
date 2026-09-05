@@ -18,6 +18,9 @@ import {
 } from './DocumentDetailPanel';
 import type { DocumentStatusWatchSnapshot } from '@/hooks/batchTranscriptionClient';
 import { PdfDocumentHeader } from './PdfDocumentHeader';
+import { TranscriptReviewPanel } from './TranscriptReviewPanel';
+import { TranscriptAwareMarkdown } from './TranscriptDocumentView';
+import type { TranscriptReview } from '@/lib/transcriptReviewContract';
 
 const { createPortal, documentPrintPortal, printPdf } = vi.hoisted(() => ({
     createPortal: vi.fn((children: React.ReactNode) => children),
@@ -1772,6 +1775,142 @@ describe('DocumentDetailPanel', () => {
                 .toBe('画面が非表示のため自動確認を止めています。表示に戻ると確認を再開します。');
             expect(describeProcessingFreshness(null, null))
                 .toBe('状態を確認できません。「状態を確認」をお試しください。');
+        });
+    });
+
+    describe('要確認箇所パネル（仕様 B3）', () => {
+        /** 合成の要確認データ（架空の会話） */
+        const syntheticReview: TranscriptReview = {
+            version: 1,
+            threshold: 0.75,
+            sourceTextHash: '0'.repeat(64),
+            sourceJobId: 'job-synthetic',
+            summary: {
+                totalPhrases: 1, lowConfidence: 1, recognitionFlagged: 0, candidateTotal: 1,
+                unknownConfidence: 0, unknownRecognitionStatus: 0, noTimeCandidates: 0, savedCandidates: 1,
+            },
+            availability: 'complete',
+            candidates: [{
+                phraseId: 'p-0', reasons: ['low_confidence'], excerpt: 'いえ、こちらこそ', excerptTruncated: false,
+                confidence: 0.5, startSec: 12.2, endSec: 14, paragraphStartLine: 1,
+            }],
+        };
+        const transcriptText = '[00:12](#t=12) **お客様** いえ、こちらこそ。';
+        const reviewDocument: Transcription = {
+            ...document,
+            id: 'review-1',
+            text: transcriptText,
+            transcriptReview: syntheticReview,
+        };
+
+        type AnyElement = React.ReactElement<Record<string, unknown> & { children?: React.ReactNode }>;
+        const findElement = (
+            node: React.ReactNode,
+            predicate: (element: AnyElement) => boolean,
+        ): AnyElement | null => {
+            if (Array.isArray(node)) {
+                for (const child of node) {
+                    const found = findElement(child, predicate);
+                    if (found) return found;
+                }
+                return null;
+            }
+            if (!React.isValidElement<Record<string, unknown> & { children?: React.ReactNode }>(node)) return null;
+            if (predicate(node)) return node;
+            return findElement(node.props.children, predicate);
+        };
+        const findReviewPanel = (node: React.ReactNode): React.ReactElement<React.ComponentProps<typeof TranscriptReviewPanel>> | null =>
+            findElement(node, element => element.type === TranscriptReviewPanel) as
+                React.ReactElement<React.ComponentProps<typeof TranscriptReviewPanel>> | null;
+        const findTextarea = (node: React.ReactNode): AnyElement | null =>
+            findElement(node, element => element.type === 'textarea');
+
+        it('🔴 review を持つ完成文書では、表示モードで本文の上（pdf-preview の外）にパネルを置き、本文照合の材料を渡す', () => {
+            mockPanelState();
+            const tree = DocumentDetailPanel({ document: reviewDocument, onDocumentUpdate: async () => undefined });
+
+            const panel = findReviewPanel(tree);
+            expect(panel).not.toBeNull();
+            expect(panel?.props.documentId).toBe('review-1');
+            expect(panel?.props.review).toBe(syntheticReview);
+            expect(panel?.props.bodyText).toBe(transcriptText);
+            expect(panel?.props.bodyState).toBe('view');
+            expect(panel?.props.canEdit).toBe(true);
+            expect(typeof panel?.props.onEditBody).toBe('function');
+
+            // PDF 本文領域（印刷・コピーの対象）の中には置かない
+            const preview = findPdfPreview(tree);
+            expect(preview).not.toBeNull();
+            expect(findReviewPanel(preview)).toBeNull();
+
+            // 本文の描画側にも文書 ID と review を渡す（段落バッジはハッシュ一致時だけ描かれる）
+            const markdown = findElement(tree, element => element.type === TranscriptAwareMarkdown);
+            expect(markdown?.props.documentId).toBe('review-1');
+            expect(markdown?.props.review).toBe(syntheticReview);
+        });
+
+        it('編集モードでは bodyState=editing でパネルを残し、textarea と並べる', () => {
+            mockPanelState({ isViewMode: false });
+            const tree = DocumentDetailPanel({ document: reviewDocument, onDocumentUpdate: async () => undefined });
+
+            const panel = findReviewPanel(tree);
+            expect(panel?.props.bodyState).toBe('editing');
+            expect(findTextarea(tree)).not.toBeNull();
+            expect(findPdfPreview(tree)).toBeNull();
+        });
+
+        it('閲覧専用（onDocumentUpdate 無し）では canEdit=false・onEditBody 無し（確認・再生だけ）', () => {
+            mockPanelState();
+            const tree = DocumentDetailPanel({ document: reviewDocument });
+            const panel = findReviewPanel(tree);
+            expect(panel).not.toBeNull();
+            expect(panel?.props.canEdit).toBe(false);
+            expect(panel?.props.onEditBody).toBeUndefined();
+        });
+
+        it('保存中は canEdit=false', () => {
+            mockPanelState({ saving: true });
+            const tree = DocumentDetailPanel({ document: reviewDocument, onDocumentUpdate: async () => undefined });
+            expect(findReviewPanel(tree)?.props.canEdit).toBe(false);
+        });
+
+        it('パネルの「本文を編集」は既存の全文編集へ移る（新しいエディタは作らない）', () => {
+            const setIsViewMode = vi.fn();
+            const setSaveError = vi.fn();
+            mockPanelState({ setIsViewMode, setSaveError });
+            const tree = DocumentDetailPanel({ document: reviewDocument, onDocumentUpdate: async () => undefined });
+
+            findReviewPanel(tree)?.props.onEditBody?.();
+            expect(setSaveError).toHaveBeenCalledWith(null);
+            expect(setIsViewMode).toHaveBeenCalledWith(false);
+        });
+
+        it('review の無い文字起こし文書（時刻リンクあり）にもパネルを置く（「信頼度情報がありません」を出す側）', () => {
+            mockPanelState();
+            const tree = DocumentDetailPanel({ document: { ...document, id: 'legacy-1', text: transcriptText } });
+            const panel = findReviewPanel(tree);
+            expect(panel).not.toBeNull();
+            expect(panel?.props.review).toBeUndefined();
+        });
+
+        it('🔴 時刻リンクの無い通常の文書にはパネルを置かない（既存文書の描画木を変えない）', () => {
+            mockPanelState();
+            const tree = DocumentDetailPanel({ document, onDocumentUpdate: async () => undefined });
+            expect(findReviewPanel(tree)).toBeNull();
+            // 編集モードの textarea も従来どおり直下に置く
+            mockPanelState({ isViewMode: false });
+            const editing = DocumentDetailPanel({ document, onDocumentUpdate: async () => undefined });
+            expect(findReviewPanel(editing)).toBeNull();
+            expect(findTextarea(editing)).not.toBeNull();
+        });
+
+        it('processing 文書にはパネルを置かない（仮本文は文字起こし結果ではない）', () => {
+            mockPanelState();
+            const tree = DocumentDetailPanel({
+                document: { ...reviewDocument, id: 'processing-2', status: 'processing' },
+                onDocumentUpdate: async () => undefined,
+            });
+            expect(findReviewPanel(tree)).toBeNull();
         });
     });
 });
