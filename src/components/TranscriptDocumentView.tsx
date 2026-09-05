@@ -61,6 +61,8 @@ export function TranscriptAwareMarkdown({
             if (!hasTranscriptTimestampLinks({ text: markdown })) return undefined;
             return createTranscriptMarkdownComponents({
                 markdown,
+                // 🔴 追従の一時停止を「この文書」に限定するため、review の有無に関わらず文書 ID を渡す
+                ...(documentId && { documentId }),
                 ...(onRenameSpeaker && { onRename: onRenameSpeaker }),
                 ...(anchorsEnabled && documentId && review
                     ? { reviewAnchors: { documentId, anchorsByLine: reviewAnchorsByLine(review.candidates) } }

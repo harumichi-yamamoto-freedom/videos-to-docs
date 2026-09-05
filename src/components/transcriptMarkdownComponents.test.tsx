@@ -4,8 +4,10 @@
  * 本文段落（transcriptMarkdownComponents）× 再生追従 × 候補ジャンプの錠（仕様 B3「候補移動と追従を区別」）。
  *
  * 🔴 候補ジャンプは追従を「一時停止」するだけで、利用者の永続設定 follow を書き換えない。
- *    書き換える実装（setFollow(false)）には 2 つの回帰があった:
- *    (a) 文書 A でジャンプ → 文書 B へ切替後も追従が戻らない（attach の終了処理は follow を持ち越す）。
+ *    一時停止は文書 ID に紐づく（followPauseDocId）。過去の回帰:
+ *    (a) 文書 A でジャンプ → 文書 B へ切替後も追従が戻らない（setFollow(false) 版は follow を持ち越す）。
+ *    (a2) 音声の無い文書 A ではプレイヤーが載らず attach の終了処理が走らない。boolean 版は A の一時停止が
+ *         解けないまま B に持ち越された（docId 照合で解決）。
  *    (b) ジャンプ effect が段落の再マウントで再発火し、利用者が追従を再開しても再び切られる。
  * fixture は全て合成（架空の会話・架空の ID）。実データ・鍵は使わない。
  */
@@ -134,6 +136,8 @@ function view({ documentId, markdown, anchors, bodyKey, playerKey, audioUrl }: V
                 remarkPlugins={[remarkGfm]}
                 components={createTranscriptMarkdownComponents({
                     markdown,
+                    // 🔴 追従の一時停止を「この文書」に限定するため、本文にも文書 ID を渡す（本番の TranscriptDocumentView と同じ）
+                    documentId,
                     reviewAnchors: { documentId, anchorsByLine: anchors },
                 })}
             >
@@ -141,6 +145,26 @@ function view({ documentId, markdown, anchors, bodyKey, playerKey, audioUrl }: V
             </ReactMarkdown>
             <TranscriptPlayer key={playerKey} audioUrl={audioUrl} durationSec={3600} />
         </div>
+    );
+}
+
+/**
+ * 本文（段落バッジ付き）だけ。プレイヤーを載せない＝音声の無い文書の再現。
+ * この文書では `transcriptPlayback.attach` が一度も起きない＝attach の終了処理も走らない。
+ */
+function viewBodyOnly({ documentId, markdown, anchors, bodyKey }: ViewOptions): React.ReactElement {
+    return (
+        <ReactMarkdown
+            key={bodyKey}
+            remarkPlugins={[remarkGfm]}
+            components={createTranscriptMarkdownComponents({
+                markdown,
+                documentId,
+                reviewAnchors: { documentId, anchorsByLine: anchors },
+            })}
+        >
+            {markdown}
+        </ReactMarkdown>
     );
 }
 
@@ -183,7 +207,7 @@ async function jump(documentId: string, line: number, phraseId: string): Promise
 describe('再生追従の通常動作', () => {
     it('follow ON では再生中の段落へ寄せ、follow OFF では強調だけ続けてスクロールしない', async () => {
         await render(view(VIEW_A));
-        expect(playback()).toMatchObject({ ready: true, follow: true, followPausedByJump: false });
+        expect(playback()).toMatchObject({ ready: true, follow: true, followPauseDocId: null });
 
         scrollIntoView.mockClear();
         await tick(30);
@@ -191,7 +215,7 @@ describe('再生追従の通常動作', () => {
         expect(scrolledElements()).toContain(paragraph(3));
 
         await click(followButton());
-        expect(playback()).toMatchObject({ follow: false, followPausedByJump: false });
+        expect(playback()).toMatchObject({ follow: false, followPauseDocId: null });
         scrollIntoView.mockClear();
         await tick(120);
         expect(activeLine()).toBe('7');
@@ -219,7 +243,7 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         expect(scrolledElements()).toEqual([target]);
 
         // 🔴 follow は書き換えない（追従トグルは押されたまま）。一時停止だけが立ち、要求は処理済みになる
-        expect(playback()).toMatchObject({ follow: true, followPausedByJump: true });
+        expect(playback()).toMatchObject({ follow: true, followPauseDocId: DOC_A });
         expect(followButton()?.getAttribute('aria-pressed')).toBe('true');
         const selection = transcriptReviewSelection.getSnapshot();
         expect(selection.paragraphRequest).not.toBeNull();
@@ -240,11 +264,11 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         await render(view(VIEW_A));
         await tick(30);
         await jump(DOC_A, 1, 'p-1');
-        expect(playback()).toMatchObject({ follow: true, followPausedByJump: true });
+        expect(playback()).toMatchObject({ follow: true, followPauseDocId: DOC_A });
 
         // 1 回目: 追従 OFF（永続設定）。一時停止も解ける
         await click(followButton());
-        expect(playback()).toMatchObject({ follow: false, followPausedByJump: false });
+        expect(playback()).toMatchObject({ follow: false, followPauseDocId: null });
         scrollIntoView.mockClear();
         await tick(120);
         expect(activeLine()).toBe('7');
@@ -253,7 +277,7 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         // 2 回目: 追従 ON → 再生中の段落へ寄せる
         scrollIntoView.mockClear();
         await click(followButton());
-        expect(playback()).toMatchObject({ follow: true, followPausedByJump: false });
+        expect(playback()).toMatchObject({ follow: true, followPauseDocId: null });
         expect(scrolledElements()).toContain(paragraph(7));
     });
 
@@ -261,11 +285,11 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         await render(view(VIEW_A));
         await tick(30);
         await jump(DOC_A, 1, 'p-1');
-        expect(playback()).toMatchObject({ follow: true, followPausedByJump: true });
+        expect(playback()).toMatchObject({ follow: true, followPauseDocId: DOC_A });
 
         scrollIntoView.mockClear();
         await click(container.querySelector('a[data-timestamp-sec="120"]'));
-        expect(playback()).toMatchObject({ follow: true, followPausedByJump: false, currentSec: 120 });
+        expect(playback()).toMatchObject({ follow: true, followPauseDocId: null, currentSec: 120 });
         expect(activeLine()).toBe('7');
         expect(scrolledElements()).toContain(paragraph(7));
     });
@@ -277,7 +301,7 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         // 追従を再開（OFF → ON）
         await click(followButton());
         await click(followButton());
-        expect(playback()).toMatchObject({ follow: true, followPausedByJump: false });
+        expect(playback()).toMatchObject({ follow: true, followPauseDocId: null });
 
         scrollIntoView.mockClear();
         await jump(DOC_A, 7, 'p-7');
@@ -285,7 +309,7 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         expect(scrolledElements()).toContain(paragraph(7));
         expect(paragraph(7)?.getAttribute('data-review-target')).toBe('true');
         expect(paragraph(1)?.getAttribute('data-review-target')).toBeNull();
-        expect(playback()).toMatchObject({ follow: true, followPausedByJump: true });
+        expect(playback()).toMatchObject({ follow: true, followPauseDocId: DOC_A });
         const selection = transcriptReviewSelection.getSnapshot();
         expect(selection.consumedNonce).toBe(selection.paragraphRequest?.nonce);
     });
@@ -312,7 +336,7 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         });
         expect(container.querySelector('p[data-review-line="5"]')?.textContent).toContain('三つ目の段落');
         // 🔴 一時停止は文書切替で解け、永続の follow は保持される
-        expect(playback()).toMatchObject({ ready: true, follow: true, followPausedByJump: false, currentSec: 0 });
+        expect(playback()).toMatchObject({ ready: true, follow: true, followPauseDocId: null, currentSec: 0 });
         expect(container.querySelector('[data-review-target]')).toBeNull();
         expect(scrollIntoView).not.toHaveBeenCalled();
 
@@ -320,6 +344,65 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         await tick(30);
         expect(activeLine()).toBe('3');
         expect(container.querySelector('[data-transcript-active="true"]')?.textContent).toContain('二つ目の段落');
+        expect(scrolledElements()).toContain(paragraph(3));
+    });
+
+    // 回帰(a2): 音声の無い文書 A ではプレイヤーが載らない＝attach が起きず終了処理も走らない。
+    // 一時停止を boolean で持つと A の一時停止が解けないまま B に持ち越され、B で追従が戻らなかった。
+    // docId に紐づける（followPauseDocId）ことで、attach の有無に依存せず文書切替で追従が復帰する。
+    it('🔴 回帰(a2): 音声の無い文書 A でジャンプ → 音声付き文書 B へ切替 → B の通常再生で追従が効く', async () => {
+        // 文書 A: プレイヤーを載せない（音声が取得できない文書）。attach は一度も起きない
+        await render(viewBodyOnly(VIEW_A));
+        expect(playback()).toMatchObject({ ready: false, follow: true, followPauseDocId: null });
+
+        // A の段落へジャンプ: プレイヤーが無くても一時停止は docId=A で立つ
+        await jump(DOC_A, 1, 'p-1');
+        expect(document.activeElement).toBe(paragraph(1));
+        expect(playback()).toMatchObject({ ready: false, follow: true, followPauseDocId: DOC_A });
+
+        // 文書 B（音声あり）へ切替。A にはプレイヤーが無かったので終了処理は走っておらず、
+        // B の attach は ready を立てるだけで一時停止は解かない → followPauseDocId は A のまま残る。
+        await act(async () => {
+            transcriptReviewSelection.clear(DOC_A);
+            root.render(<>{view(VIEW_B)}</>);
+        });
+        expect(container.querySelector('p[data-review-line="5"]')?.textContent).toContain('三つ目の段落');
+        // 🔴 一時停止フラグ自体は A のまま持ち越されている（＝終了処理では解けていない）。
+        //    それでも B は自分の docId と照合するので一時停止扱いにならない。
+        expect(playback()).toMatchObject({ ready: true, follow: true, followPauseDocId: DOC_A });
+
+        // B の通常再生: 追従が効く（旧 boolean モデルではここで引き戻されず追従が死んでいた）
+        await tick(30);
+        expect(activeLine()).toBe('3');
+        expect(container.querySelector('[data-transcript-active="true"]')?.textContent).toContain('二つ目の段落');
+        expect(scrolledElements()).toContain(paragraph(3));
+    });
+
+    // 回帰(a3): 追従の可否は「effect が走る時点の live なストア」で判定する。StrictMode は mount で effect を
+    // 二重起動する（create → destroy → create）。「描画時の値を ref で 1 回飛ばす」実装は二度目の起動で
+    // 誤って寄せてしまうが、live 判定なら二度とも「切替直後は未接続（ready=false）」を見て寄せない。
+    it('🔴 回帰(a3): StrictMode（effect 二重起動）でも文書切替で誤って寄せない', async () => {
+        const renderStrict = async (element: React.ReactElement): Promise<void> => {
+            await act(async () => {
+                root.render(<React.StrictMode>{element}</React.StrictMode>);
+            });
+        };
+        await renderStrict(view(VIEW_A));
+        await tick(30);
+        await jump(DOC_A, 1, 'p-1');
+        await tick(120); // 再生位置を 120 に。B の 5 行目（開始 120）が stale に active 判定されうる位置
+
+        scrollIntoView.mockClear();
+        await act(async () => {
+            transcriptReviewSelection.clear(DOC_A);
+            root.render(<React.StrictMode>{view(VIEW_B)}</React.StrictMode>);
+        });
+        // 🔴 切替の瞬間に前文書の再生位置で誤追従しない（二重起動でも）
+        expect(scrollIntoView).not.toHaveBeenCalled();
+
+        // 切替後の B の通常再生では追従する
+        await tick(30);
+        expect(activeLine()).toBe('3');
         expect(scrolledElements()).toContain(paragraph(3));
     });
 
@@ -342,7 +425,7 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         await act(async () => {
             transcriptPlayback.setFollow(true);
         });
-        expect(playback()).toMatchObject({ follow: true, followPausedByJump: false });
+        expect(playback()).toMatchObject({ follow: true, followPauseDocId: null });
         expect(scrolledElements()).toContain(paragraph(7));
 
         // 親の再描画で本文（段落）が再マウントされる。移動要求（同じ nonce）はストアに残ったまま
@@ -351,7 +434,7 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         expect(transcriptReviewSelection.getSnapshot().paragraphRequest?.nonce).toBe(nonce);
 
         // 🔴 同じ要求を再処理しない: 追従は再び止められず（follow も一時停止も動かない）、ジャンプ先へのフォーカス・寄せも起こさない
-        expect(playback()).toMatchObject({ follow: true, followPausedByJump: false });
+        expect(playback()).toMatchObject({ follow: true, followPauseDocId: null });
         expect(document.activeElement).not.toBe(paragraph(1));
         expect(scrolledElements()).not.toContain(paragraph(1));
         expect(transcriptReviewSelection.getSnapshot().consumedNonce).toBe(nonce);
@@ -363,6 +446,6 @@ describe('候補ジャンプと再生追従の区別（仕様 B3）', () => {
         await tick(30);
         expect(activeLine()).toBe('3');
         expect(scrolledElements()).toContain(paragraph(3));
-        expect(playback()).toMatchObject({ follow: true, followPausedByJump: false });
+        expect(playback()).toMatchObject({ follow: true, followPauseDocId: null });
     });
 });

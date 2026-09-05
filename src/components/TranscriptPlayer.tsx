@@ -14,7 +14,7 @@
  * - `audio`: 音声の可用性。`ready`（コントローラ接続）とは別に、URL の取得と音声要素のロード状態を持つ。
  *   要確認カードの「音声を再生」はこれが `'ready'` のときだけ押せる（押しても無反応なボタンを出さない）。
  * - `playbackBlocked`: ブラウザが再生を拒否した（自動再生ポリシー等）。再生済みの見た目にせず、案内を出す。
- * - `followPausedByJump`: 候補カードからの「本文の該当段落へ移動」で追従を一時的に止めている過渡状態。
+ * - `followPauseDocId`: 候補カードからの「本文の該当段落へ移動」で追従を一時停止している文書 ID（過渡状態）。
  *   🔴 利用者の永続設定 `follow` とは別物で、`follow` を書き換えない（文書切替・再マウントで自動的に解ける）。
  */
 
@@ -54,10 +54,13 @@ export interface TranscriptPlaybackSnapshot {
     /** 直前の再生要求をブラウザが拒否した（自動再生の拒否）。再生が始まると解ける */
     playbackBlocked: boolean;
     /**
-     * 候補ジャンプ（本文の該当段落へ移動）で追従を一時的に止めている。
-     * 🔴 `follow`（利用者の永続設定）は書き換えない過渡状態。追従トグル・シーク・文書切替（attach の終了）・reset で解ける。
+     * 候補ジャンプ（本文の該当段落へ移動）で追従を一時的に止めている「文書 ID」。null = 一時停止なし。
+     * 🔴 `follow`（利用者の永続設定）は書き換えない過渡状態。追従トグル・シーク・reset で解ける。
+     * 🔴 **文書 ID に紐付ける**のが要点。別文書を開けば（＝その文書の段落は自分の docId と照合して）自動的に
+     *    一時停止が外れる。音声の無い文書でジャンプした後に音声付き文書へ切り替えても、attach の終了処理に
+     *    依存せず追従が復帰する（音声が無いと attach が起きず終了処理も走らないため、boolean だと解けなかった）。
      */
-    followPausedByJump: boolean;
+    followPauseDocId: string | null;
 }
 
 /** 音声要素を持つ側（＝TranscriptPlayer）が登録する実操作 */
@@ -76,7 +79,7 @@ const INITIAL_SNAPSHOT: TranscriptPlaybackSnapshot = {
     audio: 'none',
     audioReason: null,
     playbackBlocked: false,
-    followPausedByJump: false,
+    followPauseDocId: null,
 };
 
 const createTranscriptPlaybackStore = () => {
@@ -115,16 +118,17 @@ const createTranscriptPlaybackStore = () => {
         seek: (sec: number): void => {
             if (!controller || !Number.isFinite(sec)) return;
             // 利用者が再生位置を動かした＝候補ジャンプの一時停止から追従へ復帰する
-            patch({ currentSec: Math.max(0, sec), followPausedByJump: false });
+            patch({ currentSec: Math.max(0, sec), followPauseDocId: null });
             controller.seek(Math.max(0, sec));
         },
         /** 追従の入切（利用者の永続設定）。トグル操作は候補ジャンプの一時停止を必ず解く */
-        setFollow: (follow: boolean): void => patch({ follow, followPausedByJump: false }),
+        setFollow: (follow: boolean): void => patch({ follow, followPauseDocId: null }),
         /**
-         * 候補ジャンプ中の追従の一時停止（次の時刻更新でジャンプ先から引き戻さない）。
-         * 🔴 `follow` は書き換えない。解除は setFollow / seek / attach の終了（文書切替・再マウント）/ reset。
+         * 候補ジャンプ中の追従の一時停止を、その文書 ID で立てる（次の時刻更新でジャンプ先から引き戻さない）。
+         * 🔴 `follow`（永続設定）は書き換えない。別文書の段落は自分の docId と照合するので自動的に無効になり、
+         *    音声の有無に依存しない。明示的な解除は setFollow / seek / reset。
          */
-        pauseFollowForJump: (): void => patch({ followPausedByJump: true }),
+        pauseFollowForJump: (documentId: string): void => patch({ followPauseDocId: documentId }),
         /** 音声の可用性を置く（URL の取得側とプレイヤーの両方から呼ぶ） */
         setAudio: (audio: TranscriptAudioStatus, reason: TranscriptAudioUnavailableReason | null = null): void =>
             patch({ audio, audioReason: audio === 'unavailable' ? reason : null }),
@@ -139,8 +143,9 @@ const createTranscriptPlaybackStore = () => {
             return () => {
                 if (controller !== next) return;
                 controller = null;
-                // 🔴 利用者の永続設定 `follow` だけを持ち越す。候補ジャンプの一時停止（followPausedByJump）は
-                //    INITIAL 由来で false に戻る＝文書切替・再マウントで自動的に解ける
+                // 🔴 利用者の永続設定 `follow` だけを持ち越す。候補ジャンプの一時停止（followPauseDocId）は
+                //    INITIAL 由来で null に戻る。ただし解除の主経路は docId 照合（音声が無い文書では attach 自体が
+                //    起きないため、ここに依存しない）。
                 state = { ...INITIAL_SNAPSHOT, follow: state.follow };
                 emit();
             };

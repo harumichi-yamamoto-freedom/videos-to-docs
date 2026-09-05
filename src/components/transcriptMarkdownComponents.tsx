@@ -176,7 +176,7 @@ function ReviewParagraphBadge({ anchor }: { anchor: TranscriptReviewParagraphAnc
  * 1 回だけ寄せてフォーカスを受ける。🔴 これは再生中の追従とは別（追従の入切に関係なく動き、色も分ける）。
  *
  * 🔴 候補ジャンプと追従の区別（B3）:
- * - ジャンプ中は追従を「一時停止」する（`followPausedByJump`）。利用者の永続設定 `follow` は書き換えない。
+ * - ジャンプ中は追従を「一時停止」する（`followPauseDocId`＝その文書に限定）。利用者の永続設定 `follow` は書き換えない。
  *   書き換えると、文書を切り替えても追従が戻らない／利用者が追従を再開しても再マウントで再び切られる。
  * - 同じ移動要求は 1 回だけ処理する（`consumedNonce`）。段落が再マウントされても同じ nonce では再処理しない。
  */
@@ -184,17 +184,23 @@ function TranscriptLine({
     startSec,
     nextSec,
     reviewAnchor,
+    currentDocumentId,
     children,
     ...rest
 }: {
     startSec: number;
     nextSec: number | null;
     reviewAnchor: TranscriptReviewParagraphAnchor | null;
+    /** この本文が属する文書 ID。候補ジャンプの一時停止をこの文書に限定するために使う */
+    currentDocumentId?: string;
     children?: React.ReactNode;
 } & React.HTMLAttributes<HTMLParagraphElement>): React.ReactElement {
-    const { currentSec, follow, followPausedByJump, ready } = useTranscriptPlayback();
+    const { currentSec, follow, followPauseDocId, ready } = useTranscriptPlayback();
     const selection = useTranscriptReviewSelection();
     const consumedNonce = selection.consumedNonce;
+    // 🔴 追従の一時停止は「その文書」に限定する。別文書を開けば docId が一致せず自動的に解ける
+    //    （音声の無い文書でジャンプ→音声付き文書へ切替でも復帰する。attach の終了処理に依存しない）。
+    const followPaused = followPauseDocId !== null && followPauseDocId === currentDocumentId;
     const ref = useRef<HTMLParagraphElement | null>(null);
     const active =
         ready && currentSec >= startSec && (nextSec === null || currentSec < nextSec);
@@ -208,13 +214,22 @@ function TranscriptLine({
     const isTarget = targetNonce !== null;
 
     useEffect(() => {
-        // 🔴 追従は利用者が止められる（follow）。候補ジャンプ中は一時停止（followPausedByJump）。どちらでもここへ来ない
-        if (!active || !follow || followPausedByJump) return;
+        // 🔴 追従の可否は「effect が走る時点（flush）の live なストア」で判定する（描画時に固定した値では判定しない）。
+        //    文書を切り替えた瞬間、React は新文書の段落を先に描画し、そのとき共有ストアにはまだ前文書の再生位置
+        //    （currentSec）と ready が載っている。すると前文書の位置に対応する新文書の段落が一瞬 active と判定され、
+        //    描画時の値で寄せると誤追従になる。前プレイヤーの離脱（＝ストア初期化）は、この create effect より前の
+        //    destroy フェーズで走るので、flush 時に読み直せば正しく「まだ未接続（ready=false）」を見て寄せない。
+        //    依存配列は「再生位置が進む・follow / 一時停止が変わる」という描画由来の変化で再評価するための引き金。
+        const snap = transcriptPlayback.getSnapshot();
+        const followPausedNow = snap.followPauseDocId !== null && snap.followPauseDocId === currentDocumentId;
+        const activeNow = snap.ready && snap.currentSec >= startSec && (nextSec === null || snap.currentSec < nextSec);
+        // 🔴 追従は利用者が止められる（follow）。候補ジャンプ中はこの文書だけ一時停止（followPausedNow）。どちらでもここへ来ない
+        if (!activeNow || !snap.follow || followPausedNow) return;
         const element = ref.current;
         if (element && typeof element.scrollIntoView === 'function') {
             element.scrollIntoView({ block: 'center', behavior: scrollBehaviorForMotion() });
         }
-    }, [active, follow, followPausedByJump]);
+    }, [active, follow, followPaused, startSec, nextSec, currentDocumentId]);
 
     useEffect(() => {
         // 🔴 未処理の要求だけを処理する。処理済み（consumedNonce）の同じ nonce が再マウントで再び来ても何もしない
@@ -222,8 +237,8 @@ function TranscriptLine({
         // 🔴 候補ジャンプ中は再生追従を「一時停止」する（次の時刻更新でジャンプ先から引き戻さない）。
         //    B3「選択した候補の移動と再生中段落の追従は区別する」。永続設定 follow は書き換えない
         //    （setFollow(false) だと文書切替後も追従が戻らず、再開しても再マウントで再び切られる）。
-        //    解除は追従トグル・シーク・文書切替（プレイヤーの再 attach）。
-        transcriptPlayback.pauseFollowForJump();
+        //    解除は追従トグル・シーク・文書切替（docId 照合で自動）。
+        if (reviewAnchor) transcriptPlayback.pauseFollowForJump(reviewAnchor.documentId);
         const element = ref.current;
         if (element) {
             // 候補からの移動。フォーカスを渡してから寄せる（動きを減らす設定ではアニメーションなし）
@@ -394,6 +409,11 @@ export interface TranscriptReviewAnchorOptions {
 export interface TranscriptMarkdownComponentsOptions {
     /** 表示している本文。話者ラベルの検出と「何箇所変わるか」の算出に使う */
     markdown: string;
+    /**
+     * この本文が属する文書 ID。候補ジャンプによる追従の一時停止をこの文書に限定するために使う
+     * （別文書を開けば docId が一致せず自動的に解ける）。文書 ID が無い文脈では未指定でよい。
+     */
+    documentId?: string;
     /** 話者改名。実際の保存は呼び出し側（このコンポーネントは呼ぶところまで） */
     onRename?: (from: string, to: string) => void;
     /** 欠落区間の再試行 */
@@ -404,6 +424,7 @@ export interface TranscriptMarkdownComponentsOptions {
 
 export const createTranscriptMarkdownComponents = ({
     markdown,
+    documentId,
     onRename,
     onRetryGap,
     reviewAnchors,
@@ -491,6 +512,7 @@ export const createTranscriptMarkdownComponents = ({
                     startSec={startSec}
                     nextSec={nextTimestampAfter(startSec)}
                     reviewAnchor={anchorFor(node)}
+                    {...(documentId !== undefined && { currentDocumentId: documentId })}
                     {...rest}
                 >
                     {children}

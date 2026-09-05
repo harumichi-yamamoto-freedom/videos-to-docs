@@ -660,7 +660,7 @@ describe('本文の段落バッジとの往復', () => {
             <div>
                 <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
-                    components={createTranscriptMarkdownComponents({ markdown: TRANSCRIPT, reviewAnchors: anchors() })}
+                    components={createTranscriptMarkdownComponents({ markdown: TRANSCRIPT, documentId: DOC_ID, reviewAnchors: anchors() })}
                 >
                     {TRANSCRIPT}
                 </ReactMarkdown>
@@ -726,7 +726,7 @@ describe('本文の段落バッジとの往復', () => {
             <div>
                 <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
-                    components={createTranscriptMarkdownComponents({ markdown: TRANSCRIPT, reviewAnchors: anchors() })}
+                    components={createTranscriptMarkdownComponents({ markdown: TRANSCRIPT, documentId: DOC_ID, reviewAnchors: anchors() })}
                 >
                     {TRANSCRIPT}
                 </ReactMarkdown>
@@ -756,7 +756,7 @@ describe('本文の段落バッジとの往復', () => {
         expect(document.activeElement).toBe(target);
         expect(scrollIntoView).toHaveBeenCalledTimes(1); // ジャンプの 1 回だけ
         // 🔴 永続の follow は書き換えない（追従トグルは押されたまま）。一時停止だけが立つ
-        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPausedByJump: true });
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPauseDocId: DOC_ID });
         expect(container.querySelector('button[aria-pressed]')?.getAttribute('aria-pressed')).toBe('true');
 
         // 次の時刻更新（120 秒 → 7 行目が現在行）でも、ジャンプ先から引き戻されない
@@ -770,7 +770,7 @@ describe('本文の段落バッジとの往復', () => {
         // 候補カードの「音声を再生」（＝シーク: 利用者が再生位置を動かした）で一時停止が解け、通常の追従に戻る
         scrollIntoView.mockClear();
         await click(playButton('p-3'));
-        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPausedByJump: false, currentSec: 30 });
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPauseDocId: null, currentSec: 30 });
         expect(container.querySelector('[data-transcript-active="true"]')?.getAttribute('data-review-line')).toBe('3');
         expect(scrollIntoView).toHaveBeenCalled();
     });
