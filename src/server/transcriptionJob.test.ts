@@ -411,6 +411,29 @@ describe('commitTerminalOutcome', () => {
         expect(doubles.jobs.get(JOB_PATH)).not.toHaveProperty('transcriptReview');
     });
 
+    it('🔴 文書全体が 1MiB を超えるときは要確認データを省いて本文だけ保存する（B4・実 title を含めて判定）', async () => {
+        // 極端に長い title があると、本文＋review で Firestore の 1MiB を超え得る。route の事前チェックは title を
+        // 見ないので、終端トランザクション内で実フィールドを含めて最終判定し、review を落として本文だけ保存する。
+        doubles.jobs.set(DOC_PATH, makeDocument({ title: 'a'.repeat(1_040_000) }));
+        await expect(commitTerminalOutcome(terminalParams(reviewOutcome))).resolves.toBe('committed');
+        const docWrite = doubles.set.mock.calls.find((call) => call[0].id === DOC_PATH)?.[1] as Record<string, unknown>;
+        expect(docWrite).toMatchObject({ transcription: successOutcome.transcription, status: 'completed' });
+        expect(docWrite).not.toHaveProperty('transcriptReview');
+        expect(doubles.warn).toHaveBeenCalledWith(
+            '文書全体が保存上限に近いため要確認データを省いて本文だけ保存',
+            expect.objectContaining({ docId: DOC_ID }),
+        );
+        // 本文は保存できたので job は成功で終端化する
+        expect(doubles.jobs.get(JOB_PATH)?.status).toBe('succeeded');
+    });
+
+    it('文書全体が上限内なら要確認データはそのまま保存する（実 title を含めても収まる）', async () => {
+        doubles.jobs.set(DOC_PATH, makeDocument({ title: '通常のファイル名.mp4' }));
+        await expect(commitTerminalOutcome(terminalParams(reviewOutcome))).resolves.toBe('committed');
+        const docWrite = doubles.set.mock.calls.find((call) => call[0].id === DOC_PATH)?.[1] as Record<string, unknown>;
+        expect(docWrite).toHaveProperty('transcriptReview', syntheticReview);
+    });
+
     it('review 付きでも本文の書き込みが失敗したら候補も残らず、リース切れ後に再確定できる', async () => {
         const error = new Error('synthetic transaction failure');
         doubles.set.mockImplementationOnce(() => { throw error; });

@@ -20,6 +20,17 @@ const logger = createLogger('server/transcriptionJob');
 export const TRANSCRIPTION_JOBS_COLLECTION = 'transcriptionJobs';
 
 /**
+ * Firestore の 1 文書上限（1 MiB）と、その手前で確保する余白。
+ * 🔴 要確認データ(transcriptReview)を載せた**文書全体**がこの上限を超えないかは、既存フィールド（title 等）の
+ *    実サイズを含めて確定判定しなければならない。route 側の reviewFitsDocument は本文＋review＋一定の余白しか見ないため、
+ *    極端に長い title があると見落とす。ここ（終端トランザクション）は tx で読んだ実フィールドで最終判定し、
+ *    超えるなら review を落として**本文だけは必ず保存する**（設計 B4 の本文優先）。
+ *    余白は Firestore の実サイズ計算（フィールド名・型オーバーヘッド）と JSON 概算の差を吸収するためのもの。
+ */
+const FIRESTORE_DOC_LIMIT_BYTES = 1024 * 1024;
+const DOC_WRITE_MARGIN_BYTES = 32 * 1024;
+
+/**
  * `finalizing` は確定処理中の一時状態（内部用）。
  * 🔴 並行に status が 2 回叩かれても確定を 1 回にするための CAS ロック（設計 §3.7・冪等性）。
  *    利用者向けの公開ステータスは running / succeeded / failed の 3 値だけ（finalizing は running 相当に見せる）。
@@ -210,11 +221,29 @@ export async function commitTerminalOutcome(params: {
         } else if (doc.jobId !== undefined && doc.jobId !== jobId) {
             logger.warn('ジョブが異なる文書の終端更新をスキップ', { docId });
         } else {
+            // 🔴 文書全体（既存フィールド＋本文＋review）が 1MiB を超えないか、実フィールドで最終判定する。
+            //    超えるなら review を落として本文だけ保存する（B4: 本文は必ず完成させる）。
+            let reviewToWrite = outcome.kind === 'succeeded' ? outcome.review : undefined;
+            if (reviewToWrite !== undefined && outcome.kind === 'succeeded') {
+                const projected = {
+                    ...doc,
+                    transcription: outcome.transcription,
+                    generatedByModel: outcome.generatedByModel,
+                    status: 'completed',
+                    transcriptReview: reviewToWrite,
+                };
+                delete (projected as Record<string, unknown>).processingProgress;
+                const projectedBytes = Buffer.byteLength(JSON.stringify(projected), 'utf8');
+                if (projectedBytes > FIRESTORE_DOC_LIMIT_BYTES - DOC_WRITE_MARGIN_BYTES) {
+                    logger.warn('文書全体が保存上限に近いため要確認データを省いて本文だけ保存', { docId, projectedBytes });
+                    reviewToWrite = undefined;
+                }
+            }
             tx.set(docRef, outcome.kind === 'succeeded' ? {
                 transcription: outcome.transcription,
                 generatedByModel: outcome.generatedByModel,
                 // 書く先は processing 文書だけ（上の分岐）。processing 文書は候補を持たないので merge で旧候補と混ざらない。
-                ...(outcome.review !== undefined && { transcriptReview: outcome.review }),
+                ...(reviewToWrite !== undefined && { transcriptReview: reviewToWrite }),
                 status: 'completed' satisfies TranscriptionDocStatus,
                 processingProgress: FieldValue.delete(),
                 updatedAt,
