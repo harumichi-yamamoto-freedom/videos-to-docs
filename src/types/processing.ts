@@ -32,6 +32,38 @@ export type ProcessingFailedPhase =
     | 'text_generation'
     | 'saving';
 
+/**
+ * 失敗の種別。今は「送るデータが上限を超えていた」だけを区別する。
+ * 🔴 時間上限 (AZURE_BATCH_MAX_AUDIO_SEC) 超過はビットレートでは直らないので含めない。
+ */
+export type ProcessingFailureKind = 'too_large';
+
+/**
+ * サイズ超過で失敗したときの実測値。再変換の下げ先を決めるために失敗時点で控える。
+ * 🔴 `wasConverted` が無いと「下げても効かない入力」を見分けられず、
+ *    ビットレートを下げる提案が空振りする (2026-09-04 の実害と同じ形)。
+ */
+export interface SizeFailureMeasurement {
+    /** 実際に送ろうとしたデータのバイト数 */
+    bytes: number;
+    /** そのとき使っていたビットレート ('96k' 形式) */
+    bitrate: string;
+    /** そのデータが変換由来か。false = 元ファイルをそのまま送っていた */
+    wasConverted: boolean;
+    /**
+     * 実測できた音声の長さ（秒）。そのまま送られた入力の下げ先を見積もるのに使う。
+     * 測れなかったときは無く、計画側が上界（4 時間）で見積もる。
+     */
+    durationSec?: number;
+    /**
+     * 🔴 **実際に破った**上限のバイト数。経路ごとに違うので必ず失敗時点で控える:
+     *   - アップロード前ガード = GENERATE_MAX_MEDIA_BYTES (500MB・Storage 側)
+     *   - 同期の文書生成の 413 = GENERATE_SYNC_MAX_MEDIA_BYTES (200MB・サーバのメモリ側)
+     * 一律 500MB で見積もると、200MB で落ちた失敗に 200MB を超える下げ先を選んでしまう。
+     */
+    limitBytes: number;
+}
+
 /** プロンプト単位の進行状態。生成と保存を分けて持つことで保存のみの再試行を可能にする */
 export type PromptJobState =
     | 'pending'
@@ -75,10 +107,22 @@ export interface FileProcessingStatus {
     totalTranscriptions: number; // 生成予定の文書数
     error?: string;
     convertedAudioBlob?: Blob; // 変換済み音声データ（再開用）
+    /**
+     * 🔴 `convertedAudioBlob` を**実際に符号化したときの**ビットレート。
+     *    画面のビットレート選択は全行で共有されるグローバル値なので、他の行の再試行で
+     *    書き換わる。キャッシュを再利用した失敗にその値を記録すると、下げ先の計算が
+     *    実在しない前提（例: 192k のデータを 64k 由来と誤認）で走る。
+     *    そのまま送る経路（変換していない）では入れない。
+     */
+    convertedAudioBitrate?: string;
     completedPromptIds: string[]; // 保存まで完了したプロンプトID（再開用）
     promptStates: Record<string, PromptJobState>; // プロンプト単位の状態
     savePendingPromptIds?: string[]; // 生成済みで保存だけが残っているプロンプトID
     failedPhase?: ProcessingFailedPhase; // 失敗したフェーズ
+    /** 失敗がサイズ由来か。'too_large' のときだけ「変換し直して再試行」を出す */
+    failureKind?: ProcessingFailureKind;
+    /** 'too_large' のときの実測値。下げ先の決定 (lib/retryBitrate) はここだけを読む */
+    sizeFailure?: SizeFailureMeasurement;
     isResuming?: boolean; // 再開処理中かどうか
     /** ジョブ開始時に固定した所有者UID。保存直前にこの値と現在のUIDを照合する */
     ownerUid?: string;
