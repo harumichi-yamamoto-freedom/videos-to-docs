@@ -92,6 +92,16 @@ export interface TranscriptAnnotation {
     /** `"spk:0"` など。話者分離が効いていなければ null/undefined */
     speaker?: string | null;
     type?: string;
+    /**
+     * バッチ経路の品質素材（設計 B2・2026-09-05）。同期チャンク経路では付かない。
+     * 🔴 `nBest[0].confidence` の**有限数かつ 0〜1** だけ持つ。欠損・範囲外・非数値は undefined（0 埋め・文字列変換しない）。
+     *    高い値は正確さの保証ではない（話者誤り・発話抜けは検出できない）。
+     */
+    confidence?: number;
+    /** 句の `recognitionStatus`（`Success` 等）。ジョブの status とは別物。未取得は undefined */
+    recognitionStatus?: string;
+    /** 元 `recognizedPhrases` の配列 index。要確認候補の決定的 ID の素材（同一結果の再取り込みで同じ値） */
+    phraseIndex?: number;
 }
 
 /**

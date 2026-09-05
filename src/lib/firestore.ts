@@ -18,6 +18,7 @@ import {
 } from 'firebase/firestore';
 import { getCurrentUserId, getOwnerType } from './auth';
 import type { DocumentProcessingProgress } from './transcribeBatchContract';
+import type { TranscriptReview } from './transcriptReviewContract';
 import { logAudit } from './auditLog';
 import { validateDocumentSize } from './adminSettings';
 import { updateUserStats } from './userManagement';
@@ -50,6 +51,18 @@ const normalizeProcessingProgress = (raw: unknown): DocumentProcessingProgress |
     };
 };
 
+/**
+ * 完成文書に保存された要確認候補（設計 B2）。サーバが生成時に本文と同時に書く。旧文書ではフィールドごと無い。
+ * 読取境界では形の最小確認だけ行い（object かつ version が数値・availability が文字列）、中身の再評価や補正はしない。
+ * 本文との対応は UI 側が sourceTextHash の一致で判定する。
+ */
+const normalizeTranscriptReview = (raw: unknown): TranscriptReview | undefined => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const r = raw as { version?: unknown; availability?: unknown };
+    if (typeof r.version !== 'number' || typeof r.availability !== 'string') return undefined;
+    return raw as TranscriptReview;
+};
+
 export interface TranscriptionDocument {
     id?: string;
     title: string; // 文書タイトル（デフォルトはfileName）
@@ -60,6 +73,8 @@ export interface TranscriptionDocument {
     jobId?: string;
     /** 表示専用の進捗投影（設計 §A3・processing 文書のみ・サーバが書く） */
     processingProgress?: DocumentProcessingProgress;
+    /** 要確認候補（設計 B2・completed 文書のみ・サーバが生成時に書く）。旧文書では無い */
+    transcriptReview?: TranscriptReview;
     promptName: string; // 使用したプロンプト名
     generatedByModel?: string;
     generatedByThinkingLevel?: string;
@@ -83,6 +98,7 @@ export interface Transcription {
     status?: string;
     jobId?: string;
     processingProgress?: DocumentProcessingProgress;
+    transcriptReview?: TranscriptReview;
     promptName: string;
     originalFileType?: string;
     generatedByModel?: string;
@@ -302,6 +318,7 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
                 status: data.status,
                 jobId: data.jobId,
                 processingProgress: normalizeProcessingProgress(data.processingProgress),
+                transcriptReview: normalizeTranscriptReview(data.transcriptReview),
                 promptName: data.promptName || '不明',
                 generatedByModel: data.generatedByModel,
                 generatedByThinkingLevel: data.generatedByThinkingLevel,
@@ -386,6 +403,7 @@ export async function getTranscriptions(
                 status: data.status,
                 jobId: data.jobId,
                 processingProgress: normalizeProcessingProgress(data.processingProgress),
+                transcriptReview: normalizeTranscriptReview(data.transcriptReview),
                 promptName: data.promptName || '不明',
                 originalFileType: data.originalFileType,
                 generatedByModel: data.generatedByModel,
@@ -433,6 +451,7 @@ export async function getTranscriptionsByOwnerId(ownerId: string, limitCount: nu
                 status: data.status,
                 jobId: data.jobId,
                 processingProgress: normalizeProcessingProgress(data.processingProgress),
+                transcriptReview: normalizeTranscriptReview(data.transcriptReview),
                 promptName: data.promptName || '不明',
                 originalFileType: data.originalFileType,
                 generatedByModel: data.generatedByModel,

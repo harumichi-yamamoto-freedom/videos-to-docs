@@ -100,6 +100,11 @@ vi.mock('@/server/transcriptionJob', async (importActual) => {
     };
 });
 
+vi.mock('@/server/reviewCandidates', async (importActual) => {
+    const actual = await importActual<typeof import('@/server/reviewCandidates')>();
+    return { ...actual, buildReviewCandidates: vi.fn(actual.buildReviewCandidates) };
+});
+
 import { POST as submitPOST } from './submit/route';
 import { POST as statusPOST } from './status/route';
 import { resolveRequestSubject } from '@/server/auth';
@@ -109,6 +114,8 @@ import { attachJobToDocument, createProcessingDocument, writeProcessingProgress 
 import { claimJobForFinalize, commitTerminalOutcome, recordAzureObservation, type TranscriptionJob, FINALIZE_LEASE_MS, createTranscriptionJob, getTranscriptionJob, getTranscriptionJobByDocId, updateTranscriptionJob } from '@/server/transcriptionJob';
 import { getTranscriptionDocuments, getTranscriptions, getTranscriptionsByOwnerId, restoreTranscription } from '@/lib/firestore';
 import * as finalization from '@/server/finalizeTranscription';
+import { buildReviewCandidates, phraseIdFor } from '@/server/reviewCandidates';
+import type { TranscriptReview } from '@/lib/transcriptReviewContract';
 
 const syntheticNowMs = 1_788_000_000_000;
 const syntheticCreatedAtMs = syntheticNowMs - 600_000;
@@ -146,6 +153,17 @@ const sampleAzureResult = (): AzureBatchResult => ({
     recognizedPhrases: [
         { offsetMilliseconds: 0, durationMilliseconds: 2000, speaker: 1, nBest: [{ display: 'こんにちは。' }] },
         { offsetMilliseconds: 3000, durationMilliseconds: 2000, speaker: 2, nBest: [{ display: 'よろしくお願いします。' }] },
+    ],
+});
+
+/** 要確認候補の素材を含む合成結果: 低信頼句（index 1）と非 Success の句（index 3・表示テキスト空）。 */
+const reviewAzureResult = (): AzureBatchResult => ({
+    durationMilliseconds: 60_000,
+    recognizedPhrases: [
+        { offsetMilliseconds: 0, durationMilliseconds: 2000, speaker: 1, recognitionStatus: 'Success', nBest: [{ display: 'こんにちは。', confidence: 0.9 }] },
+        { offsetMilliseconds: 2000, durationMilliseconds: 1000, speaker: 1, recognitionStatus: 'Success', nBest: [{ display: 'ええと。', confidence: 0.4 }] },
+        { offsetMilliseconds: 3000, durationMilliseconds: 2000, speaker: 2, recognitionStatus: 'Success', nBest: [{ display: 'よろしくお願いします。', confidence: 0.95 }] },
+        { offsetMilliseconds: 5000, durationMilliseconds: 500, speaker: 2, recognitionStatus: 'NoMatch', nBest: [{ display: '' }] },
     ],
 });
 
@@ -504,6 +522,10 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
             outcome: {
                 kind: 'succeeded', transcription: expect.stringContaining('よろしくお願いします'),
                 generatedByModel: expect.stringContaining('Azure'), speakers: 2,
+                // 要確認候補は本文と同じ commit に載る（設計 B2/B4）
+                review: expect.objectContaining({
+                    version: 1, sourceJobId: 'job-1', sourceTextHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+                }),
             },
         });
         expect(documentDb.data).toMatchObject({
@@ -699,7 +721,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
             } else if (stage === '結果解析') {
                 vi.mocked(fetchBatchResult).mockResolvedValueOnce(null as unknown as AzureBatchResult);
             } else if (stage === 'Markdown 化') {
-                vi.spyOn(finalization, 'buildTranscriptMarkdownFromBatch').mockImplementationOnce(() => {
+                vi.spyOn(finalization, 'buildTranscriptWithAnchors').mockImplementationOnce(() => {
                     throw new Error('合成の整形エラー');
                 });
             }
@@ -825,6 +847,90 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         },
     );
 
+    it('🔴 Succeeded の確定で要確認候補を本文と同じ commit に渡し、段落開始行と本文ハッシュを付けて文書に保存する', async () => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult).mockResolvedValue(reviewAzureResult());
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
+
+        // 抽出側には全句の品質素材を元 index 順で渡す（判定はこちらでしない）
+        expect(buildReviewCandidates).toHaveBeenCalledTimes(1);
+        const [phrases, sourceJobId, sourceTextHash] = vi.mocked(buildReviewCandidates).mock.calls[0];
+        expect(sourceJobId).toBe('job-1');
+        expect(phrases.map((p) => p.index)).toEqual([0, 1, 2, 3]);
+        expect(phrases[1]).toMatchObject({ text: 'ええと。', confidence: 0.4, recognitionStatus: 'Success', speaker: 'spk:1', startSec: 2, endSec: 3 });
+        expect(phrases[3]).toMatchObject({ text: '', recognitionStatus: 'NoMatch', speaker: 'spk:2' });
+
+        const { outcome } = vi.mocked(commitTerminalOutcome).mock.calls[0][0];
+        if (outcome.kind !== 'succeeded') throw new Error('succeeded 以外の outcome');
+        const review = outcome.review as TranscriptReview;
+        expect(sourceTextHash).toBe(finalization.sourceTextHashOf(outcome.transcription));
+        expect(review).toMatchObject({ version: 1, sourceJobId: 'job-1', sourceTextHash, availability: 'complete' });
+        expect(review.summary.totalPhrases).toBe(4);
+        // 低信頼句（index 1）は 1 段落目（1 行目）、非 Success（index 3）は 2 段落目（3 行目）
+        const lines = outcome.transcription.split('\n');
+        expect(lines[0]).toContain('ええと。');
+        expect(lines[2]).toContain('よろしくお願いします。');
+        const low = review.candidates.find((c) => c.phraseId === phraseIdFor(1));
+        const flagged = review.candidates.find((c) => c.phraseId === phraseIdFor(3));
+        expect(low).toMatchObject({ reasons: expect.arrayContaining(['low_confidence']), confidence: 0.4, paragraphStartLine: 1 });
+        expect(flagged).toMatchObject({ paragraphStartLine: 3 });
+        expect(review.candidates.find((c) => c.phraseId === phraseIdFor(0))).toBeUndefined();
+        expect(review.candidates.find((c) => c.phraseId === phraseIdFor(2))).toBeUndefined();
+
+        // 文書に本文と同じ set で保存され、job には複製しない
+        expect(documentDb.tx.set).toHaveBeenCalledWith(documentDb.ref, expect.objectContaining({
+            transcription: outcome.transcription, transcriptReview: review, status: 'completed',
+        }), { merge: true });
+        expect(documentDb.data).toMatchObject({ status: 'completed', transcriptReview: review });
+        expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+        expect(documentDb.jobData).not.toHaveProperty('transcriptReview');
+        expect(deleteBatchJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('🔴 候補生成が失敗しても本文が読めれば completed にし、unavailable と理由だけを保存する（設計 B4）', async () => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult).mockResolvedValue(reviewAzureResult());
+        vi.mocked(buildReviewCandidates).mockImplementationOnce(() => { throw new Error('合成の抽出エラー'); });
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
+        expect(documentDb.data).toMatchObject({
+            status: 'completed',
+            transcription: expect.stringContaining('よろしくお願いします'),
+            transcriptReview: {
+                version: 1, threshold: 0.75, sourceJobId: 'job-1', availability: 'unavailable',
+                unavailableReason: 'internal_error', candidates: [],
+            },
+        });
+        const saved = documentDb.data?.transcriptReview as TranscriptReview;
+        expect(saved.sourceTextHash).toBe(finalization.sourceTextHashOf(documentDb.data?.transcription as string));
+        expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+        expect(documentDb.jobData).not.toHaveProperty('transcriptReview');
+        expect(deleteBatchJob).toHaveBeenCalledTimes(1);
+        expect(documentDb.warn).toHaveBeenCalledWith('要確認候補の生成に失敗（本文は完成させる）', { jobId: 'job-1', reason: '合成の抽出エラー' });
+    });
+
+    it('commit 失敗後の再確定でも要確認候補は同じ入力から同じ内容になる（append しない）', async () => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult).mockResolvedValue(reviewAzureResult());
+        documentDb.commitError = new Error('合成の commit エラー');
+        expect((await statusPOST(req({ jobId: 'job-1' }))).status).toBe(502);
+        expect(documentDb.data).not.toHaveProperty('transcriptReview');
+        expect(documentDb.data).toMatchObject({ status: 'processing' });
+
+        vi.mocked(getTranscriptionJob).mockResolvedValueOnce({
+            ...runningJob, status: 'finalizing', updatedAtMs: Date.now() - FINALIZE_LEASE_MS - 1,
+        });
+        const retried = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await retried.json()).toEqual(expectedStatus('succeeded', { observed: true }));
+        const outcomes = vi.mocked(commitTerminalOutcome).mock.calls.map(([params]) => params.outcome);
+        expect(outcomes).toHaveLength(2);
+        expect(outcomes[1]).toEqual(outcomes[0]);
+        expect(documentDb.data).toMatchObject({
+            status: 'completed', transcriptReview: expect.objectContaining({ availability: 'complete', sourceJobId: 'job-1' }),
+        });
+    });
+
     it('他人のジョブは 403', async () => {
         vi.mocked(getTranscriptionJob).mockResolvedValue({ ...runningJob, ownerId: 'someuser', ownerType: 'user' });
         const res = await statusPOST(req({ jobId: 'job-1' }));
@@ -919,6 +1025,34 @@ describe('処理中の文書の読取・復元とバッチ確定', () => {
         })).resolves.toBe('committed');
         expect(documentDb.data).toMatchObject({ status: 'completed', jobId: 'job-1', transcription: '復元後の合成本文' });
         expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+    });
+
+    it.each(readers)('%s は completed 文書の transcriptReview をそのまま載せ、旧文書・不正な形では undefined', async (_name, read) => {
+        const savedReview: TranscriptReview = {
+            version: 1, threshold: 0.75, sourceTextHash: 'a'.repeat(64), sourceJobId: 'job-1',
+            summary: {
+                totalPhrases: 4, lowConfidence: 1, recognitionFlagged: 1, candidateTotal: 2,
+                unknownConfidence: 1, unknownRecognitionStatus: 0, noTimeCandidates: 0, savedCandidates: 2,
+            },
+            availability: 'complete',
+            candidates: [
+                { phraseId: 'p1', reasons: ['low_confidence'], excerpt: 'ええと。', excerptTruncated: false, confidence: 0.4, paragraphStartLine: 1 },
+                { phraseId: 'p3', reasons: ['recognition_status'], excerpt: '', excerptTruncated: false, recognitionStatus: 'NoMatch', paragraphStartLine: 3 },
+            ],
+        };
+        const base = { fileName: 'synthetic.mp3', promptName: '合成プロンプト', originalFileType: 'audio', ownerType: 'guest', ownerId: 'GUEST', transcription: '合成本文' };
+        clientDb.getDocs.mockResolvedValue({
+            forEach: (fn: (snapshot: { id: string; data: () => Record<string, unknown> }) => void) => {
+                fn({ id: 'doc-1', data: () => ({ ...base, title: '完成文書', status: 'completed', transcriptReview: savedReview }) });
+                fn({ id: 'legacy', data: () => ({ ...base, title: '旧文書' }) });
+                fn({ id: 'broken', data: () => ({ ...base, title: '壊れた形', transcriptReview: 'not-an-object' }) });
+            },
+        });
+        const documents = await read();
+        expect(documents).toHaveLength(3);
+        expect(documents[0].transcriptReview).toEqual(savedReview);
+        expect(documents[1].transcriptReview).toBeUndefined();
+        expect(documents[2].transcriptReview).toBeUndefined();
     });
 
     it.each(readers)('%s は旧文書の status と jobId を undefined として読み、復元 payload に追加しない', async (_name, read) => {

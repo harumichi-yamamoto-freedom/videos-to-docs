@@ -43,6 +43,7 @@ vi.mock('./firebaseAdmin', () => ({
 
 import { claimJobForFinalize, commitTerminalOutcome, FINALIZE_LEASE_MS, getTranscriptionJob, getTranscriptionJobByDocId, recordAzureObservation, updateTranscriptionJob, type TerminalOutcome } from './transcriptionJob';
 import type { AzureBatchStatus } from '@/lib/azureBatchContract';
+import type { TranscriptReview } from '@/lib/transcriptReviewContract';
 
 const NOW_MS = 1_800_000_000_000;
 const JOB_ID = 'synthetic-job';
@@ -80,6 +81,23 @@ const successOutcome: TerminalOutcome = {
     speakers: 2,
 };
 const failureOutcome: TerminalOutcome = { kind: 'failed', reason: '合成の失敗理由' };
+/** 合成の要確認候補（設計 B2）。本文と同じトランザクションで文書にだけ保存される */
+const syntheticReview: TranscriptReview = {
+    version: 1,
+    threshold: 0.75,
+    sourceTextHash: 'a'.repeat(64),
+    sourceJobId: JOB_ID,
+    summary: {
+        totalPhrases: 3, lowConfidence: 1, recognitionFlagged: 0, candidateTotal: 1,
+        unknownConfidence: 0, unknownRecognitionStatus: 0, noTimeCandidates: 0, savedCandidates: 1,
+    },
+    availability: 'complete',
+    candidates: [{
+        phraseId: 'p1', reasons: ['low_confidence'], excerpt: '合成の低信頼句', excerptTruncated: false,
+        confidence: 0.4, recognitionStatus: 'Success', speaker: 'spk:1', startSec: 1, endSec: 2, paragraphStartLine: 1,
+    }],
+};
+const reviewOutcome: TerminalOutcome = { ...successOutcome, review: syntheticReview };
 const terminalParams = (outcome: TerminalOutcome) => ({ jobId: JOB_ID, docId: DOC_ID, expectedOwnerId: OWNER_ID, outcome });
 
 beforeEach(() => {
@@ -366,6 +384,52 @@ describe('commitTerminalOutcome', () => {
         });
         expect(doubles.jobs.get(JOB_PATH)).toMatchObject({ status: 'succeeded', speakers: 2, docId: DOC_ID });
         expect(doubles.update).not.toHaveBeenCalled();
+    });
+
+    it('review 無しの成功は transcriptReview キー自体を書かない（旧文書と同じ形）', async () => {
+        await expect(commitTerminalOutcome(terminalParams(successOutcome))).resolves.toBe('committed');
+        expect(doubles.set.mock.calls[0][1]).not.toHaveProperty('transcriptReview');
+        expect(doubles.jobs.get(DOC_PATH)).not.toHaveProperty('transcriptReview');
+    });
+
+    it('🔴 review 付きの成功は本文・status と同じ set で transcriptReview を保存し、job には複製しない', async () => {
+        await expect(commitTerminalOutcome(terminalParams(reviewOutcome))).resolves.toBe('committed');
+        expect(doubles.runTransaction).toHaveBeenCalledTimes(1);
+        expect(doubles.set).toHaveBeenCalledTimes(2);
+        expect(doubles.set).toHaveBeenNthCalledWith(1, { id: DOC_PATH }, {
+            transcription: successOutcome.transcription,
+            generatedByModel: successOutcome.generatedByModel,
+            transcriptReview: syntheticReview,
+            status: 'completed',
+            processingProgress: 'SERVER_DELETE',
+            updatedAt: 'SERVER_TS',
+        }, { merge: true });
+        expect(doubles.set).toHaveBeenNthCalledWith(2, { id: JOB_PATH }, {
+            status: 'succeeded', speakers: 2, updatedAt: 'SERVER_TS',
+        }, { merge: true });
+        expect(doubles.jobs.get(DOC_PATH)).toMatchObject({ status: 'completed', transcriptReview: syntheticReview });
+        expect(doubles.jobs.get(JOB_PATH)).not.toHaveProperty('transcriptReview');
+    });
+
+    it('review 付きでも本文の書き込みが失敗したら候補も残らず、リース切れ後に再確定できる', async () => {
+        const error = new Error('synthetic transaction failure');
+        doubles.set.mockImplementationOnce(() => { throw error; });
+        await expect(commitTerminalOutcome(terminalParams(reviewOutcome))).rejects.toBe(error);
+        expect(doubles.jobs.get(DOC_PATH)).not.toHaveProperty('transcriptReview');
+        expect(doubles.jobs.get(DOC_PATH)?.status).toBe('processing');
+        expect(doubles.jobs.get(JOB_PATH)?.status).toBe('finalizing');
+
+        vi.mocked(Date.now).mockReturnValue(NOW_MS + FINALIZE_LEASE_MS + 1);
+        await expect(claimJobForFinalize(JOB_ID)).resolves.toMatchObject({ status: 'finalizing' });
+        await expect(commitTerminalOutcome(terminalParams(reviewOutcome))).resolves.toBe('committed');
+        expect(doubles.jobs.get(DOC_PATH)).toMatchObject({ status: 'completed', transcriptReview: syntheticReview });
+    });
+
+    it.each(['completed', 'failed'])('%s の文書へ review 付きで再確定しても候補を書かない（完成後の編集を上書きしない）', async status => {
+        doubles.jobs.set(DOC_PATH, makeDocument({ status, transcription: '利用者の合成編集' }));
+        await expect(commitTerminalOutcome(terminalParams(reviewOutcome))).resolves.toBe('committed');
+        expect(doubles.jobs.get(DOC_PATH)).toEqual(makeDocument({ status, transcription: '利用者の合成編集' }));
+        expect(doubles.set).toHaveBeenCalledTimes(1);
     });
 
     it('失敗でも文書を消さず理由本文を残し、ジョブも同じトランザクションで失敗にする', async () => {

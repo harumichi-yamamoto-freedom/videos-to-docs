@@ -13,6 +13,7 @@ import { getAdminFirestore } from './firebaseAdmin';
 import { TRANSCRIPTIONS_COLLECTION, type TranscriptionDocStatus } from './transcriptionDocument';
 import { createLogger } from '@/lib/logger';
 import type { AzureBatchStatus } from '@/lib/azureBatchContract';
+import type { TranscriptReview } from '@/lib/transcriptReviewContract';
 
 const logger = createLogger('server/transcriptionJob');
 
@@ -63,7 +64,17 @@ export interface CreateTranscriptionJobInput {
 }
 
 export type TerminalOutcome =
-    | { kind: 'succeeded'; transcription: string; generatedByModel: string; speakers: number }
+    | {
+        kind: 'succeeded';
+        transcription: string;
+        generatedByModel: string;
+        speakers: number;
+        /**
+         * 要確認候補（設計 B2/B4）。本文・status・job 終端と**同じトランザクション**で文書へ保存する（job には複製しない）。
+         * 省略時はフィールドを書かない（旧文書と同じ形）。再確定のたびに呼び出し側が決定的に作り直す（後から append しない）。
+         */
+        review?: TranscriptReview;
+    }
     | { kind: 'failed'; reason: string };
 
 const db = (): Firestore => getAdminFirestore();
@@ -202,6 +213,8 @@ export async function commitTerminalOutcome(params: {
             tx.set(docRef, outcome.kind === 'succeeded' ? {
                 transcription: outcome.transcription,
                 generatedByModel: outcome.generatedByModel,
+                // 書く先は processing 文書だけ（上の分岐）。processing 文書は候補を持たないので merge で旧候補と混ざらない。
+                ...(outcome.review !== undefined && { transcriptReview: outcome.review }),
                 status: 'completed' satisfies TranscriptionDocStatus,
                 processingProgress: FieldValue.delete(),
                 updatedAt,
