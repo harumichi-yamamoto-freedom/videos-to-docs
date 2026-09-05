@@ -25,6 +25,7 @@ export interface CreateProcessingDocInput {
     title?: string;
     originalFileType: string; // 'audio' | 'video'
     audioStoragePath?: string;
+    jobId?: string;
 }
 
 const PROCESSING_PLACEHOLDER = '（文字起こしを実行しています。完了すると自動で反映されます。数分〜十数分かかることがあります。）';
@@ -45,9 +46,18 @@ export async function createProcessingDocument(input: CreateProcessingDocInput):
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
         ...(input.audioStoragePath && { audioStoragePath: input.audioStoragePath }),
+        ...(input.jobId !== undefined && { jobId: input.jobId }),
     });
     logger.info('処理中の文書を作成', { docId: ref.id, ownerType: input.ownerType });
     return ref.id;
+}
+
+/** 文書作成後に採番されたジョブを紐付ける。削除済み・所有者変更済みの文書は触らない。 */
+export async function attachJobToDocument(docId: string, jobId: string, expectedOwnerId: string): Promise<void> {
+    const ref = getAdminFirestore().collection(TRANSCRIPTIONS_COLLECTION).doc(docId);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data()?.ownerId !== expectedOwnerId) return;
+    await ref.set({ jobId }, { merge: true });
 }
 
 /** 完了: 本文を書き込み、status を completed にする。 */

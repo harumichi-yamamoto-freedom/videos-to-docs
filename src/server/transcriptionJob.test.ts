@@ -16,6 +16,8 @@ const doubles = vi.hoisted(() => ({
     update: vi.fn(),
     set: vi.fn(),
     runTransaction: vi.fn(),
+    where: vi.fn(),
+    queryGet: vi.fn(),
     warn: vi.fn(),
 }));
 
@@ -25,12 +27,15 @@ vi.mock('firebase-admin/firestore', () => ({
 }));
 vi.mock('./firebaseAdmin', () => ({
     getAdminFirestore: () => ({
-        collection: (name: string) => ({ doc: (id: string) => ({ id: `${name}/${id}` }) }),
+        collection: (name: string) => ({
+            doc: (id: string) => ({ id: `${name}/${id}` }),
+            where: doubles.where,
+        }),
         runTransaction: doubles.runTransaction,
     }),
 }));
 
-import { claimJobForFinalize, commitTerminalOutcome, FINALIZE_LEASE_MS, type TerminalOutcome } from './transcriptionJob';
+import { claimJobForFinalize, commitTerminalOutcome, FINALIZE_LEASE_MS, getTranscriptionJobByDocId, type TerminalOutcome } from './transcriptionJob';
 
 const NOW_MS = 1_800_000_000_000;
 const JOB_ID = 'synthetic-job';
@@ -77,6 +82,8 @@ beforeEach(() => {
     doubles.transactionTail = Promise.resolve();
     doubles.commitError = undefined;
     doubles.set.mockReset();
+    doubles.where.mockReturnValue({ get: doubles.queryGet });
+    doubles.queryGet.mockResolvedValue({ docs: [] });
     // Firestore の同じ文書に対するトランザクションを直列化し、確定した更新を次の読取へ渡す。
     doubles.runTransaction.mockImplementation((fn: (tx: Transaction) => Promise<unknown>) => {
         const result = doubles.transactionTail.then(async () => {
@@ -114,6 +121,34 @@ beforeEach(() => {
 
 afterEach(() => {
     vi.restoreAllMocks();
+});
+
+describe('getTranscriptionJobByDocId', () => {
+    it('docId 単一等値で検索し、該当がなければ null を返す', async () => {
+        await expect(getTranscriptionJobByDocId(DOC_ID)).resolves.toBeNull();
+        expect(doubles.where).toHaveBeenCalledExactlyOnceWith('docId', '==', DOC_ID);
+        expect(doubles.queryGet).toHaveBeenCalledTimes(1);
+    });
+
+    it('クエリ順によらず createdAt が最新のジョブを採る', async () => {
+        doubles.queryGet.mockResolvedValue({ docs: [
+            { id: 'synthetic-middle', data: () => makeJob({ createdAt: NOW_MS - 1000 }) },
+            { id: 'synthetic-newest', data: () => makeJob({ createdAt: { toMillis: () => NOW_MS } }) },
+            { id: 'synthetic-oldest', data: () => makeJob({ createdAt: { toMillis: () => NOW_MS - 2000 } }) },
+        ] });
+        await expect(getTranscriptionJobByDocId(DOC_ID)).resolves.toMatchObject({
+            id: 'synthetic-newest', docId: DOC_ID, createdAtMs: NOW_MS,
+        });
+        expect(doubles.where).toHaveBeenCalledExactlyOnceWith('docId', '==', DOC_ID);
+    });
+
+    it('壊れたジョブを除外し、有効な一件を返す', async () => {
+        doubles.queryGet.mockResolvedValue({ docs: [
+            { id: 'synthetic-invalid', data: () => ({ docId: DOC_ID, createdAt: NOW_MS }) },
+            { id: JOB_ID, data: () => makeJob() },
+        ] });
+        await expect(getTranscriptionJobByDocId(DOC_ID)).resolves.toMatchObject({ id: JOB_ID, docId: DOC_ID });
+    });
 });
 
 describe('claimJobForFinalize', () => {

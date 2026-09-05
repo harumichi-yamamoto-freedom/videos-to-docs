@@ -950,6 +950,27 @@ describe('firestore', () => {
             expect(payload).not.toHaveProperty('bitrate');
             expect(payload).not.toHaveProperty('sampleRate');
             expect(payload).not.toHaveProperty('audioStoragePath');
+            expect(payload).not.toHaveProperty('jobId');
+        });
+
+        it('processing 文書の再作成で jobId と status を保持する', async () => {
+            mocks.getCurrentUserId.mockReturnValue('user-id');
+            mocks.getOwnerType.mockReturnValue('user');
+            mocks.transactionGet
+                .mockResolvedValueOnce({ exists: () => false, data: () => ({}) })
+                .mockResolvedValueOnce({ exists: () => true, data: () => ({ documentCount: 4 }) });
+
+            await restoreTranscription('document-id', {
+                ...sourceDocument,
+                status: 'processing',
+                jobId: 'synthetic-batch-job',
+            }, { transcription: '保存後の本文' });
+
+            expect(mocks.transactionSet).toHaveBeenCalledWith(
+                mocks.documentReference,
+                expect.objectContaining({ status: 'processing', jobId: 'synthetic-batch-job' }),
+                { merge: true },
+            );
         });
 
         it('文書が存在していた場合は本文項目だけを更新し、既存metadataと件数を変更しない', async () => {
@@ -1457,6 +1478,35 @@ describe('firestore', () => {
     });
 
     describe('本文の読出マッピング', () => {
+        it.each([
+            ['詳細形式', () => getTranscriptionDocuments()],
+            ['簡略形式', () => getTranscriptions()],
+            ['所有者指定形式', () => getTranscriptionsByOwnerId('owner-id')],
+        ] as const)('%sで jobId を保持し未付与の文書も読み込む', async (_label, readDocuments) => {
+            mocks.getDocs.mockResolvedValueOnce({
+                forEach: (callback: (snapshot: { id: string; data: () => unknown }) => void) => {
+                    callback({
+                        id: 'processing-document',
+                        data: () => ({
+                            ...mappingCases[0].data,
+                            status: 'processing',
+                            jobId: 'synthetic-batch-job',
+                        }),
+                    });
+                    callback({ id: 'legacy-document', data: () => mappingCases[1].data });
+                },
+            });
+
+            const documents = await readDocuments();
+
+            expect(documents[0]).toMatchObject({
+                id: 'processing-document',
+                status: 'processing',
+                jobId: 'synthetic-batch-job',
+            });
+            expect(documents[1].jobId).toBeUndefined();
+        });
+
         it('詳細形式で transcription を優先し、text と空文字へフォールバックする', async () => {
             mockQuerySnapshot();
 

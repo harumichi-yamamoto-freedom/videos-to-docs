@@ -31,6 +31,7 @@ export interface TranscriptionDocument {
     originalFileType: string; // 'video' or 'audio'
     transcription: string;
     status?: string;
+    jobId?: string;
     promptName: string; // 使用したプロンプト名
     generatedByModel?: string;
     generatedByThinkingLevel?: string;
@@ -52,6 +53,7 @@ export interface Transcription {
     fileName: string;
     text: string; // transcription のエイリアス
     status?: string;
+    jobId?: string;
     promptName: string;
     originalFileType?: string;
     generatedByModel?: string;
@@ -269,6 +271,7 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
                 originalFileType: data.originalFileType,
                 transcription: data.transcription ?? data.text ?? '',
                 status: data.status,
+                jobId: data.jobId,
                 promptName: data.promptName || '不明',
                 generatedByModel: data.generatedByModel,
                 generatedByThinkingLevel: data.generatedByThinkingLevel,
@@ -351,6 +354,7 @@ export async function getTranscriptions(
                 fileName: data.fileName,
                 text: data.transcription ?? data.text ?? '', // transcription を text にマッピング
                 status: data.status,
+                jobId: data.jobId,
                 promptName: data.promptName || '不明',
                 originalFileType: data.originalFileType,
                 generatedByModel: data.generatedByModel,
@@ -396,6 +400,7 @@ export async function getTranscriptionsByOwnerId(ownerId: string, limitCount: nu
                 fileName: data.fileName,
                 text: data.transcription ?? data.text ?? '',
                 status: data.status,
+                jobId: data.jobId,
                 promptName: data.promptName || '不明',
                 originalFileType: data.originalFileType,
                 generatedByModel: data.generatedByModel,
@@ -615,6 +620,7 @@ export async function restoreTranscription(
         createdAt: source.createdAt,
         updatedAt: serverTimestamp(),
         ...(source.status !== undefined && { status: source.status }),
+        ...(source.jobId !== undefined && { jobId: source.jobId }),
         ...(source.generatedByModel !== undefined && {
             generatedByModel: source.generatedByModel,
         }),

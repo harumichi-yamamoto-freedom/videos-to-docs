@@ -12,6 +12,7 @@ import {
     TRANSCRIBE_STATUS_PATH,
     type TranscribeSubmitRequest,
     type TranscribeSubmitResponse,
+    type TranscribeStatusRequest,
     type TranscribeStatusResponse,
     type TranscribeBatchErrorBody,
 } from '@/lib/transcribeBatchContract';
@@ -52,15 +53,14 @@ export async function submitBatchTranscription(
     return json as TranscribeSubmitResponse;
 }
 
-/** ジョブの状態を 1 回問い合わせる。完了していればサーバがその場で文書を確定する。 */
-export async function fetchBatchStatus(
-    jobId: string,
+async function fetchTranscriptionStatus(
+    request: TranscribeStatusRequest,
     signal?: AbortSignal,
 ): Promise<TranscribeStatusResponse> {
     const response = await fetch(TRANSCRIBE_STATUS_PATH, {
         method: 'POST',
         headers: await authHeaders(),
-        body: JSON.stringify({ jobId }),
+        body: JSON.stringify(request),
         ...(signal ? { signal } : {}),
     });
     const json = await response.json().catch(() => null);
@@ -68,6 +68,22 @@ export async function fetchBatchStatus(
         throw new Error(messageFrom(json, `状態の確認に失敗しました (${response.status})`));
     }
     return json as TranscribeStatusResponse;
+}
+
+/** ジョブの状態を 1 回問い合わせる。完了していればサーバがその場で文書を確定する。 */
+export function fetchBatchStatus(
+    jobId: string,
+    signal?: AbortSignal,
+): Promise<TranscribeStatusResponse> {
+    return fetchTranscriptionStatus({ jobId }, signal);
+}
+
+/** 文書を開いたときの 1 回限りの確認。running なら文書は変更せず、終端の保存はサーバが行う。 */
+export function reconcileProcessingDocument(
+    docId: string,
+    signal?: AbortSignal,
+): Promise<TranscribeStatusResponse> {
+    return fetchTranscriptionStatus({ docId }, signal);
 }
 
 export interface PollOptions {

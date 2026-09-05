@@ -3,8 +3,8 @@
  *
  * 背景 (P1): 長尺音声を 25 分前後のチャンクに割って `gemini-3.5-transcribe` に投げ、
  * 逐語テキストと語単位の注釈 (話者・タイムスタンプ) を取り出す。
- * サーバ (src/server/transcribeChunk.ts, src/app/api/*) と品質ゲート (src/lib/transcriptQuality.ts) が
- * 共通で参照する。
+ * 注釈と結果の型は、バッチ経路 (src/server/azureBatchTranscribe.ts)・結合処理・
+ * 品質ゲート (src/lib/transcriptQuality.ts) でも共通で参照する。
  *
  * 🔴 このファイルが「1 か所」である理由:
  *   `diarization_mode` と `timestamp_granularities` は API 側で値が検証されない (silent fail-open)。

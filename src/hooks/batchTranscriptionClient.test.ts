@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
     submitBatchTranscription,
+    reconcileProcessingDocument,
     pollBatchStatus,
     runBatchTranscription,
 } from './batchTranscriptionClient';
@@ -37,6 +38,38 @@ describe('submitBatchTranscription', () => {
         vi.spyOn(globalThis, 'fetch').mockResolvedValue(
             jsonResponse({ error: 'rate_limited', message: '上限に達しました' }, false, 429));
         await expect(submitBatchTranscription(req)).rejects.toThrow('上限に達しました');
+    });
+});
+
+describe('reconcileProcessingDocument', () => {
+    it('docId と signal を渡して 1 回だけ確認し、running のまま返す', async () => {
+        const status = { status: 'running', docId: 'd1' };
+        const controller = new AbortController();
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(status));
+
+        expect(await reconcileProcessingDocument('d1', controller.signal)).toBe(status);
+        expect(fetchMock).toHaveBeenCalledExactlyOnceWith(TRANSCRIBE_STATUS_PATH, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ docId: 'd1' }),
+            signal: controller.signal,
+        });
+    });
+
+    it.each(['succeeded', 'failed'])('サーバで確定済みの %s を追加 fetch なしで返す', async (status) => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            jsonResponse({ status, docId: 'd1' }));
+
+        expect(await reconcileProcessingDocument('d1')).toEqual({ status, docId: 'd1' });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('確認エラーは再試行せず呼出元へ返す', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            jsonResponse({ error: 'upstream_error', message: '確認できません' }, false, 502));
+
+        await expect(reconcileProcessingDocument('d1')).rejects.toThrow('確認できません');
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 });
 

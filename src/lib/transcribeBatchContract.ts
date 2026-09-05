@@ -25,9 +25,10 @@ export interface TranscribeSubmitResponse {
     docId: string;
 }
 
-export interface TranscribeStatusRequest {
-    jobId: string;
-}
+/** 既存の poll は jobId、文書を開いたときの再確定は docId を指定する。 */
+export type TranscribeStatusRequest =
+    | { jobId: string; docId?: never }
+    | { docId: string; jobId?: never };
 
 export type TranscribeJobPublicStatus = 'running' | 'succeeded' | 'failed';
 
