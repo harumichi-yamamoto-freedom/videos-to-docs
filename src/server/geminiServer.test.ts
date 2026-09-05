@@ -150,6 +150,21 @@ describe('GeminiServerClient.generate — files_api', () => {
         expect(doubles.filesDelete).toHaveBeenCalledWith({ name: 'files/abc' });
     });
 
+    it('🔴 files_api 経路ではバッファ全量を Base64 文字列化しない（~384MiB 超で Node の最大文字列長を超え ERR_STRING_TOO_LONG になる回帰を防ぐ）', async () => {
+        doubles.filesUpload.mockResolvedValue({ name: 'files/big', state: 'ACTIVE', uri: 'https://files/big', mimeType: 'audio/mpeg' });
+        doubles.filesDelete.mockResolvedValue(undefined);
+        // 🔴 経路判定は Base64 の「長さ」だけで行い、実際の toString('base64') は inline のときだけ。
+        //    旧実装は判定前に全量を toString('base64') しており、上限を 500MB に上げると ~384MiB 超で
+        //    Base64 文字列が Node の最大文字列長 (536,870,888) を超え ERR_STRING_TOO_LONG で 502 になっていた。
+        const toStringSpy = vi.spyOn(bigBytes, 'toString');
+        const client = new GeminiServerClient({ pollIntervalMs: 0 });
+        const result = await client.generate({ bytes: bigBytes, mimeType: 'audio/mpeg', fileName: 'big.mp3', prompt });
+        expect(result.transport).toBe('files_api');
+        // 🔴 files_api 経路ではバッファを Base64 化していない（これがあると巨大ファイルで例外になる）
+        expect(toStringSpy).not.toHaveBeenCalledWith('base64');
+        toStringSpy.mockRestore();
+    });
+
     it('境界: base64+prompt が予算ちょうど以下は inline、1 バイト超で files_api', async () => {
         // prompt 'p' は 1 バイト。bytes = (budget-4)/4*3 → base64 = budget-4 → 合計 budget-3 (inline)
         const inlineBytes = ((INLINE_REQUEST_BUDGET_BYTES - 4) / 4) * 3;
