@@ -14,6 +14,8 @@
  * - `audio`: 音声の可用性。`ready`（コントローラ接続）とは別に、URL の取得と音声要素のロード状態を持つ。
  *   要確認カードの「音声を再生」はこれが `'ready'` のときだけ押せる（押しても無反応なボタンを出さない）。
  * - `playbackBlocked`: ブラウザが再生を拒否した（自動再生ポリシー等）。再生済みの見た目にせず、案内を出す。
+ * - `followPausedByJump`: 候補カードからの「本文の該当段落へ移動」で追従を一時的に止めている過渡状態。
+ *   🔴 利用者の永続設定 `follow` とは別物で、`follow` を書き換えない（文書切替・再マウントで自動的に解ける）。
  */
 
 import React, {
@@ -51,6 +53,11 @@ export interface TranscriptPlaybackSnapshot {
     audioReason: TranscriptAudioUnavailableReason | null;
     /** 直前の再生要求をブラウザが拒否した（自動再生の拒否）。再生が始まると解ける */
     playbackBlocked: boolean;
+    /**
+     * 候補ジャンプ（本文の該当段落へ移動）で追従を一時的に止めている。
+     * 🔴 `follow`（利用者の永続設定）は書き換えない過渡状態。追従トグル・シーク・文書切替（attach の終了）・reset で解ける。
+     */
+    followPausedByJump: boolean;
 }
 
 /** 音声要素を持つ側（＝TranscriptPlayer）が登録する実操作 */
@@ -69,6 +76,7 @@ const INITIAL_SNAPSHOT: TranscriptPlaybackSnapshot = {
     audio: 'none',
     audioReason: null,
     playbackBlocked: false,
+    followPausedByJump: false,
 };
 
 const createTranscriptPlaybackStore = () => {
@@ -106,10 +114,17 @@ const createTranscriptPlaybackStore = () => {
          */
         seek: (sec: number): void => {
             if (!controller || !Number.isFinite(sec)) return;
-            patch({ currentSec: Math.max(0, sec) });
+            // 利用者が再生位置を動かした＝候補ジャンプの一時停止から追従へ復帰する
+            patch({ currentSec: Math.max(0, sec), followPausedByJump: false });
             controller.seek(Math.max(0, sec));
         },
-        setFollow: (follow: boolean): void => patch({ follow }),
+        /** 追従の入切（利用者の永続設定）。トグル操作は候補ジャンプの一時停止を必ず解く */
+        setFollow: (follow: boolean): void => patch({ follow, followPausedByJump: false }),
+        /**
+         * 候補ジャンプ中の追従の一時停止（次の時刻更新でジャンプ先から引き戻さない）。
+         * 🔴 `follow` は書き換えない。解除は setFollow / seek / attach の終了（文書切替・再マウント）/ reset。
+         */
+        pauseFollowForJump: (): void => patch({ followPausedByJump: true }),
         /** 音声の可用性を置く（URL の取得側とプレイヤーの両方から呼ぶ） */
         setAudio: (audio: TranscriptAudioStatus, reason: TranscriptAudioUnavailableReason | null = null): void =>
             patch({ audio, audioReason: audio === 'unavailable' ? reason : null }),
@@ -124,6 +139,8 @@ const createTranscriptPlaybackStore = () => {
             return () => {
                 if (controller !== next) return;
                 controller = null;
+                // 🔴 利用者の永続設定 `follow` だけを持ち越す。候補ジャンプの一時停止（followPausedByJump）は
+                //    INITIAL 由来で false に戻る＝文書切替・再マウントで自動的に解ける
                 state = { ...INITIAL_SNAPSHOT, follow: state.follow };
                 emit();
             };

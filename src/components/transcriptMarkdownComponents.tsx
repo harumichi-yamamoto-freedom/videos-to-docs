@@ -174,6 +174,11 @@ function ReviewParagraphBadge({ anchor }: { anchor: TranscriptReviewParagraphAnc
  *
  * 要確認アンカーを持つ行は、候補カードからの移動要求（同じ文書・同じ開始行）を受けて
  * 1 回だけ寄せてフォーカスを受ける。🔴 これは再生中の追従とは別（追従の入切に関係なく動き、色も分ける）。
+ *
+ * 🔴 候補ジャンプと追従の区別（B3）:
+ * - ジャンプ中は追従を「一時停止」する（`followPausedByJump`）。利用者の永続設定 `follow` は書き換えない。
+ *   書き換えると、文書を切り替えても追従が戻らない／利用者が追従を再開しても再マウントで再び切られる。
+ * - 同じ移動要求は 1 回だけ処理する（`consumedNonce`）。段落が再マウントされても同じ nonce では再処理しない。
  */
 function TranscriptLine({
     startSec,
@@ -187,8 +192,9 @@ function TranscriptLine({
     reviewAnchor: TranscriptReviewParagraphAnchor | null;
     children?: React.ReactNode;
 } & React.HTMLAttributes<HTMLParagraphElement>): React.ReactElement {
-    const { currentSec, follow, ready } = useTranscriptPlayback();
+    const { currentSec, follow, followPausedByJump, ready } = useTranscriptPlayback();
     const selection = useTranscriptReviewSelection();
+    const consumedNonce = selection.consumedNonce;
     const ref = useRef<HTMLParagraphElement | null>(null);
     const active =
         ready && currentSec >= startSec && (nextSec === null || currentSec < nextSec);
@@ -202,28 +208,32 @@ function TranscriptLine({
     const isTarget = targetNonce !== null;
 
     useEffect(() => {
-        if (!active || !follow) return;
+        // 🔴 追従は利用者が止められる（follow）。候補ジャンプ中は一時停止（followPausedByJump）。どちらでもここへ来ない
+        if (!active || !follow || followPausedByJump) return;
         const element = ref.current;
-        // 🔴 追従は利用者が止められる。止めているときはここへ来ない
         if (element && typeof element.scrollIntoView === 'function') {
             element.scrollIntoView({ block: 'center', behavior: scrollBehaviorForMotion() });
         }
-    }, [active, follow]);
+    }, [active, follow, followPausedByJump]);
 
     useEffect(() => {
-        if (targetNonce === null) return;
-        // 🔴 候補ジャンプ中は再生追従を止める（次の時刻更新でジャンプ先から引き戻さない）。
-        //    B3「選択した候補の移動と再生中段落の追従は区別する」。利用者が「追従」を押し直すと再開する。
-        //    追従スクロールとジャンプは別動作なので、ジャンプ先のフォーカス・寄せはこの後そのまま行う。
-        transcriptPlayback.setFollow(false);
+        // 🔴 未処理の要求だけを処理する。処理済み（consumedNonce）の同じ nonce が再マウントで再び来ても何もしない
+        if (targetNonce === null || targetNonce === consumedNonce) return;
+        // 🔴 候補ジャンプ中は再生追従を「一時停止」する（次の時刻更新でジャンプ先から引き戻さない）。
+        //    B3「選択した候補の移動と再生中段落の追従は区別する」。永続設定 follow は書き換えない
+        //    （setFollow(false) だと文書切替後も追従が戻らず、再開しても再マウントで再び切られる）。
+        //    解除は追従トグル・シーク・文書切替（プレイヤーの再 attach）。
+        transcriptPlayback.pauseFollowForJump();
         const element = ref.current;
-        if (!element) return;
-        // 候補からの移動。フォーカスを渡してから寄せる（動きを減らす設定ではアニメーションなし）
-        if (typeof element.focus === 'function') element.focus({ preventScroll: true });
-        if (typeof element.scrollIntoView === 'function') {
-            element.scrollIntoView({ block: 'center', behavior: scrollBehaviorForMotion() });
+        if (element) {
+            // 候補からの移動。フォーカスを渡してから寄せる（動きを減らす設定ではアニメーションなし）
+            if (typeof element.focus === 'function') element.focus({ preventScroll: true });
+            if (typeof element.scrollIntoView === 'function') {
+                element.scrollIntoView({ block: 'center', behavior: scrollBehaviorForMotion() });
+            }
         }
-    }, [targetNonce]);
+        transcriptReviewSelection.consumeParagraphRequest(targetNonce);
+    }, [targetNonce, consumedNonce]);
 
     return (
         <p

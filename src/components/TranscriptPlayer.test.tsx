@@ -252,6 +252,78 @@ describe('再生中の行の追従', () => {
     });
 });
 
+// 候補ジャンプ中の追従の一時停止（仕様 B3）。🔴 利用者の永続設定 follow は書き換えない過渡状態。
+// 本文側（段落）との組み合わせは transcriptMarkdownComponents.test.tsx。ここはストアの規則の錠。
+describe('候補ジャンプの追従一時停止（followPausedByJump）', () => {
+    it('初期状態は一時停止なし・追従あり', () => {
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPausedByJump: false });
+    });
+
+    it('pauseFollowForJump は一時停止だけを立て、follow を書き換えない（follow が OFF のときも触らない）', () => {
+        transcriptPlayback.pauseFollowForJump();
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPausedByJump: true });
+
+        transcriptPlayback.setFollow(false);
+        transcriptPlayback.pauseFollowForJump();
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: false, followPausedByJump: true });
+    });
+
+    it('setFollow（追従トグル）は OFF でも ON でも一時停止を解く', () => {
+        transcriptPlayback.pauseFollowForJump();
+        transcriptPlayback.setFollow(false);
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: false, followPausedByJump: false });
+
+        transcriptPlayback.pauseFollowForJump();
+        transcriptPlayback.setFollow(true);
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPausedByJump: false });
+    });
+
+    it('seek（利用者が再生位置を動かした）は一時停止を解く。コントローラが居ないときは何も変えない', () => {
+        transcriptPlayback.pauseFollowForJump();
+        transcriptPlayback.seek(30);
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ currentSec: 0, followPausedByJump: true });
+
+        const seek = vi.fn();
+        const detach = transcriptPlayback.attach({ seek });
+        transcriptPlayback.seek(30);
+        expect(seek).toHaveBeenCalledWith(30);
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ currentSec: 30, follow: true, followPausedByJump: false });
+        detach();
+    });
+
+    it('🔴 attach の終了（文書切替・プレイヤーの破棄）で一時停止は解け、follow は保持される（ON でも OFF でも）', () => {
+        const detachA = transcriptPlayback.attach({ seek: vi.fn() });
+        transcriptPlayback.pauseFollowForJump();
+        detachA();
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ ready: false, follow: true, followPausedByJump: false });
+
+        transcriptPlayback.setFollow(false);
+        const detachB = transcriptPlayback.attach({ seek: vi.fn() });
+        transcriptPlayback.pauseFollowForJump();
+        detachB();
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ ready: false, follow: false, followPausedByJump: false });
+    });
+
+    it('reset で初期状態へ戻る', () => {
+        transcriptPlayback.pauseFollowForJump();
+        transcriptPlayback.reset();
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPausedByJump: false });
+    });
+
+    it('🔴 プレイヤーの再マウント（文書切替＝key 変更）でも同じ: 一時停止は解け、follow は保持される', async () => {
+        await render(<TranscriptPlayer key="docA" audioUrl="https://example.test/a.m4a" durationSec={60} />);
+        await act(async () => {
+            transcriptPlayback.pauseFollowForJump();
+        });
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ ready: true, follow: true, followPausedByJump: true });
+
+        await render(<TranscriptPlayer key="docB" audioUrl="https://example.test/b.m4a" durationSec={60} />);
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ ready: true, follow: true, followPausedByJump: false });
+        // 追従トグルの見た目も押されたまま（永続設定は書き換えていない）
+        expect(container.querySelector('button[aria-pressed]')?.getAttribute('aria-pressed')).toBe('true');
+    });
+});
+
 describe('話者ラベルの改名', () => {
     it('その場で入力でき、変更箇所数が事前に出て、onRename が呼ばれる', async () => {
         const onRename = vi.fn();

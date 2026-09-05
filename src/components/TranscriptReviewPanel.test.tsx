@@ -628,7 +628,7 @@ describe('操作', () => {
 
         await render(<TranscriptReviewPanel key="other" {...panelProps({ documentId: 'doc-synthetic-2', review: undefined })} />);
         expect(transcriptReviewSelection.getSnapshot()).toEqual({
-            documentId: null, selectedPhraseId: null, revealRequest: null, paragraphRequest: null,
+            documentId: null, selectedPhraseId: null, revealRequest: null, paragraphRequest: null, consumedNonce: null,
         });
     });
 });
@@ -703,8 +703,10 @@ describe('本文の段落バッジとの往復', () => {
     });
 
     // Major2: 再生追従中に候補へジャンプ → 次の時刻更新で追従がジャンプ先から引き戻す不具合。
-    // B3「候補移動と再生中段落の追従を区別」。ジャンプで追従を止め、利用者の明示再開で戻す。
-    it('🔴 再生追従中に候補へジャンプ→次の時刻更新で引き戻されない（追従を止め、明示再開で戻す）', async () => {
+    // B3「候補移動と再生中段落の追従を区別」。ジャンプで追従を「一時停止」し（🔴 永続の follow は書き換えない。
+    // 書き換えると文書切替後も追従が戻らず、再開しても段落の再マウントで再び切られる）、利用者の明示操作（追従トグル・シーク）で戻す。
+    // 一時停止の解除・段落の再マウント・文書切替の錠は transcriptMarkdownComponents.test.tsx。
+    it('🔴 再生追従中に候補へジャンプ→次の時刻更新で引き戻されない（追従を一時停止・follow は書き換えない・「音声を再生」で戻る）', async () => {
         await render(
             <div>
                 <ReactMarkdown
@@ -719,6 +721,11 @@ describe('本文の段落バッジとの往復', () => {
         );
         await click(toggle());
         await settleHash(TRANSCRIPT);
+        // 音声要素がメタデータを読めた＝候補カードの「音声を再生」が押せる
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('loadedmetadata'));
+        });
+        expect(transcriptPlayback.getSnapshot().audio).toBe('ready');
 
         // 追従中: 30 秒 → 3 行目が現在行としてスクロール追従する
         await act(async () => {
@@ -726,13 +733,16 @@ describe('本文の段落バッジとの往復', () => {
         });
         expect(container.querySelector('[data-transcript-active="true"]')?.getAttribute('data-review-line')).toBe('3');
 
-        // 候補 p-1（1 行目）へ移動＝ジャンプ。ジャンプ先へ寄せ、フォーカスは維持し、以後の追従は止まる
+        // 候補 p-1（1 行目）へ移動＝ジャンプ。ジャンプ先へ寄せ、フォーカスは維持し、以後の追従は一時停止
         scrollIntoView.mockClear();
         await click(moveButton('p-1'));
         const target = container.querySelector<HTMLElement>('p[data-review-line="1"]')!;
         expect(target.getAttribute('data-review-target')).toBe('true');
         expect(document.activeElement).toBe(target);
         expect(scrollIntoView).toHaveBeenCalledTimes(1); // ジャンプの 1 回だけ
+        // 🔴 永続の follow は書き換えない（追従トグルは押されたまま）。一時停止だけが立つ
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPausedByJump: true });
+        expect(container.querySelector('button[aria-pressed]')?.getAttribute('aria-pressed')).toBe('true');
 
         // 次の時刻更新（120 秒 → 7 行目が現在行）でも、ジャンプ先から引き戻されない
         scrollIntoView.mockClear();
@@ -742,12 +752,10 @@ describe('本文の段落バッジとの往復', () => {
         expect(container.querySelector('[data-transcript-active="true"]')?.getAttribute('data-review-line')).toBe('7');
         expect(scrollIntoView).not.toHaveBeenCalled();
 
-        // 追従を明示的に再開すると、通常どおり追従スクロールに戻る
-        await click(container.querySelector('button[aria-pressed]'));
+        // 候補カードの「音声を再生」（＝シーク: 利用者が再生位置を動かした）で一時停止が解け、通常の追従に戻る
         scrollIntoView.mockClear();
-        await act(async () => {
-            transcriptPlayback.patch({ currentSec: 30 });
-        });
+        await click(playButton('p-3'));
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPausedByJump: false, currentSec: 30 });
         expect(container.querySelector('[data-transcript-active="true"]')?.getAttribute('data-review-line')).toBe('3');
         expect(scrollIntoView).toHaveBeenCalled();
     });
