@@ -16,6 +16,21 @@ const { getAudioDownloadURL } = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/storage', () => ({ getAudioDownloadURL }));
 
+// 🔴 hashTranscriptText だけを差し替え可能な形にする（他は実物のまま）。
+//    「照合前はバッジ無し」を観測するテストは、crypto.subtle の解決が act の flush に入るか否かの
+//    時間依存でフレークになる。そのテストだけ、解決タイミングを手で制御できる deferred に差し替える。
+vi.mock('@/lib/transcriptDocument', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@/lib/transcriptDocument')>();
+    return { ...actual, hashTranscriptText: vi.fn(actual.hashTranscriptText) };
+});
+
+/** テスト用の手動解決 Promise（モジュール直下・どの describe からも使える） */
+function makeDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => { resolve = res; });
+    return { promise, resolve };
+}
+
 import type { ReviewCandidate, TranscriptReview } from '@/lib/transcriptReviewContract';
 import { hashTranscriptText, reviewAnchorsByLine } from '@/lib/transcriptDocument';
 import { TranscriptPlayer, transcriptPlayback } from './TranscriptPlayer';
@@ -780,21 +795,24 @@ describe('TranscriptAwareMarkdown の段落バッジ', () => {
         // このテストだけの本文（他のテストでハッシュがキャッシュ済みだと「照合前」を観測できない）
         const body = `${TRANSCRIPT}\n\n[04:00](#t=240) **営業** 照合テスト用の固有の段落。`;
         const matching = review({ sourceTextHash: sha256(body) });
+        // 🔴 「照合前」を決定的に観測するため、最初のハッシュ計算だけ手動解決の Promise に差し替える。
+        //    実 crypto.subtle は act の flush に入るか否かで解決タイミングが揺れ、「照合前はバッジ無し」がフレークになる。
+        const pending = makeDeferred<string>();
+        vi.mocked(hashTranscriptText).mockReturnValueOnce(pending.promise);
         await render(<TranscriptAwareMarkdown markdown={body} documentId={DOC_ID} review={matching} />);
-        // 照合前はバッジ無し
+        // 照合前はバッジ無し（ハッシュは保留中で決定的）
         expect(container.querySelector('[data-review-badge]')).toBeNull();
-        await settleHash(body);
+        await act(async () => { pending.resolve(sha256(body)); await pending.promise; });
         expect(container.querySelectorAll('[data-review-badge]')).toHaveLength(3);
 
+        // 編集後（不一致）は実装の実ハッシュで照合（mockOnce は消費済み＝以降は実物）
         const edited = body.replace('こちらこそ', 'こちらこそ、');
         await render(<TranscriptAwareMarkdown markdown={edited} documentId={DOC_ID} review={matching} />);
         await settleHash(edited);
         expect(container.querySelector('[data-review-badge]')).toBeNull();
         // 時刻リンク自体は引き続き動く
         expect(container.querySelector('a[data-timestamp-sec="12"]')).not.toBeNull();
-    // 🔴 2 回のレンダー＋2 回の非同期ハッシュ照合を含み、全体実行の並列負荷で既定 5000ms を超えることがある
-    //    （単体では緑）。判定内容は変えず、余裕を与える。
-    }, 20_000);
+    });
 
     it('documentId が無ければ照合しない（バッジ無し）', async () => {
         await render(<TranscriptAwareMarkdown markdown={TRANSCRIPT} review={review()} />);
