@@ -56,7 +56,10 @@ vi.mock('@/lib/videoConversionService', () => ({
     convertVideoToAudioSegments: serviceMocks.convertVideoToAudioSegments,
     resumeVideoConversion: serviceMocks.resumeVideoConversion,
 }));
-vi.mock('@/components/FileDropZone', () => ({
+// 🔴 差し替えるのは kind の判定だけ。SUPPORTED_MEDIA_FORMATS は mediaInput が
+//    「非圧縮かどうか」を引くのに使うので、実物を残す（丸ごと差し替えると undefined になる）
+vi.mock('@/components/FileDropZone', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@/components/FileDropZone')>()),
     getSupportedMediaKind: serviceMocks.getSupportedMediaKind,
 }));
 vi.mock('@/lib/ffmpeg', () => ({
@@ -72,7 +75,11 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { CONVERSION_QUEUE_WAIT_LIMIT_MS, useProcessingWorkflow } from './useProcessingWorkflow';
-import { canSendAudioAsIs } from '@/lib/mediaInput';
+import {
+    canSendAudioAsIs,
+    COMPRESSED_AUDIO_EXTENSIONS,
+    UNCOMPRESSED_AUDIO_EXTENSIONS,
+} from '@/lib/mediaInput';
 import { TRANSCRIPT_PROMPT_ID } from '@/lib/transcriptPrompt';
 import { GENERATE_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
 
@@ -478,6 +485,145 @@ describe('handleResumeFile checkpoint planning', () => {
     });
 });
 
+/**
+ * 🔴 本機能の肝 (2026-09-04 の実害)。圧縮済みで上限内の音声は変換を通らずそのまま送られ、
+ *    利用者がビットレートを下げても一切効かない。強制再変換は `convertedAudioBlob` と
+ *    `canSendAudioAsIs` の**両方の近道**を無効化して、元ファイルから変換をやり直さなければならない。
+ */
+describe('🔴 強制再変換（サイズ超過からの「変換し直して再試行」）', () => {
+    const forceResume = (
+        harness: Harness,
+        status: FileProcessingStatus,
+        file: FileWithPrompts,
+        forceReconvertAtBitrate = '64k'
+    ) => harness.workflow.handleResumeFile(
+        status.fileId, [file], [status.fileId], [status], BITRATE, SAMPLE_RATE,
+        { forceReconvertAtBitrate }
+    );
+
+    it('🔴 そのまま送れる音声 (canSendAudioAsIs===true) でも変換を呼ぶ', async () => {
+        const harness = useWorkflowHarness();
+        // 圧縮済み・上限内＝通常の再開なら変換を丸ごと飛ばす入力
+        const file = createFile('会議音声.m4a', 'audio/mp4', 1024);
+        expect(canSendAudioAsIs(file.file)).toBe(true);
+
+        await forceResume(harness, createStatus('f1'), file);
+
+        expect(serviceMocks.convertVideoToAudioSegments).toHaveBeenCalledTimes(1);
+        // 指定したビットレートで変換する（画面の設定値 BITRATE ではない）
+        expect(serviceMocks.convertVideoToAudioSegments.mock.calls[0][3]).toBe('64k');
+        expect(serviceMocks.ffmpegLoad).toHaveBeenCalled();
+    });
+
+    it('🔴 変換済み Blob が残っていても捨てて変換し直す', async () => {
+        const harness = useWorkflowHarness();
+        const status = createStatus('f1', {
+            convertedAudioBlob: new Blob(['old-audio'], { type: 'audio/mpeg' }),
+        });
+
+        await forceResume(harness, status, createFile('long.wav', 'audio/wav', 1024));
+
+        expect(serviceMocks.convertVideoToAudioSegments).toHaveBeenCalledTimes(1);
+        // 生成には新しく変換した Blob を渡す（古いものを送り直さない）
+        const passedBlob = harness.processTranscriptionResume.mock.calls[0][1];
+        expect(passedBlob).not.toBe(status.convertedAudioBlob);
+    });
+
+    it('🔴 区間チェックポイントが揃っていても区間再開ではなく全体を変換し直す', async () => {
+        const harness = useWorkflowHarness();
+        const status = createStatus('f1', {
+            totalDuration: 60,
+            segments: [
+                {
+                    segmentIndex: 0, startTime: 0, endTime: 30, status: 'completed',
+                    progress: 100, audioBlob: new Blob(['a']),
+                },
+                { segmentIndex: 1, startTime: 30, endTime: 60, status: 'pending', progress: 0 },
+            ],
+            completedSegmentIndices: [0],
+        });
+
+        await forceResume(harness, status, createFile('only.mp4', 'video/mp4'));
+
+        expect(serviceMocks.resumeVideoConversion).not.toHaveBeenCalled();
+        expect(serviceMocks.convertVideoToAudioSegments).toHaveBeenCalledTimes(1);
+    });
+
+    it('🔴 保存だけ残っていても（save_only の近道でも）変換をやり直す', async () => {
+        const harness = useWorkflowHarness({ pendingSave: true });
+
+        await forceResume(harness, createStatus('f1'), createFile('会議音声.m4a', 'audio/mp4', 1024));
+
+        expect(serviceMocks.convertVideoToAudioSegments).toHaveBeenCalledTimes(1);
+    });
+
+    it('🔴 動画直送モードでも近道を通さず変換する', async () => {
+        const harness = useWorkflowHarness({ sendVideoDirectly: true });
+
+        await forceResume(harness, createStatus('f1'), createFile('only.mp4', 'video/mp4'));
+
+        expect(serviceMocks.convertVideoToAudioSegments).toHaveBeenCalledTimes(1);
+    });
+
+    it('保存済みプロンプトは再実行しない（完了済みIDをそのまま引き継ぐ）', async () => {
+        const harness = useWorkflowHarness();
+        const status = createStatus('f1', {
+            completedPromptIds: ['prompt-done'],
+            convertedAudioBlob: new Blob(['old-audio'], { type: 'audio/mpeg' }),
+        });
+
+        await forceResume(harness, status, createFile('会議音声.m4a', 'audio/mp4', 1024));
+
+        expect(harness.processTranscriptionResume).toHaveBeenCalledTimes(1);
+        expect(harness.processTranscriptionResume.mock.calls[0][2]).toEqual(['prompt-done']);
+        // 生成にも指定したビットレートを渡す（記録される値と実際の変換を揃える）
+        expect(harness.processTranscriptionResume.mock.calls[0][3]).toBe('64k');
+    });
+
+    it('チェックポイントと失敗の種別を消してから走る', async () => {
+        const status = createStatus('f1', {
+            failureKind: 'too_large',
+            sizeFailure: { bytes: 999, bitrate: '96k', wasConverted: false, limitBytes: 999 },
+            convertedAudioBlob: new Blob(['old-audio'], { type: 'audio/mpeg' }),
+            totalDuration: 60,
+            completedSegmentIndices: [0],
+            audioConversionProgress: 80,
+        });
+        const harness = useWorkflowHarness({ initialStatuses: [status] });
+        // 変換に入る前の状態を覗く
+        let observed: FileProcessingStatus | undefined;
+        serviceMocks.convertVideoToAudioSegments.mockImplementationOnce(async () => {
+            observed = harness.statuses.find(current => current.fileId === 'f1');
+            return new Blob(['audio'], { type: 'audio/mpeg' });
+        });
+
+        await forceResume(harness, status, createFile('会議音声.m4a', 'audio/mp4', 1024));
+
+        expect(observed).toMatchObject({
+            failureKind: undefined,
+            sizeFailure: undefined,
+            convertedAudioBlob: undefined,
+            segments: [],
+            completedSegmentIndices: [],
+            totalDuration: undefined,
+            audioConversionProgress: 0,
+        });
+    });
+
+    it('オプション無しの再開は従来どおり（近道はそのまま効く）', async () => {
+        const harness = useWorkflowHarness();
+        const file = createFile('会議音声.m4a', 'audio/mp4', 1024);
+
+        await harness.workflow.handleResumeFile(
+            'f1', [file], ['f1'], [createStatus('f1')], BITRATE, SAMPLE_RATE
+        );
+
+        expect(serviceMocks.convertVideoToAudioSegments).not.toHaveBeenCalled();
+        expect(harness.processTranscriptionResume).toHaveBeenCalledTimes(1);
+        expect(harness.processTranscriptionResume.mock.calls[0][3]).toBe(BITRATE);
+    });
+});
+
 describe('handleResumeFile mixed draft sets (V7)', () => {
     it('does not take the save-only path when only some prompts have a draft', async () => {
         // 2件中1件だけ下書きあり。保存のみで済ませると Base64 とアップロードが欠ける
@@ -557,6 +703,20 @@ describe('canSendAudioAsIs', () => {
     it('圧縮済みで上限内の音声だけ、そのまま送る', () => {
         expect(canSendAudioAsIs(f('a.mp3', 'audio/mpeg', 1024))).toBe(true);
         expect(canSendAudioAsIs(f('a.m4a', 'audio/mp4', 1024))).toBe(true);
+        expect(canSendAudioAsIs(f('a.aac', 'audio/aac', 1024))).toBe(true);
+        expect(canSendAudioAsIs(f('a.ogg', 'audio/ogg', 1024))).toBe(true);
+    });
+
+    /**
+     * 🔴 上限が 500MB に上がってから「上限内の WAV」が生まれた。サイズだけで判定すると
+     *    その WAV は変換を素通りし、ビットレートを下げても同じサイズが上がる
+     *    （2026-09-04 の実害そのもの）。非圧縮は大きさに関係なく変換に回す。
+     */
+    it('🔴 上限内でも非圧縮 (wav/flac) はそのまま送らない。同サイズの圧縮済みは送る', () => {
+        expect(canSendAudioAsIs(f('a.wav', 'audio/wav', 1024))).toBe(false);
+        expect(canSendAudioAsIs(f('a.flac', 'audio/flac', 1024))).toBe(false);
+        // 同じサイズでも圧縮済みなら通る＝判定しているのはサイズではなく形式
+        expect(canSendAudioAsIs(f('a.mp3', 'audio/mpeg', 1024))).toBe(true);
     });
 
     it('🔴 上限を超える音声は、拡張子が何であれ変換に回す', () => {
@@ -564,7 +724,44 @@ describe('canSendAudioAsIs', () => {
         expect(canSendAudioAsIs(f('a.mp3', 'audio/mpeg', GENERATE_MAX_MEDIA_BYTES + 1))).toBe(false);
     });
 
+    it('size が読めない音声はそのまま送らない（判定できないものを合格に丸めない）', () => {
+        expect(canSendAudioAsIs({ name: 'a.mp3', type: 'audio/mpeg' } as File)).toBe(false);
+        // 🔴 数値でない size は比較で暗黙変換されて通ってしまう（'100' <= 上限 は true）。
+        //    undefined だけを試すと typeof の門が効いているかを判別できない
+        expect(canSendAudioAsIs(
+            { name: 'a.mp3', type: 'audio/mpeg', size: '100' } as unknown as File
+        )).toBe(false);
+    });
+
     it('動画はそのまま送らない', () => {
         expect(canSendAudioAsIs(f('a.mp4', 'video/mp4', 1024))).toBe(false);
+    });
+
+    /**
+     * 🔴 「圧縮済み」は SUPPORTED_MEDIA_FORMATS の音声から非圧縮を引いた差集合＝
+     *    表に音声形式が増えると既定で「圧縮済み」に入る。新形式が非圧縮だった場合に
+     *    黙って素通りさせないよう、現在の分類をここで固定して見直しを強制する。
+     */
+    /**
+     * 🔴 判定は明示の許可リスト（未知の形式は変換に回る fail-closed）。そのぶん、表に
+     *    音声形式が増えたのにどちらのリストにも入れ忘れると、その形式は永久に変換行きのまま
+     *    誰も気づかない。表の音声形式が 2 つのリストで**過不足なく**分割されていることを検査する。
+     */
+    it('表の音声形式は「圧縮済み ∪ 非圧縮」で過不足なく分割されている', async () => {
+        const { SUPPORTED_MEDIA_FORMATS } =
+            await vi.importActual<typeof import('@/components/FileDropZone')>('@/components/FileDropZone');
+        const audioExtensions = SUPPORTED_MEDIA_FORMATS
+            .filter(format => format.kind === 'audio')
+            .map(format => format.extension);
+        const classified = [...COMPRESSED_AUDIO_EXTENSIONS, ...UNCOMPRESSED_AUDIO_EXTENSIONS];
+
+        expect([...audioExtensions].sort()).toEqual([...classified].sort());
+        // 同じ拡張子が両方に入っていない（分割であって重複ではない）
+        expect(new Set(classified).size).toBe(classified.length);
+    });
+
+    it('🔴 どちらのリストにも無い音声形式は、そのまま送らない (fail-closed)', () => {
+        // 表に新形式（例: 非圧縮の .aiff）が入り、分類を足し忘れた状況
+        expect(canSendAudioAsIs(f('a.aiff', 'audio/aiff', 1024))).toBe(false);
     });
 });

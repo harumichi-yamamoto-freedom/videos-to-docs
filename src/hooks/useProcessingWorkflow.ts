@@ -29,6 +29,16 @@ export interface WorkflowResult {
     message?: string;
 }
 
+export interface ResumeFileOptions {
+    /**
+     * サイズ超過からの「変換し直して再試行」。指定すると引数の bitrate ではなくこの値で変換し、
+     * 🔴 `convertedAudioBlob` と `canSendAudioAsIs` の**両方の近道を無効化**する。
+     *    どちらか片方でも残すと同じサイズのデータが上がり、ビットレートの選択が効かない
+     *    (2026-09-04 の実害。`mediaInput.canSendAudioAsIs` のコメント参照)。
+     */
+    forceReconvertAtBitrate?: string;
+}
+
 /** 再開時に、どこからやり直せば整合が取れるかの判定結果 */
 type ResumePlan = 'save_only' | 'transcribe' | 'convert_resume' | 'convert_full';
 
@@ -254,8 +264,13 @@ export const useProcessingWorkflow = ({
                     );
 
                     if (audioBlob) {
-                        // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始
-                        updateById(fileId, status => ({ ...status, convertedAudioBlob: audioBlob }));
+                        // 音声変換が成功したら、Blobをキャッシュしてすぐに文書生成を並列で開始。
+                        // どのビットレートで焼いたかも一緒に残す（画面の選択は後から変わる）
+                        updateById(fileId, status => ({
+                            ...status,
+                            convertedAudioBlob: audioBlob,
+                            convertedAudioBitrate: bitrate,
+                        }));
 
                         // R1: 変換中に中止された場合、生成を始めずに終端状態を書く
                         if (claim.signal.aborted) {
@@ -342,7 +357,8 @@ export const useProcessingWorkflow = ({
         fileIds: string[],
         processingStatuses: FileProcessingStatus[],
         bitrate: string,
-        sampleRate: number
+        sampleRate: number,
+        options?: ResumeFileOptions
     ): Promise<WorkflowResult> => {
         setWorkflowError(null);
 
@@ -376,15 +392,22 @@ export const useProcessingWorkflow = ({
         }
 
         const job: TranscriptionJobRef = { file, fileIndex, fileId, signal: claim.signal };
-        const plan = resolveResumePlan(status, file);
+        // 🔴 強制再変換では計画を convert_full に固定する。resolveResumePlan は
+        //    変換済み Blob・canSendAudioAsIs・sendVideoDirectly のどれでも変換を飛ばすので、
+        //    ここを通すと「下げたのに同じサイズが上がる」に戻る
+        const forcedBitrate = options?.forceReconvertAtBitrate;
+        const effectiveBitrate = forcedBitrate ?? bitrate;
+        const plan: ResumePlan = forcedBitrate ? 'convert_full' : resolveResumePlan(status, file);
 
         processingWorkflowLogger.info('再開処理を開始', {
             fileId,
             fileIndex,
             plan,
+            forcedBitrate,
             phase: status.phase,
             status: status.status,
             failedPhase: status.failedPhase,
+            failureKind: status.failureKind,
             segments: status.segments.length,
             completedSegments: status.completedSegmentIndices.length,
             hasAudio: Boolean(status.convertedAudioBlob),
@@ -398,6 +421,17 @@ export const useProcessingWorkflow = ({
             status: 'waiting',
             error: undefined,
             failedPhase: undefined,
+            failureKind: undefined,
+            sizeFailure: undefined,
+            // 強制再変換では、変換を飛ばす根拠になるチェックポイントを先に捨てる
+            ...(forcedBitrate && {
+                convertedAudioBlob: undefined,
+                convertedAudioBitrate: undefined,
+                segments: [],
+                completedSegmentIndices: [],
+                totalDuration: undefined,
+                audioConversionProgress: 0,
+            }),
         }));
 
         try {
@@ -439,7 +473,7 @@ export const useProcessingWorkflow = ({
                     updateById(fileId, current => ({ ...current, convertedAudioBlob: audioBlob }));
                 }
 
-                await processTranscriptionResume(job, audioBlob, status.completedPromptIds, bitrate, sampleRate);
+                await processTranscriptionResume(job, audioBlob, status.completedPromptIds, effectiveBitrate, sampleRate);
                 return { ok: true };
             }
 
@@ -492,7 +526,7 @@ export const useProcessingWorkflow = ({
                         fileIndex,
                         status,
                         converterRef.current!,
-                        bitrate,
+                        effectiveBitrate,
                         sampleRate,
                         debugErrorMode,
                         setProcessingStatuses
@@ -501,7 +535,7 @@ export const useProcessingWorkflow = ({
                         file,
                         fileIndex,
                         converterRef.current!,
-                        bitrate,
+                        effectiveBitrate,
                         sampleRate,
                         debugErrorMode,
                         setProcessingStatuses
@@ -512,8 +546,12 @@ export const useProcessingWorkflow = ({
                     return { ok: false };
                 }
 
-                updateById(fileId, current => ({ ...current, convertedAudioBlob: audioBlob }));
-                await processTranscriptionResume(job, audioBlob, status.completedPromptIds, bitrate, sampleRate);
+                updateById(fileId, current => ({
+                    ...current,
+                    convertedAudioBlob: audioBlob,
+                    convertedAudioBitrate: effectiveBitrate,
+                }));
+                await processTranscriptionResume(job, audioBlob, status.completedPromptIds, effectiveBitrate, sampleRate);
                 return { ok: true };
             } finally {
                 audioConversionQueueRef.current = false;

@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { VideoConverter } from '@/lib/ffmpeg';
-import { GeminiClient } from '@/lib/gemini';
+import { GeminiClient, type TranscriptionResult } from '@/lib/gemini';
 import { saveTranscription } from '@/lib/firestore';
 import { uploadAudioToStorage } from '@/lib/storage';
-import { GENERATE_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
+import {
+    GENERATE_MAX_MEDIA_BYTES,
+    GENERATE_SYNC_MAX_MEDIA_BYTES,
+} from '@/lib/generateApiContract';
 import {
     BatchTranscriptionProgress,
     FileProcessingStatus,
     FileWithPrompts,
     DebugErrorMode,
     ProcessingFailedPhase,
+    ProcessingFailureKind,
     ProcessingPhase,
     PromptJobState,
 } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
-import { isTranscriptPrompt } from '@/lib/transcriptPrompt';
+import { isTranscriptPrompt, TRANSCRIPT_PROMPT_ID } from '@/lib/transcriptPrompt';
+import { measureMediaDurationSec } from '@/lib/mediaDuration';
 import {
     resumeBatchTranscription,
     runBatchTranscription,
@@ -43,9 +48,23 @@ export class ProcessingAbortedError extends Error {
     }
 }
 
+/**
+ * 失敗がサイズ由来だったときに、種別と**破った上限**を一緒に運ぶ。
+ * 片方だけでは再変換の下げ先を決められないので、必ず対で持つ。
+ */
+export interface SizeFailureContext {
+    kind: ProcessingFailureKind;
+    limitBytes: number;
+}
+
 /** どのフェーズで失敗したかを保持したまま伝播させるためのエラー */
 class PromptPhaseError extends Error {
-    constructor(readonly failedPhase: ProcessingFailedPhase, message: string) {
+    constructor(
+        readonly failedPhase: ProcessingFailedPhase,
+        message: string,
+        /** サイズ超過のときだけ入る。文言ではなくここで種別を運ぶ */
+        readonly sizeFailure?: SizeFailureContext,
+    ) {
         super(message);
         this.name = 'PromptPhaseError';
     }
@@ -101,6 +120,19 @@ const describeError = (error: unknown): string => {
     if (typeof error === 'string') return error;
     return '不明なエラー';
 };
+
+/**
+ * 文書生成 API の失敗がサイズ超過かを、**サーバ契約のコードと HTTP status だけ**で見分ける。
+ *
+ * 🔴 文言では判定しない。文言はサーバ側の都合でいつでも変わり
+ *    (実際に「大きすぎます」→「上限 200MB を超えています」に変わった)、
+ *    部分一致で分類すると変わった瞬間に静かに外れる。
+ * 🔴 時間上限 (AZURE_BATCH_MAX_AUDIO_SEC) は別経路 (バッチ提出の 400) で、
+ *    このコードにも 413 にも当たらないため、ここには入ってこない。
+ */
+export const isMediaTooLargeFailure = (
+    result: Pick<TranscriptionResult, 'errorCode' | 'errorStatus'>
+): boolean => result.errorCode === 'media_too_large' || result.errorStatus === 413;
 
 const FAILED_PHASE_TO_PHASE: Record<ProcessingFailedPhase, ProcessingPhase> = {
     engine_init: 'waiting',
@@ -415,14 +447,63 @@ export const useVideoProcessing = (
         // バッチ提出済みで、確認の上限に達して決着を確認できなかったプロンプト（失敗ではない）
         const pendingConfirmationPromptIds: string[] = [];
         let failedPhase: ProcessingFailedPhase = 'text_generation';
+        // サイズ超過で落ちたプロンプトがあれば、その種別と上限をジョブ全体の失敗へ引き継ぐ
+        let jobSizeFailure: SizeFailureContext | undefined;
+        /**
+         * 送るデータの**実測の長さ**（秒）。測れなければ null で、各所が従来の推定へ落ちる。
+         * 🔴 サイズ÷ビットレートの推定は、そのまま送られる入力で外れる（元の符号化を知らないため）。
+         *    提出の門と再変換の見積りは、測れたならこちらを使う。
+         */
+        let measuredDurationSec: number | null = null;
 
-        const failJob = (phase: ProcessingFailedPhase, messages: string[]) => {
+        /**
+         * 失敗の唯一の書き込み口。サイズ超過は呼び出し側が `sizeFailure` を明示して渡す
+         * (種別と破った上限は対でしか意味を持たないので、片方だけは渡せない形にしてある)。
+         * 🔴 `failureKind` / `sizeFailure` は毎回上書きする。書かずに残すと、前回の失敗の
+         *    種別で「変換し直して再試行」が出続ける。
+         */
+        /**
+         * この行に**文書生成のプロンプトが 1 つでも計画されているか**。
+         * 🔴 判定は予約 ID だけで行う（`transcriptPrompt.ts` の警告どおり、名前で判定しない）。
+         *    文字起こしだけの行に生成の制約 (200MB) を持ち込むと、無関係な理由で
+         *    ビットレートを下げることになる。
+         */
+        const plansDocumentGeneration = job.file.selectedPromptIds
+            .some(promptId => promptId !== TRANSCRIPT_PROMPT_ID);
+
+        const failJob = (
+            phase: ProcessingFailedPhase,
+            messages: string[],
+            sizeFailure?: SizeFailureContext
+        ) => {
             updateStatus(fileId, status => ({
                 ...status,
                 status: 'error',
                 phase: FAILED_PHASE_TO_PHASE[phase],
                 failedPhase: phase,
                 error: messages.join('\n'),
+                failureKind: sizeFailure?.kind,
+                // 下げ先の決定に要る実測値。「変換由来か」は、送った Blob が元ファイルそのものか
+                // (＝変換を通らずそのまま送られたか) で決まる
+                sizeFailure: sizeFailure && audioBlob
+                    ? {
+                        bytes: audioBlob.size,
+                        // 🔴 キャッシュ済みの Blob は、画面の今の選択とは**別のビットレート**で
+                        //    焼かれていることがある（他の行の再試行がグローバル値を書き換える）。
+                        //    その Blob を作った値が分かるならそちらが正。無ければ渡された値。
+                        bitrate: (status.convertedAudioBlob === audioBlob
+                            && status.convertedAudioBitrate) || bitrate,
+                        wasConverted: audioBlob !== file.file,
+                        // 実測できていれば下げ先の見積りに使う（無ければ計画側が上界で見積もる）
+                        ...(measuredDurationSec !== null && { durationSec: measuredDurationSec }),
+                        // 🔴 再試行が満たすべき上限。生成を含む行は、いま破った上限を通せても
+                        //    次に同期生成の 200MB で落ちる。両方を満たす値まで一度で下げる
+                        //    （文字起こしだけの行に 200MB を持ち込まない）
+                        limitBytes: plansDocumentGeneration
+                            ? Math.min(sizeFailure.limitBytes, GENERATE_SYNC_MAX_MEDIA_BYTES)
+                            : sizeFailure.limitBytes,
+                    }
+                    : undefined,
             }));
         };
 
@@ -494,6 +575,8 @@ export const useVideoProcessing = (
                         phase: 'completed',
                         error: undefined,
                         failedPhase: undefined,
+                        failureKind: undefined,
+                        sizeFailure: undefined,
                         transcriptionCount: savedCount,
                         totalTranscriptions: plannedCount,
                     }));
@@ -546,6 +629,8 @@ export const useVideoProcessing = (
                 phase: needsGeneration ? 'uploading' : 'saving',
                 error: undefined,
                 failedPhase: undefined,
+                failureKind: undefined,
+                sizeFailure: undefined,
                 ownerUid,
                 totalTranscriptions: plannedTotal,
             }));
@@ -564,16 +649,36 @@ export const useVideoProcessing = (
                 //    ルールが `request.resource.size < 上限` を条件にしているためで、
                 //    利用者にはサイズの問題が**権限の問題として見える**（2026-09-04 の実害）。
                 //    投げる前にこちらで落として、何をすればよいかを書いた文言を出す。
-                if (audioBlob.size > GENERATE_MAX_MEDIA_BYTES) {
+                // 🔴 送るデータの長さをここで一度だけ測る。以降の「4 時間の門」と
+                //    再変換の見積りは、推定ではなくこの値を使う（測れなければ従来どおり推定）。
+                measuredDurationSec = await measureMediaDurationSec(audioBlob);
+                videoProcessingLogger.info('メディアの長さを測定', {
+                    fileId, fileIndex, measuredDurationSec, blobSizeBytes: audioBlob.size, bitrate,
+                });
+
+                // 🔴 この実行が**文書生成だけ**なら、上げても 200MB でサーバに弾かれる。
+                //    数百MBを上げ切ってから 413 にせず、投げる前に落とす。
+                //    文字起こしを含む行では 500MB のまま: 同じアップロードを文字起こしも使うので、
+                //    ここで 200MB にすると**正常に動くはずの文字起こしまで殺す**。
+                const runsTranscription = remainingPrompts.some(prompt => isTranscriptPrompt(prompt));
+                const uploadLimitBytes = runsTranscription
+                    ? GENERATE_MAX_MEDIA_BYTES
+                    : GENERATE_SYNC_MAX_MEDIA_BYTES;
+
+                if (audioBlob.size > uploadLimitBytes) {
                     const sizeMb = (audioBlob.size / 1024 / 1024).toFixed(0);
-                    const limitMb = Math.floor(GENERATE_MAX_MEDIA_BYTES / 1024 / 1024);
+                    const limitMb = Math.floor(uploadLimitBytes / 1024 / 1024);
                     videoProcessingLogger.error('アップロードするファイルが上限超', undefined, {
-                        fileId, fileIndex, blobSizeBytes: audioBlob.size, limit: GENERATE_MAX_MEDIA_BYTES, bitrate,
+                        fileId, fileIndex, blobSizeBytes: audioBlob.size, limit: uploadLimitBytes,
+                        bitrate, runsTranscription,
                     });
                     failJob('upload', [
-                        `この音声は ${sizeMb}MB で、アップロードできる上限 ${limitMb}MB を超えています。`
-                        + 'ビットレートを下げるか、録音を分割してから、もう一度お試しください。',
-                    ]);
+                        runsTranscription
+                            ? `この音声は ${sizeMb}MB で、アップロードできる上限 ${limitMb}MB を超えています。`
+                                + 'ビットレートを下げるか、録音を分割してから、もう一度お試しください。'
+                            : `この音声は ${sizeMb}MB で、議事録などの文書生成に送れる上限 ${limitMb}MB を超えています。`
+                                + 'ビットレートを下げるか、録音を分割してから、もう一度お試しください。',
+                    ], { kind: 'too_large', limitBytes: uploadLimitBytes });
                     return;
                 }
 
@@ -673,7 +778,9 @@ export const useVideoProcessing = (
                                 storagePath: media.storagePath,
                                 fileName: file.file.name,
                                 mimeType: media.mimeType,
-                                audioSec: estimateAudioSec(audioBlob, bitrate),
+                                // 🔴 実測があればそれが正。推定 (サイズ÷画面のビットレート) は
+                                //    そのまま送られる入力で外れ、2 時間の商談を「長すぎます」と誤拒否する
+                                audioSec: measuredDurationSec ?? estimateAudioSec(audioBlob, bitrate),
                                 promptName: prompt.name,
                                 originalFileType,
                                 signal,
@@ -769,7 +876,12 @@ export const useVideoProcessing = (
                     if (!transcriptionResult.success) {
                         throw new PromptPhaseError(
                             'text_generation',
-                            transcriptionResult.error || 'Gemini API処理失敗'
+                            transcriptionResult.error || 'Gemini API処理失敗',
+                            // 🔴 破ったのは同期文書生成の上限 (200MB)。アップロードの 500MB ではない。
+                            //    ここを 500MB にすると、下げ先が 200MB を超えてもう一度落ちる
+                            isMediaTooLargeFailure(transcriptionResult)
+                                ? { kind: 'too_large', limitBytes: GENERATE_SYNC_MAX_MEDIA_BYTES }
+                                : undefined,
                         );
                     }
 
@@ -866,6 +978,9 @@ export const useVideoProcessing = (
                 if (reason instanceof PromptPhaseError && reason.failedPhase === 'saving') {
                     failedPhase = 'saving';
                 }
+                if (reason instanceof PromptPhaseError && reason.sizeFailure) {
+                    jobSizeFailure = reason.sizeFailure;
+                }
                 failures.push(`プロンプト「${prompt.name}」: ${describeError(reason)}`);
                 markPromptState(fileId, prompt.id!, 'failed');
                 videoProcessingLogger.error(`プロンプト「${prompt.name}」の処理に失敗`, reason, {
@@ -895,6 +1010,8 @@ export const useVideoProcessing = (
                     phase: 'completed',
                     error: undefined,
                     failedPhase: undefined,
+                    failureKind: undefined,
+                    sizeFailure: undefined,
                     transcriptionCount: savedCount,
                     totalTranscriptions: plannedCount,
                 }));
@@ -910,6 +1027,8 @@ export const useVideoProcessing = (
                     phase: 'awaiting_confirmation',
                     error: undefined,
                     failedPhase: undefined,
+                    failureKind: undefined,
+                    sizeFailure: undefined,
                 }));
                 return;
             }
@@ -920,7 +1039,7 @@ export const useVideoProcessing = (
                 );
             }
 
-            failJob(failedPhase, failures);
+            failJob(failedPhase, failures, jobSizeFailure);
         } catch (error) {
             if (error instanceof ProcessingAbortedError) {
                 videoProcessingLogger.info('文書生成を中止', { fileId, fileIndex, reason: error.message });
@@ -934,7 +1053,8 @@ export const useVideoProcessing = (
             });
             failJob(
                 error instanceof PromptPhaseError ? error.failedPhase : 'text_generation',
-                [describeError(error)]
+                [describeError(error)],
+                error instanceof PromptPhaseError ? error.sizeFailure : undefined
             );
         } finally {
             claim.release();

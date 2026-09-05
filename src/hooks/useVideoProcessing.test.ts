@@ -23,6 +23,11 @@ const batchMocks = vi.hoisted(() => ({
     resumeBatchTranscription: vi.fn(),
 }));
 
+// 実測の長さ。既定は「測れなかった」＝従来の推定へ落ちる（既存テストの挙動を変えない）
+const durationMocks = vi.hoisted(() => ({
+    measureMediaDurationSec: vi.fn(),
+}));
+
 vi.mock('@/hooks/batchTranscriptionClient', async (importOriginal) => ({
     ...(await importOriginal<typeof import('@/hooks/batchTranscriptionClient')>()),
     runBatchTranscription: batchMocks.runBatchTranscription,
@@ -51,6 +56,9 @@ vi.mock('react', () => ({
     },
 }));
 
+vi.mock('@/lib/mediaDuration', () => ({
+    measureMediaDurationSec: durationMocks.measureMediaDurationSec,
+}));
 vi.mock('@/lib/ffmpeg', () => ({ VideoConverter: class VideoConverter {} }));
 vi.mock('@/lib/gemini', () => ({ GeminiClient: class GeminiClient {} }));
 vi.mock('@/lib/firestore', () => ({
@@ -79,6 +87,8 @@ vi.mock('@/lib/logger', () => ({
 
 import {
     cancelPromptStates,
+    estimateAudioSec,
+    isMediaTooLargeFailure,
     countPendingSaveDrafts,
     derivePhase,
     evaluateCompletion,
@@ -86,6 +96,11 @@ import {
     resolveSavePendingPromptIds,
     useVideoProcessing,
 } from './useVideoProcessing';
+import {
+    GENERATE_MAX_MEDIA_BYTES,
+    GENERATE_SYNC_MAX_MEDIA_BYTES,
+} from '@/lib/generateApiContract';
+import { AZURE_BATCH_MAX_AUDIO_SEC } from '@/lib/azureBatchContract';
 import { TRANSCRIPT_PROMPT_ID } from '@/lib/transcriptPrompt';
 import type { RunBatchTranscriptionInput, RunBatchTranscriptionResult } from './batchTranscriptionClient';
 
@@ -147,6 +162,7 @@ beforeEach(() => {
     reactHarness.stateCursor = 0;
     reactHarness.stateValues = [];
     vi.clearAllMocks();
+    durationMocks.measureMediaDurationSec.mockResolvedValue(null);
     serviceMocks.getCurrentUserId.mockReturnValue('user-1');
     serviceMocks.saveTranscription.mockResolvedValue('doc-1');
     serviceMocks.uploadAudioToStorage.mockResolvedValue('audio/path');
@@ -1233,5 +1249,410 @@ describe('useVideoProcessing 全文文字起こし（バッチ）の確認待ち
         await hook.processTranscriptionResume(createJob(file), audioBlob, [TRANSCRIPT_PROMPT_ID], '192k', 44100);
         expect(batchMocks.runBatchTranscription).toHaveBeenCalledTimes(1);
         expect(batchMocks.resumeBatchTranscription).not.toHaveBeenCalled();
+    });
+});
+
+
+/**
+ * サイズ超過だけに「変換し直して再試行」を出すための種別づけ。
+ * 🔴 判定はサーバ契約のコードと HTTP status だけ。文言は見ない
+ *    (サーバ側の文言は実際に変わった: 「大きすぎます」→「上限 200MB を超えています」)。
+ */
+describe('isMediaTooLargeFailure（サイズ超過の見分け）', () => {
+    it('契約コード media_too_large を拾う', () => {
+        expect(isMediaTooLargeFailure({ errorCode: 'media_too_large', errorStatus: 413 })).toBe(true);
+    });
+
+    it('契約本文が読めない応答でも HTTP 413 で拾う', () => {
+        expect(isMediaTooLargeFailure({ errorCode: 'unknown', errorStatus: 413 })).toBe(true);
+    });
+
+    it('他の失敗は拾わない', () => {
+        expect(isMediaTooLargeFailure({ errorCode: 'rate_limited', errorStatus: 429 })).toBe(false);
+        expect(isMediaTooLargeFailure({ errorCode: 'upstream_error', errorStatus: 502 })).toBe(false);
+        expect(isMediaTooLargeFailure({})).toBe(false);
+    });
+
+    it('🔴 文言では判定しない（サーバが言い回しを変えても結果が変わらない）', () => {
+        // どちらもサーバが実際に返してきた/返しうるサイズ超過の文言だが、種別はコードだけで決まる
+        expect(isMediaTooLargeFailure({ errorCode: 'media_too_large' })).toBe(true);
+        // 「大きすぎます」と書いてあってもコードが別なら too_large にしない
+        expect(isMediaTooLargeFailure({ errorCode: 'upstream_error', errorStatus: 502 })).toBe(false);
+    });
+});
+
+describe('useVideoProcessing サイズ超過の失敗（変換し直して再試行の土台）', () => {
+    const overLimitBlob = (size: number = GENERATE_MAX_MEDIA_BYTES + 1) =>
+        ({ size, type: 'audio/mpeg' }) as Blob;
+
+    it('アップロード前のサイズガードは too_large と実測値を残す', async () => {
+        const transcriptPrompt = createPrompt(TRANSCRIPT_PROMPT_ID, '全文文字起こし');
+        const hook = useProcessingHarness([transcriptPrompt]);
+        const file = createFile([TRANSCRIPT_PROMPT_ID]);
+
+        await hook.processTranscription(createJob(file), overLimitBlob(), '96k', 44100);
+
+        expect(getCurrentStatus()).toMatchObject({
+            status: 'error',
+            failedPhase: 'upload',
+            failureKind: 'too_large',
+            sizeFailure: {
+                bytes: GENERATE_MAX_MEDIA_BYTES + 1,
+                bitrate: '96k',
+                // 変換済みの Blob を送っていた＝下げれば効く
+                wasConverted: true,
+                // 文字起こしだけの行なので、破ったのはアップロード (Storage) の上限のまま
+                limitBytes: GENERATE_MAX_MEDIA_BYTES,
+            },
+        });
+        expect(serviceMocks.uploadAudioToStorage).not.toHaveBeenCalled();
+    });
+
+    /**
+     * 🔴 同じアップロードを文字起こしも使う。生成の上限 (200MB) を一律に持ち込むと、
+     *    300MB のファイルで**正常に動くはずの文字起こしまで殺す**。
+     *    絞ってよいのは「この実行に文字起こしが 1 つも無い」＝生成専用のときだけ。
+     */
+    it('🔴 生成専用の行は、同期生成の上限を超えた時点でアップロードせずに落とす', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = useProcessingHarness([prompt]);
+        const blob = { size: 300 * 1024 * 1024, type: 'audio/mpeg' } as Blob;
+
+        await hook.processTranscription(createJob(createFile([prompt.id!])), blob, '96k', 44100);
+
+        expect(serviceMocks.uploadAudioToStorage).not.toHaveBeenCalled();
+        expect(getCurrentStatus()).toMatchObject({
+            status: 'error',
+            failureKind: 'too_large',
+            sizeFailure: { limitBytes: GENERATE_SYNC_MAX_MEDIA_BYTES },
+        });
+        expect(getCurrentStatus().error).toContain('文書生成に送れる上限');
+    });
+
+    it('🔴 文字起こしを含む行の 300MB は、アップロードして文字起こしを走らせる', async () => {
+        const transcriptPrompt = createPrompt(TRANSCRIPT_PROMPT_ID, '全文文字起こし');
+        batchMocks.runBatchTranscription.mockImplementation(
+            async (input: RunBatchTranscriptionInput) => {
+                input.onSubmitted?.({ jobId: 'job-1', docId: 'doc-1' });
+                return { outcome: 'succeeded', success: true, jobId: 'job-1', docId: 'doc-1' };
+            }
+        );
+        const hook = useProcessingHarness([transcriptPrompt]);
+        const blob = { size: 300 * 1024 * 1024, type: 'audio/mpeg' } as Blob;
+
+        await hook.processTranscription(createJob(createFile([TRANSCRIPT_PROMPT_ID])), blob, '96k', 44100);
+
+        expect(serviceMocks.uploadAudioToStorage).toHaveBeenCalledTimes(1);
+        expect(batchMocks.runBatchTranscription).toHaveBeenCalledTimes(1);
+        expect(getCurrentStatus()).toMatchObject({ status: 'completed' });
+    });
+
+    /**
+     * 🔴 6時間・192k (518MB) はアップロードのガード (500MB) が先に発火する。予算をそのまま
+     *    500MB にすると 192k のままが選ばれ、再変換 415MB → アップロードは通る →
+     *    今度は生成が 200MB 超で 413（2 押し目）。生成を含む行は両方を満たす値まで一度で下げる。
+     */
+    it('🔴 生成を含む行は、アップロード上限で落ちても予算を同期生成の上限まで絞る', async () => {
+        const transcriptPrompt = createPrompt(TRANSCRIPT_PROMPT_ID, '全文文字起こし');
+        const docPrompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = useProcessingHarness([transcriptPrompt, docPrompt], 2);
+
+        await hook.processTranscription(
+            createJob(createFile([TRANSCRIPT_PROMPT_ID, 'prompt-a'])),
+            overLimitBlob(),
+            '192k',
+            44100
+        );
+
+        expect(getCurrentStatus().sizeFailure).toMatchObject({
+            limitBytes: GENERATE_SYNC_MAX_MEDIA_BYTES,
+        });
+    });
+
+    it('文字起こしだけの行には、生成の上限を持ち込まない', async () => {
+        const transcriptPrompt = createPrompt(TRANSCRIPT_PROMPT_ID, '全文文字起こし');
+        const hook = useProcessingHarness([transcriptPrompt]);
+
+        await hook.processTranscription(
+            createJob(createFile([TRANSCRIPT_PROMPT_ID])),
+            overLimitBlob(),
+            '192k',
+            44100
+        );
+
+        expect(getCurrentStatus().sizeFailure).toMatchObject({
+            limitBytes: GENERATE_MAX_MEDIA_BYTES,
+        });
+    });
+
+    it('🔴 元ファイルをそのまま送っていた失敗は wasConverted=false（下げても効かない入力）', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = useProcessingHarness([prompt]);
+        // 変換を通らずそのまま送られる経路では、送る Blob が元ファイルそのもの
+        const file: FileWithPrompts = {
+            file: { name: '会議音声.m4a', type: 'audio/mp4', size: GENERATE_MAX_MEDIA_BYTES + 1 } as File,
+            selectedPromptIds: [prompt.id!],
+        };
+
+        await hook.processTranscription(createJob(file), file.file as Blob, '96k', 44100);
+
+        expect(getCurrentStatus()).toMatchObject({
+            failureKind: 'too_large',
+            sizeFailure: { wasConverted: false, bitrate: '96k' },
+        });
+    });
+
+    it('🔴 サーバ 413 (media_too_large) は、破った上限を「同期文書生成の上限」として記録する', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        // 文言ではなく契約コードで種別が決まる。文言はサーバ都合で変わる前提で無関係な文にしておく
+        serviceMocks.generateDocument.mockResolvedValue({
+            success: false,
+            error: 'サーバ側の都合でいつ変わってもよい文言',
+            errorCode: 'media_too_large',
+            errorStatus: 413,
+        });
+        const hook = useProcessingHarness([prompt]);
+        const audioBlob = new Blob(['audio'], { type: 'audio/mpeg' });
+
+        await hook.processTranscription(createJob(createFile([prompt.id!])), audioBlob, '128k', 44100);
+
+        // 🔴 ボタンを出すには実測値が必ず要る。413 の経路でも欠けないこと
+        expect(getCurrentStatus()).toMatchObject({
+            status: 'error',
+            failureKind: 'too_large',
+            sizeFailure: {
+                bytes: audioBlob.size,
+                bitrate: '128k',
+                wasConverted: true,
+                limitBytes: GENERATE_SYNC_MAX_MEDIA_BYTES,
+            },
+        });
+    });
+
+    it('契約本文が読めない 413 でも種別を落とさない', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        serviceMocks.generateDocument.mockResolvedValue({
+            success: false,
+            error: '文書生成サーバがエラーを返しました（HTTP 413）。',
+            errorCode: 'unknown',
+            errorStatus: 413,
+        });
+        const hook = useProcessingHarness([prompt]);
+
+        await hook.processTranscription(
+            createJob(createFile([prompt.id!])),
+            new Blob(['audio'], { type: 'audio/mpeg' }),
+            '128k',
+            44100
+        );
+
+        expect(getCurrentStatus()).toMatchObject({
+            failureKind: 'too_large',
+            sizeFailure: { limitBytes: GENERATE_SYNC_MAX_MEDIA_BYTES },
+        });
+    });
+
+    // 時間上限はバッチ提出の 400 で返る別経路。413 でも media_too_large でもないので種別は付かない
+    it('🔴 時間上限で失敗したジョブには種別を付けない（下げても直らないため）', async () => {
+        const transcriptPrompt = createPrompt(TRANSCRIPT_PROMPT_ID, '全文文字起こし');
+        batchMocks.runBatchTranscription.mockImplementation(async (input: RunBatchTranscriptionInput) => {
+            input.onSubmitted?.({ jobId: 'job-1', docId: 'doc-1' });
+            return {
+                outcome: 'failed', success: false, jobId: 'job-1', docId: 'doc-1',
+                error: `音声が長すぎます（上限 ${Math.floor(AZURE_BATCH_MAX_AUDIO_SEC / 60)} 分）。分割してお試しください。`,
+            };
+        });
+        const hook = useProcessingHarness([transcriptPrompt]);
+
+        await hook.processTranscription(
+            createJob(createFile([TRANSCRIPT_PROMPT_ID])),
+            new Blob(['audio'], { type: 'audio/mpeg' }),
+            '96k',
+            44100
+        );
+
+        expect(getCurrentStatus()).toMatchObject({ status: 'error' });
+        expect(getCurrentStatus().failureKind).toBeUndefined();
+        expect(getCurrentStatus().sizeFailure).toBeUndefined();
+    });
+
+    it('サイズ以外の失敗には種別も実測値も残さない', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        serviceMocks.generateDocument.mockResolvedValue({
+            success: false,
+            error: '1時間あたりの上限に達しました。（約90秒後に再試行できます）',
+            errorCode: 'rate_limited',
+            errorStatus: 429,
+        });
+        const hook = useProcessingHarness([prompt]);
+
+        await hook.processTranscription(
+            createJob(createFile([prompt.id!])),
+            new Blob(['audio'], { type: 'audio/mpeg' }),
+            '128k',
+            44100
+        );
+
+        expect(getCurrentStatus().failureKind).toBeUndefined();
+        expect(getCurrentStatus().sizeFailure).toBeUndefined();
+    });
+
+    /**
+     * 🔴 実害: 2 行とも 192k で変換済み・両方 413。行1で再試行すると setBitrate('64k') が
+     *    グローバル値を書き換える。行2で通常の「再開する」を押すと 192k のキャッシュが
+     *    再利用されるのに、失敗の記録が 64k になり計画が `already_lowest` に化ける
+     *    ＝実際には有効な 96k の再試行が隠れる。焼いた値のほうを正とする。
+     */
+    it('🔴 キャッシュ済み音声の失敗には、その Blob を焼いたビットレートを記録する', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = useProcessingHarness([prompt]);
+        const cachedBlob = overLimitBlob();
+        // 192k で変換済みのキャッシュを持つ行
+        hook.setProcessingStatuses([{
+            ...createStatus(1),
+            convertedAudioBlob: cachedBlob,
+            convertedAudioBitrate: '192k',
+        }]);
+
+        // 画面のビットレートは他の行の再試行で 64k に変わっている
+        await hook.processTranscriptionResume(createJob(createFile([prompt.id!])), cachedBlob, [], '64k', 44100);
+
+        expect(getCurrentStatus().sizeFailure).toMatchObject({ bitrate: '192k', wasConverted: true });
+    });
+
+    it('焼いた値が残っていない（そのまま送る経路など）ときは渡された値を使う', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = useProcessingHarness([prompt]);
+
+        await hook.processTranscription(createJob(createFile([prompt.id!])), overLimitBlob(), '96k', 44100);
+
+        expect(getCurrentStatus().sizeFailure).toMatchObject({ bitrate: '96k' });
+    });
+
+    it('新しい試行を始めると前回の種別が消える', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        const hook = useProcessingHarness([prompt]);
+        const file = createFile([prompt.id!]);
+
+        await hook.processTranscription(createJob(file), overLimitBlob(), '96k', 44100);
+        expect(getCurrentStatus().failureKind).toBe('too_large');
+
+        // 上限内の Blob で再試行すれば、種別も実測値も残らない
+        serviceMocks.generateDocument.mockResolvedValue({ success: true, text: 'generated' });
+        await hook.processTranscriptionResume(
+            createJob(file), new Blob(['audio'], { type: 'audio/mpeg' }), [], '64k', 44100
+        );
+
+        expect(getCurrentStatus()).toMatchObject({ status: 'completed' });
+        expect(getCurrentStatus().failureKind).toBeUndefined();
+        expect(getCurrentStatus().sizeFailure).toBeUndefined();
+    });
+});
+
+
+/**
+ * 🔴 既存バグ: `estimateAudioSec` は「サイズ ÷ 画面のビットレート」で長さを出すので、
+ *    そのまま送られる入力（画面設定で焼かれていない）では実長を誤る。
+ *    元が 192k の m4a を既定 96k で出すと長さが 2 倍に見え、**2 時間の商談が**
+ *    「音声が長すぎます（上限 240 分）」で誤って拒否される。しかも 400 なので種別が付かず、
+ *    正しい回避策（ビットレートを上げる）は同じ画面が「使われません」と言っている。
+ */
+describe('useVideoProcessing 提出に渡す音声長（実測を優先する）', () => {
+    const transcriptPrompt = createPrompt(TRANSCRIPT_PROMPT_ID, '全文文字起こし');
+
+    /** 192k・2時間30分 = 9000秒。画面設定 96k での推定は 18000 秒（＝4時間超）になる */
+    const AS_IS_BLOB = { size: (192 * 1000 / 8) * 9000, type: 'audio/mp4' } as Blob;
+
+    /** サーバの提出ゲート（`/api/transcribe/submit` の 240 分判定）を再現する */
+    const submitWithServerGate = () =>
+        batchMocks.runBatchTranscription.mockImplementation(
+            async (input: RunBatchTranscriptionInput) => {
+                if (input.audioSec > AZURE_BATCH_MAX_AUDIO_SEC) {
+                    throw new Error(
+                        `音声が長すぎます（上限 ${Math.floor(AZURE_BATCH_MAX_AUDIO_SEC / 60)} 分）。分割してお試しください。`
+                    );
+                }
+                input.onSubmitted?.({ jobId: 'job-1', docId: 'doc-1' });
+                return { outcome: 'succeeded', success: true, jobId: 'job-1', docId: 'doc-1' };
+            }
+        );
+
+    // 🔴 ハーネス生成 (フック呼び出し) は各テスト内で直接行う。補助関数に包むと
+    //    react-hooks/rules-of-hooks に当たる（この補助は提出だけを受け持つ）
+    const runSubmit = (
+        hook: ReturnType<typeof useProcessingHarness>,
+        blob: Blob,
+        bitrate = '96k',
+    ) => hook.processTranscription(
+        createJob(createFile([TRANSCRIPT_PROMPT_ID])), blob, bitrate, 44100
+    );
+
+    it('🔴 そのまま送られる 2時間30分の音声は、実測が渡るので提出が通る', async () => {
+        // 推定だと 18000 秒（4時間超）になり、実際は 9000 秒
+        expect(estimateAudioSec(AS_IS_BLOB, '96k')).toBeGreaterThan(AZURE_BATCH_MAX_AUDIO_SEC);
+        durationMocks.measureMediaDurationSec.mockResolvedValue(9000);
+        submitWithServerGate();
+
+        await runSubmit(useProcessingHarness([transcriptPrompt]), AS_IS_BLOB);
+
+        expect(batchMocks.runBatchTranscription.mock.calls[0][0].audioSec).toBe(9000);
+        expect(getCurrentStatus()).toMatchObject({ status: 'completed' });
+    });
+
+    it('🔴 実測でも 4 時間を超える音声は、従来どおり提出の門で落ちる', async () => {
+        durationMocks.measureMediaDurationSec.mockResolvedValue(AZURE_BATCH_MAX_AUDIO_SEC + 1);
+        submitWithServerGate();
+
+        await runSubmit(useProcessingHarness([transcriptPrompt]), AS_IS_BLOB);
+
+        expect(getCurrentStatus()).toMatchObject({ status: 'error' });
+        expect(getCurrentStatus().error).toContain('音声が長すぎます');
+    });
+
+    it('測れなかったときは従来の推定へ落ちる', async () => {
+        durationMocks.measureMediaDurationSec.mockResolvedValue(null);
+        batchMocks.runBatchTranscription.mockImplementation(
+            async (input: RunBatchTranscriptionInput) => {
+                input.onSubmitted?.({ jobId: 'job-1', docId: 'doc-1' });
+                return { outcome: 'succeeded', success: true, jobId: 'job-1', docId: 'doc-1' };
+            }
+        );
+
+        // 🔴 推定が 0 にならない大きさで測る。極小の Blob だと推定も 0 になり、
+        //    「門を素通しにする 0」との区別がつかない
+        const blob = { size: (128 * 1000 / 8) * 600, type: 'audio/mpeg' } as Blob;
+        await runSubmit(useProcessingHarness([transcriptPrompt]), blob, '128k');
+
+        const passed = batchMocks.runBatchTranscription.mock.calls[0][0].audioSec;
+        expect(passed).toBe(estimateAudioSec(blob, '128k'));
+        expect(passed).toBe(600);
+    });
+
+    it('変換済み入力でも実測をそのまま渡す（推定とほぼ一致し、挙動は変わらない）', async () => {
+        // 96k で 1 時間ぶんに変換した Blob。推定も実測も 3600 秒
+        const converted = { size: (96 * 1000 / 8) * 3600, type: 'audio/mpeg' } as Blob;
+        expect(estimateAudioSec(converted, '96k')).toBe(3600);
+        durationMocks.measureMediaDurationSec.mockResolvedValue(3600);
+        submitWithServerGate();
+
+        await runSubmit(useProcessingHarness([transcriptPrompt]), converted);
+
+        expect(batchMocks.runBatchTranscription.mock.calls[0][0].audioSec).toBe(3600);
+        expect(getCurrentStatus()).toMatchObject({ status: 'completed' });
+    });
+
+    it('サイズ超過の記録にも実測の長さを残す（下げ先の見積りに使う）', async () => {
+        const prompt = createPrompt('prompt-a', 'Prompt A');
+        durationMocks.measureMediaDurationSec.mockResolvedValue(9000);
+        const hook = useProcessingHarness([prompt]);
+
+        await hook.processTranscription(
+            createJob(createFile([prompt.id!])),
+            { size: GENERATE_MAX_MEDIA_BYTES + 1, type: 'audio/mpeg' } as Blob,
+            '96k',
+            44100
+        );
+
+        expect(getCurrentStatus().sizeFailure).toMatchObject({ durationSec: 9000 });
     });
 });
