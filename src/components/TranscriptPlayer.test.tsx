@@ -444,3 +444,67 @@ describe('音声の可用性（仕様 B3）', () => {
         expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(true);
     });
 });
+
+// Major1: 文書を切り替える（TranscriptDocumentView は key を変えて remount する）と、
+// 前の文書の play() の遅延結果が共有 transcriptPlayback を上書きしてはならない。
+describe('文書切替と再生状態（遅延結果の隔離・仕様 B3）', () => {
+    it('🔴 前の文書の play() が遅れて拒否されても、切替後の文書の再生を止めず・再生拒否も出さない', async () => {
+        // 文書 A の play() を保留にする（この 1 回だけ deferred を返す）
+        let rejectA: (reason: unknown) => void = () => {};
+        const pendingA = new Promise<void>((_, reject) => {
+            rejectA = reject;
+        });
+        vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(() => pendingA);
+
+        // A を再生（play() は保留のまま。楽観的に playing:true）
+        await render(<TranscriptPlayer key="docA" audioUrl="https://example.test/a.m4a" durationSec={60} />);
+        await click(container.querySelector('button[aria-label="再生"]'));
+        expect(transcriptPlayback.getSnapshot().playing).toBe(true);
+
+        // 文書 B へ切替（key 変更で remount → attach cleanup が状態を初期化）。B を再生
+        await render(<TranscriptPlayer key="docB" audioUrl="https://example.test/b.m4a" durationSec={60} />);
+        await click(container.querySelector('button[aria-label="再生"]'));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(transcriptPlayback.getSnapshot().playing).toBe(true);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(false);
+
+        // A の play() が遅れて NotAllowedError で拒否される
+        const blocked = new Error('late rejection from document A');
+        blocked.name = 'NotAllowedError';
+        await act(async () => {
+            rejectA(blocked);
+            await Promise.resolve();
+        });
+
+        // B の状態は無傷（誤って停止せず、別文書に再生拒否案内も出ない）
+        expect(transcriptPlayback.getSnapshot().playing).toBe(true);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(false);
+    });
+
+    it('🔴 前の文書の play() が遅れて解決しても、切替後（停止中）の文書を再生中にしない', async () => {
+        let resolveA: () => void = () => {};
+        const pendingA = new Promise<void>(resolve => {
+            resolveA = resolve;
+        });
+        vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(() => pendingA);
+
+        await render(<TranscriptPlayer key="docA" audioUrl="https://example.test/a.m4a" durationSec={60} />);
+        await click(container.querySelector('button[aria-label="再生"]'));
+        expect(transcriptPlayback.getSnapshot().playing).toBe(true);
+
+        // B へ切替（remount で store 初期化 → playing:false）。B は停止のまま
+        await render(<TranscriptPlayer key="docB" audioUrl="https://example.test/b.m4a" durationSec={60} />);
+        expect(transcriptPlayback.getSnapshot().playing).toBe(false);
+
+        // A の play() が遅れて解決
+        await act(async () => {
+            resolveA();
+            await Promise.resolve();
+        });
+
+        // B は停止のまま（A の解決に引きずられて再生中に化けない）
+        expect(transcriptPlayback.getSnapshot().playing).toBe(false);
+    });
+});

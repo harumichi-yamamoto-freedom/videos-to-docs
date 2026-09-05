@@ -505,6 +505,34 @@ describe('本文との照合', () => {
         expect(moveButton('p-9')?.title).toContain('生成時に確定していません');
     });
 
+    // Major3: paragraphStartLine はあるが時刻が無効（startSec===null）な候補（PR2 で音声長超の句は
+    // 時刻が除去されつつアンカーは付与され得る）。B3「時刻不明は再生と本文移動を無効」。
+    it('🔴 段落アンカーはあるが時刻が無い候補: ハッシュ一致でも本文移動は無効（再生も無効）', async () => {
+        transcriptPlayback.setAudio('ready');
+        const anchoredNoTime: ReviewCandidate = {
+            phraseId: 'p-anchored-notime',
+            reasons: ['recognition_status'],
+            excerpt: '時刻は消えたが段落は分かる句',
+            excerptTruncated: false,
+            recognitionStatus: 'NoMatch',
+            speaker: '営業',
+            paragraphStartLine: 7,
+            // startSec なし（時刻情報のない候補）
+        };
+        await renderExpanded({ review: review({ candidates: [CANDIDATES[2], anchoredNoTime] }) });
+        await settleHash(TRANSCRIPT);
+
+        // 時刻あり＋アンカーあり＋ハッシュ一致（p-1）は従来どおり移動できる
+        expect(moveButton('p-1')?.disabled).toBe(false);
+
+        // アンカーはあるが時刻なし: 再生も本文移動も無効。理由を「時刻なし」と分けて表示する
+        expect(card('p-anchored-notime')?.querySelector('h4')?.textContent).toContain('時刻情報なし');
+        expect(playButton('p-anchored-notime')?.disabled).toBe(true);
+        const move = moveButton('p-anchored-notime');
+        expect(move?.disabled).toBe(true);
+        expect(move?.title).toContain('時刻情報がないため');
+    });
+
     it('sourceTextHash の無い壊れた review では移動を出さないが候補は読める', async () => {
         await renderExpanded({ review: review({ sourceTextHash: '' }) });
         await settleHash(TRANSCRIPT);
@@ -672,6 +700,56 @@ describe('本文の段落バッジとの往復', () => {
             card('p-1')!.focus();
         });
         expect(paragraph.getAttribute('data-review-target')).toBeNull();
+    });
+
+    // Major2: 再生追従中に候補へジャンプ → 次の時刻更新で追従がジャンプ先から引き戻す不具合。
+    // B3「候補移動と再生中段落の追従を区別」。ジャンプで追従を止め、利用者の明示再開で戻す。
+    it('🔴 再生追従中に候補へジャンプ→次の時刻更新で引き戻されない（追従を止め、明示再開で戻す）', async () => {
+        await render(
+            <div>
+                <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={createTranscriptMarkdownComponents({ markdown: TRANSCRIPT, reviewAnchors: anchors() })}
+                >
+                    {TRANSCRIPT}
+                </ReactMarkdown>
+                <TranscriptReviewPanel {...panelProps()} />
+                <TranscriptPlayer audioUrl="https://example.test/a.m4a" durationSec={3600} />
+            </div>,
+        );
+        await click(toggle());
+        await settleHash(TRANSCRIPT);
+
+        // 追従中: 30 秒 → 3 行目が現在行としてスクロール追従する
+        await act(async () => {
+            transcriptPlayback.patch({ currentSec: 30 });
+        });
+        expect(container.querySelector('[data-transcript-active="true"]')?.getAttribute('data-review-line')).toBe('3');
+
+        // 候補 p-1（1 行目）へ移動＝ジャンプ。ジャンプ先へ寄せ、フォーカスは維持し、以後の追従は止まる
+        scrollIntoView.mockClear();
+        await click(moveButton('p-1'));
+        const target = container.querySelector<HTMLElement>('p[data-review-line="1"]')!;
+        expect(target.getAttribute('data-review-target')).toBe('true');
+        expect(document.activeElement).toBe(target);
+        expect(scrollIntoView).toHaveBeenCalledTimes(1); // ジャンプの 1 回だけ
+
+        // 次の時刻更新（120 秒 → 7 行目が現在行）でも、ジャンプ先から引き戻されない
+        scrollIntoView.mockClear();
+        await act(async () => {
+            transcriptPlayback.patch({ currentSec: 120 });
+        });
+        expect(container.querySelector('[data-transcript-active="true"]')?.getAttribute('data-review-line')).toBe('7');
+        expect(scrollIntoView).not.toHaveBeenCalled();
+
+        // 追従を明示的に再開すると、通常どおり追従スクロールに戻る
+        await click(container.querySelector('button[aria-pressed]'));
+        scrollIntoView.mockClear();
+        await act(async () => {
+            transcriptPlayback.patch({ currentSec: 30 });
+        });
+        expect(container.querySelector('[data-transcript-active="true"]')?.getAttribute('data-review-line')).toBe('3');
+        expect(scrollIntoView).toHaveBeenCalled();
     });
 
     it('別文書の移動要求には反応しない（文書 ID で照合）', async () => {

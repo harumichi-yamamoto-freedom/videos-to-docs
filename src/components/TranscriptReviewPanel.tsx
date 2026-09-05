@@ -486,18 +486,22 @@ function ReviewCandidateCard({
 
     const line = candidate.paragraphStartLine;
     const hasAnchor = typeof line === 'number' && Number.isInteger(line) && line >= 1;
-    const canMove = hasAnchor && anchorsEnabled;
+    // 🔴 時刻不明（startSec===null）は再生も本文移動も無効（仕様 B3）。PR2 で音声長超の句は
+    //    時刻が除去されつつ段落アンカーは付与され得るため、アンカーの有無だけでは判定しない。
+    const canMove = hasAnchor && anchorsEnabled && startSec !== null;
     const moveTitle = !hasAnchor
         ? 'この候補の本文位置は生成時に確定していません'
-        : anchorState === 'editing'
-            ? '編集中は本文へ移動できません（表示に戻ると再確認します）'
-            : anchorState === 'mismatch'
-                ? '本文が編集されているため移動できません'
-                : anchorState === 'pending'
-                    ? '本文を照合しています'
-                    : anchorState === 'none'
-                        ? '本文の照合情報がありません'
-                        : undefined;
+        : startSec === null
+            ? '時刻情報がないため本文へ移動できません'
+            : anchorState === 'editing'
+                ? '編集中は本文へ移動できません（表示に戻ると再確認します）'
+                : anchorState === 'mismatch'
+                    ? '本文が編集されているため移動できません'
+                    : anchorState === 'pending'
+                        ? '本文を照合しています'
+                        : anchorState === 'none'
+                            ? '本文の照合情報がありません'
+                            : undefined;
 
     return (
         <li

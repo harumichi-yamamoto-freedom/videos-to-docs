@@ -188,19 +188,33 @@ export function TranscriptPlayer({
     onMediaError,
 }: TranscriptPlayerProps): React.ReactElement | null {
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    // play() の世代。文書切替（要素の張り替え・remount）や後続の play() で追い越された
+    // 遅延結果を弾くために使う（Major1: 共有ストアへの誤った上書きを防ぐ）
+    const playGenerationRef = useRef(0);
     const snapshot = useTranscriptPlayback();
     const hasAudio = typeof audioUrl === 'string' && audioUrl.trim() !== '';
 
     const play = useCallback((): void => {
         const element = audioRef.current;
         if (!element) return;
+        // 🔴 この play() 呼び出しの世代と音声要素を捕捉する。文書を切り替える（＝プレイヤーが
+        //    remount されて要素が張り替わる）と、遅れて届く resolve/reject は共有ストアへ書かない。
+        //    そうしないと、前の文書の play() の遅延結果が別文書の再生状態を上書きしてしまう
+        //    （B の playing が誤って false になる／A の NotAllowedError が B に再生拒否案内を出す）。
+        const generation = (playGenerationRef.current += 1);
+        const isCurrent = (): boolean =>
+            audioRef.current === element && playGenerationRef.current === generation;
         try {
             const started: unknown = element.play();
             if (started && typeof (started as Promise<void>).then === 'function') {
                 void (started as Promise<void>).then(
-                    () => transcriptPlayback.patch({ playing: true, playbackBlocked: false }),
+                    () => {
+                        if (isCurrent()) transcriptPlayback.patch({ playing: true, playbackBlocked: false });
+                    },
                     (error: unknown) => {
-                        // 🔴 拒否されたのに「再生中」の見た目にしない。自動再生の拒否だけを案内する
+                        // 🔴 拒否されたのに「再生中」の見た目にしない。自動再生の拒否だけを案内する。
+                        //    ただし現役の要素／世代でなければ（切替後）何も書かない。
+                        if (!isCurrent()) return;
                         transcriptPlayback.patch(
                             isNotAllowedError(error)
                                 ? { playing: false, playbackBlocked: true }
@@ -212,7 +226,8 @@ export function TranscriptPlayer({
         } catch {
             // 音声要素を持たない実行環境。帯の状態表示だけ進める
         }
-        transcriptPlayback.patch({ playing: true });
+        // 楽観的な「再生中」表示も、現役の要素／世代のときだけ（切替直後の誤 true を防ぐ）
+        if (isCurrent()) transcriptPlayback.patch({ playing: true });
     }, []);
 
     const pause = useCallback((): void => {

@@ -212,6 +212,10 @@ function TranscriptLine({
 
     useEffect(() => {
         if (targetNonce === null) return;
+        // 🔴 候補ジャンプ中は再生追従を止める（次の時刻更新でジャンプ先から引き戻さない）。
+        //    B3「選択した候補の移動と再生中段落の追従は区別する」。利用者が「追従」を押し直すと再開する。
+        //    追従スクロールとジャンプは別動作なので、ジャンプ先のフォーカス・寄せはこの後そのまま行う。
+        transcriptPlayback.setFollow(false);
         const element = ref.current;
         if (!element) return;
         // 候補からの移動。フォーカスを渡してから寄せる（動きを減らす設定ではアニメーションなし）
