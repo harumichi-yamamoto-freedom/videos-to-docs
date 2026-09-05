@@ -8,13 +8,27 @@
  *    それ以外の要素は一切上書きしない＝他の文書と同じ見た目・同じ操作のまま。
  *
  * 🔴 利用者は本文を自由に編集できる。壊れた行は「単に押せない」だけにし、例外は投げない。
+ *
+ * 仕様 B3（要確認箇所）で足したもの: 生成時に確定した段落アンカー（`paragraphStartLine`）と
+ * 描画ノードの元ソース行（`node.position.start.line`）が一致する段落に「要確認 N 箇所」のバッジを付け、
+ * 候補カードからの「本文の該当段落へ移動」を受ける。
+ * 🔴 アンカーは呼び出し側が「表示本文のハッシュが review.sourceTextHash と一致する」ときだけ渡す。
+ *    ここでは本文の文字列検索・最寄り時刻・同じ #t= の先頭一致でアンカーを推測しない（仕様 B2）。
  */
 
 import React, { useEffect, useRef, useState } from 'react';
 import type { Components } from 'react-markdown';
 import type { Element as HastElement } from 'hast';
 import { formatTimestamp, parseTimestampHref, parseTranscriptTimestamps } from '@/lib/transcriptMerge';
-import { transcriptPlayback, useTranscriptPlayback } from '@/components/TranscriptPlayer';
+import {
+    scrollBehaviorForMotion,
+    transcriptPlayback,
+    useTranscriptPlayback,
+} from '@/components/TranscriptPlayer';
+import {
+    transcriptReviewSelection,
+    useTranscriptReviewSelection,
+} from '@/components/transcriptReviewSelection';
 
 /**
  * 通常リンクの見た目。MarkdownDocument.tsx の `a` と同一にする。
@@ -110,49 +124,152 @@ const leadingTimestampSec = (node: HastElement | undefined): number | null => {
     return typeof href === 'string' ? parseTimestampHref(href) : null;
 };
 
+/** 描画ノードの元ソース上の開始行（1 始まり）。無ければ null（アンカーを付けない） */
+const sourceStartLine = (node: HastElement | undefined): number | null => {
+    const line = node?.position?.start?.line;
+    return typeof line === 'number' && Number.isInteger(line) && line >= 1 ? line : null;
+};
+
 // ---------------------------------------------------------------------------
 // 部品
 // ---------------------------------------------------------------------------
 
+/** 段落に付く要確認アンカー（呼び出し側がハッシュ一致を確認したときだけ渡される） */
+export interface TranscriptReviewParagraphAnchor {
+    documentId: string;
+    /** 段落の開始行（1 始まり）。候補カードからの移動要求はこの行で照合する */
+    line: number;
+    /** この段落に属する候補の phraseId（表示順） */
+    phraseIds: readonly string[];
+}
+
+/**
+ * 段落の「要確認 N 箇所」バッジ。押すと候補カード側がその候補を表示してフォーカスを受ける。
+ * 🔴 段落全体を誤り扱いする表現にしない。色だけでなく文言で区別する。
+ * 🔴 選択不可（select-none）・印刷非表示: 本文のコピー・PDF に操作 UI を混ぜない。
+ */
+function ReviewParagraphBadge({ anchor }: { anchor: TranscriptReviewParagraphAnchor }): React.ReactElement {
+    const count = anchor.phraseIds.length;
+    return (
+        <span
+            className="ml-2 inline-flex select-none align-baseline print:hidden"
+            data-review-badge={anchor.line}
+        >
+            <button
+                type="button"
+                onClick={() => transcriptReviewSelection.reveal(anchor.documentId, anchor.phraseIds[0])}
+                aria-label={`この段落の要確認候補 ${count} 箇所を、要確認箇所の一覧で表示`}
+                title="要確認箇所の一覧で該当の候補を表示"
+                className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium leading-none text-amber-900 hover:bg-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+            >
+                要確認 {count} 箇所
+            </button>
+        </span>
+    );
+}
+
 /**
  * 再生中の行。淡くハイライトし、追従が入なら画面内へ寄せる。
  * 本文の色とサイズは他の文書と同じまま（背景だけを足す）。
+ *
+ * 要確認アンカーを持つ行は、候補カードからの移動要求（同じ文書・同じ開始行）を受けて
+ * 1 回だけ寄せてフォーカスを受ける。🔴 これは再生中の追従とは別（追従の入切に関係なく動き、色も分ける）。
+ *
+ * 🔴 候補ジャンプと追従の区別（B3）:
+ * - ジャンプ中は追従を「一時停止」する（`followPauseDocId`＝その文書に限定）。利用者の永続設定 `follow` は書き換えない。
+ *   書き換えると、文書を切り替えても追従が戻らない／利用者が追従を再開しても再マウントで再び切られる。
+ * - 同じ移動要求は 1 回だけ処理する（`consumedNonce`）。段落が再マウントされても同じ nonce では再処理しない。
  */
 function TranscriptLine({
     startSec,
     nextSec,
+    reviewAnchor,
+    currentDocumentId,
     children,
     ...rest
 }: {
     startSec: number;
     nextSec: number | null;
+    reviewAnchor: TranscriptReviewParagraphAnchor | null;
+    /** この本文が属する文書 ID。候補ジャンプの一時停止をこの文書に限定するために使う */
+    currentDocumentId?: string;
     children?: React.ReactNode;
 } & React.HTMLAttributes<HTMLParagraphElement>): React.ReactElement {
-    const { currentSec, follow, ready } = useTranscriptPlayback();
+    const { currentSec, follow, followPauseDocId, ready } = useTranscriptPlayback();
+    const selection = useTranscriptReviewSelection();
+    const consumedNonce = selection.consumedNonce;
+    // 🔴 追従の一時停止は「その文書」に限定する。別文書を開けば docId が一致せず自動的に解ける
+    //    （音声の無い文書でジャンプ→音声付き文書へ切替でも復帰する。attach の終了処理に依存しない）。
+    const followPaused = followPauseDocId !== null && followPauseDocId === currentDocumentId;
     const ref = useRef<HTMLParagraphElement | null>(null);
     const active =
         ready && currentSec >= startSec && (nextSec === null || currentSec < nextSec);
+    const targetNonce =
+        reviewAnchor !== null
+            && selection.documentId === reviewAnchor.documentId
+            && selection.paragraphRequest !== null
+            && selection.paragraphRequest.line === reviewAnchor.line
+            ? selection.paragraphRequest.nonce
+            : null;
+    const isTarget = targetNonce !== null;
 
     useEffect(() => {
-        if (!active || !follow) return;
+        // 🔴 追従の可否は「effect が走る時点（flush）の live なストア」で判定する（描画時に固定した値では判定しない）。
+        //    文書を切り替えた瞬間、React は新文書の段落を先に描画し、そのとき共有ストアにはまだ前文書の再生位置
+        //    （currentSec）と ready が載っている。すると前文書の位置に対応する新文書の段落が一瞬 active と判定され、
+        //    描画時の値で寄せると誤追従になる。前プレイヤーの離脱（＝ストア初期化）は、この create effect より前の
+        //    destroy フェーズで走るので、flush 時に読み直せば正しく「まだ未接続（ready=false）」を見て寄せない。
+        //    ⚠ これは本文とプレイヤーが同じ document から同一コミットで再構成される前提に依る（現状 DocumentDetailPanel）。
+        //    本文とプレイヤーを別タイミングで供給する構成にすると、この保証は崩れる。
+        //    依存配列は「再生位置が進む・follow / 一時停止が変わる」という描画由来の変化で再評価するための引き金。
+        const snap = transcriptPlayback.getSnapshot();
+        const followPausedNow = snap.followPauseDocId !== null && snap.followPauseDocId === currentDocumentId;
+        const activeNow = snap.ready && snap.currentSec >= startSec && (nextSec === null || snap.currentSec < nextSec);
+        // 🔴 追従は利用者が止められる（follow）。候補ジャンプ中はこの文書だけ一時停止（followPausedNow）。どちらでもここへ来ない
+        if (!activeNow || !snap.follow || followPausedNow) return;
         const element = ref.current;
-        // 🔴 追従は利用者が止められる。止めているときはここへ来ない
         if (element && typeof element.scrollIntoView === 'function') {
-            element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            element.scrollIntoView({ block: 'center', behavior: scrollBehaviorForMotion() });
         }
-    }, [active, follow]);
+    }, [active, follow, followPaused, startSec, nextSec, currentDocumentId]);
+
+    useEffect(() => {
+        // 🔴 未処理の要求だけを処理する。処理済み（consumedNonce）の同じ nonce が再マウントで再び来ても何もしない
+        if (targetNonce === null || targetNonce === consumedNonce) return;
+        // 🔴 候補ジャンプ中は再生追従を「一時停止」する（次の時刻更新でジャンプ先から引き戻さない）。
+        //    B3「選択した候補の移動と再生中段落の追従は区別する」。永続設定 follow は書き換えない
+        //    （setFollow(false) だと文書切替後も追従が戻らず、再開しても再マウントで再び切られる）。
+        //    解除は追従トグル・シーク・文書切替（docId 照合で自動）。
+        if (reviewAnchor) transcriptPlayback.pauseFollowForJump(reviewAnchor.documentId);
+        const element = ref.current;
+        if (element) {
+            // 候補からの移動。フォーカスを渡してから寄せる（動きを減らす設定ではアニメーションなし）
+            if (typeof element.focus === 'function') element.focus({ preventScroll: true });
+            if (typeof element.scrollIntoView === 'function') {
+                element.scrollIntoView({ block: 'center', behavior: scrollBehaviorForMotion() });
+            }
+        }
+        transcriptReviewSelection.consumeParagraphRequest(targetNonce);
+    }, [targetNonce, consumedNonce]);
 
     return (
         <p
             ref={ref}
             data-transcript-active={active ? 'true' : undefined}
             aria-current={active ? 'location' : undefined}
-            className={`mb-4 leading-relaxed ${
-                active ? '-mx-2 rounded-md bg-purple-50/70 px-2' : ''
-            }`}
+            tabIndex={reviewAnchor ? -1 : undefined}
+            data-review-line={reviewAnchor ? reviewAnchor.line : undefined}
+            data-review-target={isTarget ? 'true' : undefined}
+            className={[
+                'mb-4 leading-relaxed',
+                active ? '-mx-2 rounded-md bg-purple-50/70 px-2' : '',
+                reviewAnchor ? 'rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500' : '',
+                isTarget ? 'ring-2 ring-amber-400 ring-offset-2' : '',
+            ].filter(Boolean).join(' ')}
             {...rest}
         >
             {children}
+            {reviewAnchor && <ReviewParagraphBadge anchor={reviewAnchor} />}
         </p>
     );
 }
@@ -284,19 +401,35 @@ function SpeakerLabel({
 // components 上書き本体
 // ---------------------------------------------------------------------------
 
+/** 要確認候補の段落アンカー。呼び出し側が本文ハッシュの一致を確認したときだけ渡す */
+export interface TranscriptReviewAnchorOptions {
+    documentId: string;
+    /** 段落開始行（1 始まり）→ その段落に属する候補の phraseId（表示順） */
+    anchorsByLine: ReadonlyMap<number, readonly string[]>;
+}
+
 export interface TranscriptMarkdownComponentsOptions {
     /** 表示している本文。話者ラベルの検出と「何箇所変わるか」の算出に使う */
     markdown: string;
+    /**
+     * この本文が属する文書 ID。候補ジャンプによる追従の一時停止をこの文書に限定するために使う
+     * （別文書を開けば docId が一致せず自動的に解ける）。文書 ID が無い文脈では未指定でよい。
+     */
+    documentId?: string;
     /** 話者改名。実際の保存は呼び出し側（このコンポーネントは呼ぶところまで） */
     onRename?: (from: string, to: string) => void;
     /** 欠落区間の再試行 */
     onRetryGap?: (gap: TranscriptGap) => void;
+    /** 要確認候補の段落バッジ。渡さなければ本文の描画は従来どおり */
+    reviewAnchors?: TranscriptReviewAnchorOptions;
 }
 
 export const createTranscriptMarkdownComponents = ({
     markdown,
+    documentId,
     onRename,
     onRetryGap,
+    reviewAnchors,
 }: TranscriptMarkdownComponentsOptions): Components => {
     const timestamps = parseTranscriptTimestamps(markdown)
         .map(entry => entry.sec)
@@ -308,6 +441,15 @@ export const createTranscriptMarkdownComponents = ({
             if (candidate > sec) return candidate;
         }
         return null;
+    };
+
+    const anchorFor = (node: HastElement | undefined): TranscriptReviewParagraphAnchor | null => {
+        if (!reviewAnchors) return null;
+        const line = sourceStartLine(node);
+        if (line === null) return null;
+        const phraseIds = reviewAnchors.anchorsByLine.get(line);
+        if (!phraseIds || phraseIds.length === 0) return null;
+        return { documentId: reviewAnchors.documentId, line, phraseIds };
     };
 
     return {
@@ -371,6 +513,8 @@ export const createTranscriptMarkdownComponents = ({
                 <TranscriptLine
                     startSec={startSec}
                     nextSec={nextTimestampAfter(startSec)}
+                    reviewAnchor={anchorFor(node)}
+                    {...(documentId !== undefined && { currentDocumentId: documentId })}
                     {...rest}
                 >
                     {children}

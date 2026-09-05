@@ -9,6 +9,13 @@
  * 本文（Markdown）側の時刻リンクとこの帯は別ファイルに分かれているため、両者はこのモジュールの
  * 小さなストアで繋ぐ。Provider を足すと lead 側の配線点が増えるので、
  * モジュール内シングルトン + useSyncExternalStore にした（同時に開く文書は常に 1 本）。
+ *
+ * 仕様 B3（要確認箇所）で足したもの:
+ * - `audio`: 音声の可用性。`ready`（コントローラ接続）とは別に、URL の取得と音声要素のロード状態を持つ。
+ *   要確認カードの「音声を再生」はこれが `'ready'` のときだけ押せる（押しても無反応なボタンを出さない）。
+ * - `playbackBlocked`: ブラウザが再生を拒否した（自動再生ポリシー等）。再生済みの見た目にせず、案内を出す。
+ * - `followPauseDocId`: 候補カードからの「本文の該当段落へ移動」で追従を一時停止している文書 ID（過渡状態）。
+ *   🔴 利用者の永続設定 `follow` とは別物で、`follow` を書き換えない（文書切替・再マウントで自動的に解ける）。
  */
 
 import React, {
@@ -20,6 +27,16 @@ import React, {
 import { Crosshair, Pause, Play } from 'lucide-react';
 import { formatTimestamp } from '@/lib/transcriptMerge';
 
+/**
+ * 音声の可用性。
+ * - `none`: 文字起こし UI が載っていない（通常の文書・切替直後）
+ * - `loading`: URL の取得中、または音声要素がまだメタデータを読めていない
+ * - `ready`: 音声要素が読めた（再生・シークできる）
+ * - `unavailable`: 音声参照が無い／URL 取得失敗／音声要素のロード失敗（本文の確認・編集はできる）
+ */
+export type TranscriptAudioStatus = 'none' | 'loading' | 'ready' | 'unavailable';
+export type TranscriptAudioUnavailableReason = 'no_audio' | 'url_failed' | 'media_failed';
+
 export interface TranscriptPlaybackSnapshot {
     /** 現在の再生位置（秒） */
     currentSec: number;
@@ -28,8 +45,22 @@ export interface TranscriptPlaybackSnapshot {
     playing: boolean;
     /** 再生中の行へスクロール追従するか。利用者が止められる */
     follow: boolean;
-    /** 音声付きのプレイヤーが実際に載っているか。音声が無い文書ではずっと false */
+    /** 音声付きのプレイヤーが実際に載っているか（コントローラの接続）。音声ロード成功の保証ではない */
     ready: boolean;
+    /** 音声の可用性（URL 取得と音声要素のロード状態を含む） */
+    audio: TranscriptAudioStatus;
+    /** `audio === 'unavailable'` のときの理由。再試行の要否の判断に使う */
+    audioReason: TranscriptAudioUnavailableReason | null;
+    /** 直前の再生要求をブラウザが拒否した（自動再生の拒否）。再生が始まると解ける */
+    playbackBlocked: boolean;
+    /**
+     * 候補ジャンプ（本文の該当段落へ移動）で追従を一時的に止めている「文書 ID」。null = 一時停止なし。
+     * 🔴 `follow`（利用者の永続設定）は書き換えない過渡状態。追従トグル・シーク・reset で解ける。
+     * 🔴 **文書 ID に紐付ける**のが要点。別文書を開けば（＝その文書の段落は自分の docId と照合して）自動的に
+     *    一時停止が外れる。音声の無い文書でジャンプした後に音声付き文書へ切り替えても、attach の終了処理に
+     *    依存せず追従が復帰する（音声が無いと attach が起きず終了処理も走らないため、boolean だと解けなかった）。
+     */
+    followPauseDocId: string | null;
 }
 
 /** 音声要素を持つ側（＝TranscriptPlayer）が登録する実操作 */
@@ -45,6 +76,10 @@ const INITIAL_SNAPSHOT: TranscriptPlaybackSnapshot = {
     playing: false,
     follow: true,
     ready: false,
+    audio: 'none',
+    audioReason: null,
+    playbackBlocked: false,
+    followPauseDocId: null,
 };
 
 const createTranscriptPlaybackStore = () => {
@@ -82,16 +117,44 @@ const createTranscriptPlaybackStore = () => {
          */
         seek: (sec: number): void => {
             if (!controller || !Number.isFinite(sec)) return;
-            patch({ currentSec: Math.max(0, sec) });
+            // 利用者が再生位置を動かした＝候補ジャンプの一時停止から追従へ復帰する
+            patch({ currentSec: Math.max(0, sec), followPauseDocId: null });
             controller.seek(Math.max(0, sec));
         },
-        setFollow: (follow: boolean): void => patch({ follow }),
+        /** 追従の入切（利用者の永続設定）。トグル操作は候補ジャンプの一時停止を必ず解く */
+        setFollow: (follow: boolean): void => patch({ follow, followPauseDocId: null }),
+        /**
+         * 候補ジャンプ中の追従の一時停止を、その文書 ID で立てる（次の時刻更新でジャンプ先から引き戻さない）。
+         * 🔴 `follow`（永続設定）は書き換えない。別文書の段落は自分の docId と照合するので自動的に無効になり、
+         *    音声の有無に依存しない。明示的な解除は setFollow / seek / clearFollowPauseForDocument（文書離脱）/ reset。
+         */
+        pauseFollowForJump: (documentId: string): void => patch({ followPauseDocId: documentId }),
+        /**
+         * 文書から離れる（本文の表示 documentId が変わる・アンマウント）ときに、その文書で立てた
+         * 候補ジャンプの一時停止を破棄する。🔴 プレイヤーの有無に依存しない解除経路（音声の無い文書では
+         * attach の終了処理が走らないため、docId 照合だけだと「A でジャンプ→別文書→A へ戻り A が音声を得る」で
+         * 一時停止が残り追従が死ぬ）。自分の文書の分だけ消す（別文書が既に立てた停止は壊さない）。
+         */
+        clearFollowPauseForDocument: (documentId: string): void => {
+            if (state.followPauseDocId === documentId) patch({ followPauseDocId: null });
+        },
+        /** 音声の可用性を置く（URL の取得側とプレイヤーの両方から呼ぶ） */
+        setAudio: (audio: TranscriptAudioStatus, reason: TranscriptAudioUnavailableReason | null = null): void =>
+            patch({ audio, audioReason: audio === 'unavailable' ? reason : null }),
+        /** 音声要素が読めた。`loading` からだけ進める（ロード失敗の後に届く suspend 等で戻さない） */
+        markAudioReady: (): void => {
+            if (state.audio !== 'loading') return;
+            patch({ audio: 'ready', audioReason: null });
+        },
         attach: (next: TranscriptPlaybackController): (() => void) => {
             controller = next;
             patch({ ready: true });
             return () => {
                 if (controller !== next) return;
                 controller = null;
+                // 🔴 利用者の永続設定 `follow` だけを持ち越す。候補ジャンプの一時停止（followPauseDocId）は
+                //    INITIAL 由来で null に戻る。ただし解除の主経路は docId 照合（音声が無い文書では attach 自体が
+                //    起きないため、ここに依存しない）。
                 state = { ...INITIAL_SNAPSHOT, follow: state.follow };
                 emit();
             };
@@ -115,8 +178,25 @@ export const useTranscriptPlayback = (): TranscriptPlaybackSnapshot =>
         transcriptPlayback.getSnapshot,
     );
 
+/**
+ * スクロールの寄せ方。動きを減らす設定（prefers-reduced-motion）ではアニメーションを止める。
+ * matchMedia の無い実行環境（jsdom・SSR）では従来どおり smooth。
+ */
+export const scrollBehaviorForMotion = (): ScrollBehavior => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'smooth';
+    try {
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    } catch {
+        return 'smooth';
+    }
+};
+
 const safeDuration = (value: number | undefined): number =>
     typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+
+/** 自動再生ポリシーによる拒否だけを「案内対象」にする。pause() による中断（AbortError）等は含めない */
+const isNotAllowedError = (error: unknown): boolean =>
+    typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'NotAllowedError';
 
 export interface TranscriptPlayerProps {
     /** 再生する音声の URL。無い文書では未指定になり、この帯ごと消える */
@@ -124,6 +204,8 @@ export interface TranscriptPlayerProps {
     /** 総尺が分かっていれば渡す（metadata 読み込み前の表示に使う） */
     durationSec?: number;
     className?: string;
+    /** 音声要素のロード失敗（URL は取れたが再生できない）。呼び出し側が帯を状態表示へ差し替える */
+    onMediaError?: () => void;
 }
 
 /**
@@ -134,23 +216,49 @@ export function TranscriptPlayer({
     audioUrl,
     durationSec,
     className,
+    onMediaError,
 }: TranscriptPlayerProps): React.ReactElement | null {
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    // play() の世代。文書切替（要素の張り替え・remount）や後続の play() で追い越された
+    // 遅延結果を弾くために使う（Major1: 共有ストアへの誤った上書きを防ぐ）
+    const playGenerationRef = useRef(0);
     const snapshot = useTranscriptPlayback();
     const hasAudio = typeof audioUrl === 'string' && audioUrl.trim() !== '';
 
     const play = useCallback((): void => {
         const element = audioRef.current;
         if (!element) return;
+        // 🔴 この play() 呼び出しの世代と音声要素を捕捉する。文書を切り替える（＝プレイヤーが
+        //    remount されて要素が張り替わる）と、遅れて届く resolve/reject は共有ストアへ書かない。
+        //    そうしないと、前の文書の play() の遅延結果が別文書の再生状態を上書きしてしまう
+        //    （B の playing が誤って false になる／A の NotAllowedError が B に再生拒否案内を出す）。
+        const generation = (playGenerationRef.current += 1);
+        const isCurrent = (): boolean =>
+            audioRef.current === element && playGenerationRef.current === generation;
         try {
             const started: unknown = element.play();
-            if (started && typeof (started as Promise<void>).catch === 'function') {
-                void (started as Promise<void>).catch(() => undefined);
+            if (started && typeof (started as Promise<void>).then === 'function') {
+                void (started as Promise<void>).then(
+                    () => {
+                        if (isCurrent()) transcriptPlayback.patch({ playing: true, playbackBlocked: false });
+                    },
+                    (error: unknown) => {
+                        // 🔴 拒否されたのに「再生中」の見た目にしない。自動再生の拒否だけを案内する。
+                        //    ただし現役の要素／世代でなければ（切替後）何も書かない。
+                        if (!isCurrent()) return;
+                        transcriptPlayback.patch(
+                            isNotAllowedError(error)
+                                ? { playing: false, playbackBlocked: true }
+                                : { playing: false },
+                        );
+                    },
+                );
             }
         } catch {
-            // 自動再生の拒否や、音声要素を持たない実行環境。帯の状態表示だけ進める
+            // 音声要素を持たない実行環境。帯の状態表示だけ進める
         }
-        transcriptPlayback.patch({ playing: true });
+        // 楽観的な「再生中」表示も、現役の要素／世代のときだけ（切替直後の誤 true を防ぐ）
+        if (isCurrent()) transcriptPlayback.patch({ playing: true });
     }, []);
 
     const pause = useCallback((): void => {
@@ -167,6 +275,9 @@ export function TranscriptPlayer({
     useEffect(() => {
         if (!hasAudio) return;
         transcriptPlayback.patch({ durationSec: safeDuration(durationSec) });
+        // 音声要素のロード状態。メタデータが読めていれば ready、まだなら loading（要素のイベントで進める）
+        const element = audioRef.current;
+        transcriptPlayback.setAudio(element && element.readyState >= 1 ? 'ready' : 'loading');
         return transcriptPlayback.attach({
             seek: (sec: number) => {
                 const element = audioRef.current;
@@ -191,6 +302,12 @@ export function TranscriptPlayer({
     };
     const onLoadedMetadata = (event: React.SyntheticEvent<HTMLAudioElement>): void => {
         transcriptPlayback.patch({ durationSec: safeDuration(event.currentTarget.duration) });
+        transcriptPlayback.markAudioReady();
+    };
+    const onMediaLoaded = (): void => transcriptPlayback.markAudioReady();
+    const onError = (): void => {
+        transcriptPlayback.setAudio('unavailable', 'media_failed');
+        onMediaError?.();
     };
 
     return (
@@ -210,7 +327,12 @@ export function TranscriptPlayer({
                 className="hidden"
                 onTimeUpdate={onTimeUpdate}
                 onLoadedMetadata={onLoadedMetadata}
-                onPlay={() => transcriptPlayback.patch({ playing: true })}
+                onLoadedData={onMediaLoaded}
+                onCanPlay={onMediaLoaded}
+                // preload を尊重しないブラウザは読み込みを中断（suspend）する。押せば読み込みが始まるので待たせない
+                onSuspend={onMediaLoaded}
+                onError={onError}
+                onPlay={() => transcriptPlayback.patch({ playing: true, playbackBlocked: false })}
                 onPause={() => transcriptPlayback.patch({ playing: false })}
                 onEnded={() => transcriptPlayback.patch({ playing: false })}
             />

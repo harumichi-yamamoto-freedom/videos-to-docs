@@ -252,6 +252,80 @@ describe('再生中の行の追従', () => {
     });
 });
 
+// 候補ジャンプ中の追従の一時停止（仕様 B3）。🔴 利用者の永続設定 follow は書き換えない過渡状態。
+// 一時停止は「その文書 ID」に紐づく（followPauseDocId）。音声の無い文書では attach が起きず終了処理も
+// 走らないため、boolean ではなく docId で持つ。本文側（段落）との組み合わせ・文書切替での復帰は
+// transcriptMarkdownComponents.test.tsx。ここはストアの規則の錠。
+describe('候補ジャンプの追従一時停止（followPauseDocId）', () => {
+    it('初期状態は一時停止なし・追従あり', () => {
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPauseDocId: null });
+    });
+
+    it('pauseFollowForJump(docId) は一時停止をその文書 ID で立て、follow を書き換えない（follow が OFF のときも触らない）', () => {
+        transcriptPlayback.pauseFollowForJump('doc-1');
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPauseDocId: 'doc-1' });
+
+        transcriptPlayback.setFollow(false);
+        transcriptPlayback.pauseFollowForJump('doc-1');
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: false, followPauseDocId: 'doc-1' });
+    });
+
+    it('setFollow（追従トグル）は OFF でも ON でも一時停止を解く', () => {
+        transcriptPlayback.pauseFollowForJump('doc-1');
+        transcriptPlayback.setFollow(false);
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: false, followPauseDocId: null });
+
+        transcriptPlayback.pauseFollowForJump('doc-1');
+        transcriptPlayback.setFollow(true);
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPauseDocId: null });
+    });
+
+    it('seek（利用者が再生位置を動かした）は一時停止を解く。コントローラが居ないときは何も変えない', () => {
+        transcriptPlayback.pauseFollowForJump('doc-1');
+        transcriptPlayback.seek(30);
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ currentSec: 0, followPauseDocId: 'doc-1' });
+
+        const seek = vi.fn();
+        const detach = transcriptPlayback.attach({ seek });
+        transcriptPlayback.seek(30);
+        expect(seek).toHaveBeenCalledWith(30);
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ currentSec: 30, follow: true, followPauseDocId: null });
+        detach();
+    });
+
+    it('🔴 attach の終了（文書切替・プレイヤーの破棄）で一時停止は解け、follow は保持される（ON でも OFF でも）', () => {
+        const detachA = transcriptPlayback.attach({ seek: vi.fn() });
+        transcriptPlayback.pauseFollowForJump('doc-1');
+        detachA();
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ ready: false, follow: true, followPauseDocId: null });
+
+        transcriptPlayback.setFollow(false);
+        const detachB = transcriptPlayback.attach({ seek: vi.fn() });
+        transcriptPlayback.pauseFollowForJump('doc-1');
+        detachB();
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ ready: false, follow: false, followPauseDocId: null });
+    });
+
+    it('reset で初期状態へ戻る', () => {
+        transcriptPlayback.pauseFollowForJump('doc-1');
+        transcriptPlayback.reset();
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ follow: true, followPauseDocId: null });
+    });
+
+    it('🔴 プレイヤーの再マウント（文書切替＝key 変更）でも同じ: 一時停止は解け、follow は保持される', async () => {
+        await render(<TranscriptPlayer key="docA" audioUrl="https://example.test/a.m4a" durationSec={60} />);
+        await act(async () => {
+            transcriptPlayback.pauseFollowForJump('docA');
+        });
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ ready: true, follow: true, followPauseDocId: 'docA' });
+
+        await render(<TranscriptPlayer key="docB" audioUrl="https://example.test/b.m4a" durationSec={60} />);
+        expect(transcriptPlayback.getSnapshot()).toMatchObject({ ready: true, follow: true, followPauseDocId: null });
+        // 追従トグルの見た目も押されたまま（永続設定は書き換えていない）
+        expect(container.querySelector('button[aria-pressed]')?.getAttribute('aria-pressed')).toBe('true');
+    });
+});
+
 describe('話者ラベルの改名', () => {
     it('その場で入力でき、変更箇所数が事前に出て、onRename が呼ばれる', async () => {
         const onRename = vi.fn();
@@ -347,5 +421,164 @@ describe('本文の読み取り（純関数）', () => {
         expect(parseClockDisplay('1:20:00')).toBe(4800);
         expect(parseClockDisplay('あ:い')).toBeNull();
         expect(parseClockDisplay('12')).toBeNull();
+    });
+});
+
+describe('音声の可用性（仕様 B3）', () => {
+    it('プレイヤーが載ると loading、メタデータが読めたら ready、外れると none に戻る', async () => {
+        await render(<TranscriptPlayer audioUrl="https://example.test/a.m4a" />);
+        expect(transcriptPlayback.getSnapshot().audio).toBe('loading');
+        expect(transcriptPlayback.getSnapshot().ready).toBe(true);
+
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('loadedmetadata'));
+        });
+        expect(transcriptPlayback.getSnapshot().audio).toBe('ready');
+
+        await render(<TranscriptPlayer audioUrl={null} />);
+        expect(transcriptPlayback.getSnapshot().audio).toBe('none');
+        expect(transcriptPlayback.getSnapshot().ready).toBe(false);
+    });
+
+    it('preload を尊重しない環境（suspend）でも ready にして、押せば読み込みが始まる形にする', async () => {
+        await render(<TranscriptPlayer audioUrl="https://example.test/a.m4a" />);
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('suspend'));
+        });
+        expect(transcriptPlayback.getSnapshot().audio).toBe('ready');
+    });
+
+    it('音声要素のロード失敗は unavailable(media_failed)。その後の suspend で ready に戻さない', async () => {
+        const onMediaError = vi.fn();
+        await render(<TranscriptPlayer audioUrl="https://example.test/a.m4a" onMediaError={onMediaError} />);
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('error'));
+        });
+        expect(transcriptPlayback.getSnapshot().audio).toBe('unavailable');
+        expect(transcriptPlayback.getSnapshot().audioReason).toBe('media_failed');
+        expect(onMediaError).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('suspend'));
+        });
+        expect(transcriptPlayback.getSnapshot().audio).toBe('unavailable');
+    });
+
+    it('🔴 再生がブラウザに拒否されたら（NotAllowedError）再生中の見た目にせず、playbackBlocked を立てる', async () => {
+        const blocked = new Error('play() failed because the user didn\'t interact with the document first.');
+        blocked.name = 'NotAllowedError';
+        vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(async () => {
+            throw blocked;
+        });
+        await render(<TranscriptPlayer audioUrl="https://example.test/a.m4a" durationSec={60} />);
+        await click(container.querySelector('button[aria-label="再生"]'));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(transcriptPlayback.getSnapshot().playing).toBe(false);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(true);
+        expect(container.querySelector('button[aria-label="再生"]')).not.toBeNull();
+
+        // 実際に再生が始まれば解ける
+        await act(async () => {
+            container.querySelector('audio')!.dispatchEvent(new Event('play'));
+        });
+        expect(transcriptPlayback.getSnapshot().playing).toBe(true);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(false);
+    });
+
+    it('pause() による中断（AbortError）は拒否として案内しない', async () => {
+        const aborted = new Error('The play() request was interrupted by a call to pause().');
+        aborted.name = 'AbortError';
+        vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(async () => {
+            throw aborted;
+        });
+        await render(<TranscriptPlayer audioUrl="https://example.test/a.m4a" durationSec={60} />);
+        await click(container.querySelector('button[aria-label="再生"]'));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(transcriptPlayback.getSnapshot().playing).toBe(false);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(false);
+    });
+
+    it('時刻リンクからの seek も同じ経路（拒否されれば blocked）', async () => {
+        const blocked = new Error('blocked');
+        blocked.name = 'NotAllowedError';
+        vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(async () => {
+            throw blocked;
+        });
+        await render(transcriptView(TRANSCRIPT, { audioUrl: 'https://example.test/a.m4a' }));
+        await click(container.querySelector('a[data-timestamp-sec="12"]'));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(transcriptPlayback.getSnapshot().currentSec).toBe(12);
+        expect(transcriptPlayback.getSnapshot().playing).toBe(false);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(true);
+    });
+});
+
+// Major1: 文書を切り替える（TranscriptDocumentView は key を変えて remount する）と、
+// 前の文書の play() の遅延結果が共有 transcriptPlayback を上書きしてはならない。
+describe('文書切替と再生状態（遅延結果の隔離・仕様 B3）', () => {
+    it('🔴 前の文書の play() が遅れて拒否されても、切替後の文書の再生を止めず・再生拒否も出さない', async () => {
+        // 文書 A の play() を保留にする（この 1 回だけ deferred を返す）
+        let rejectA: (reason: unknown) => void = () => {};
+        const pendingA = new Promise<void>((_, reject) => {
+            rejectA = reject;
+        });
+        vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(() => pendingA);
+
+        // A を再生（play() は保留のまま。楽観的に playing:true）
+        await render(<TranscriptPlayer key="docA" audioUrl="https://example.test/a.m4a" durationSec={60} />);
+        await click(container.querySelector('button[aria-label="再生"]'));
+        expect(transcriptPlayback.getSnapshot().playing).toBe(true);
+
+        // 文書 B へ切替（key 変更で remount → attach cleanup が状態を初期化）。B を再生
+        await render(<TranscriptPlayer key="docB" audioUrl="https://example.test/b.m4a" durationSec={60} />);
+        await click(container.querySelector('button[aria-label="再生"]'));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(transcriptPlayback.getSnapshot().playing).toBe(true);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(false);
+
+        // A の play() が遅れて NotAllowedError で拒否される
+        const blocked = new Error('late rejection from document A');
+        blocked.name = 'NotAllowedError';
+        await act(async () => {
+            rejectA(blocked);
+            await Promise.resolve();
+        });
+
+        // B の状態は無傷（誤って停止せず、別文書に再生拒否案内も出ない）
+        expect(transcriptPlayback.getSnapshot().playing).toBe(true);
+        expect(transcriptPlayback.getSnapshot().playbackBlocked).toBe(false);
+    });
+
+    it('🔴 前の文書の play() が遅れて解決しても、切替後（停止中）の文書を再生中にしない', async () => {
+        let resolveA: () => void = () => {};
+        const pendingA = new Promise<void>(resolve => {
+            resolveA = resolve;
+        });
+        vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(() => pendingA);
+
+        await render(<TranscriptPlayer key="docA" audioUrl="https://example.test/a.m4a" durationSec={60} />);
+        await click(container.querySelector('button[aria-label="再生"]'));
+        expect(transcriptPlayback.getSnapshot().playing).toBe(true);
+
+        // B へ切替（remount で store 初期化 → playing:false）。B は停止のまま
+        await render(<TranscriptPlayer key="docB" audioUrl="https://example.test/b.m4a" durationSec={60} />);
+        expect(transcriptPlayback.getSnapshot().playing).toBe(false);
+
+        // A の play() が遅れて解決
+        await act(async () => {
+            resolveA();
+            await Promise.resolve();
+        });
+
+        // B は停止のまま（A の解決に引きずられて再生中に化けない）
+        expect(transcriptPlayback.getSnapshot().playing).toBe(false);
     });
 });

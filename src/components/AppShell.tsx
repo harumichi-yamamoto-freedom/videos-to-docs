@@ -17,7 +17,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         >
             メインコンテンツへ移動
         </a>
-        <Suspense fallback={<div className="h-20" />}>
+        {/* サスペンス中のプレースホルダ高さは、実ヘッダー（ナビ行＋不具合連絡先バー、デスクトップ約 109px）に
+            近づけて hydration 時のレイアウトシフトを抑える。応答形（375px 未満は連絡先が 2 行）で厳密一致は
+            できないので近似。ヘッダー高を固定値で持たない設計にするのが本筋（別途）。 */}
+        <Suspense fallback={<div className="h-28" />}>
             <AppHeader />
         </Suspense>
         <main

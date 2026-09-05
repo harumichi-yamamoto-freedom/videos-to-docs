@@ -161,3 +161,94 @@ describe('🔴 回帰: TranscriptAwareMarkdown は通常の文書を素通しす
         expect(through).not.toBe(plain);
     });
 });
+
+// ---------------------------------------------------------------------------
+// 仕様 B3（要確認箇所）で足した判定と描画の錠
+// ---------------------------------------------------------------------------
+
+import {
+    reviewAnchorsByLine,
+    shouldShowTranscriptReviewPanel,
+} from '@/lib/transcriptDocument';
+import type { TranscriptReview } from '@/lib/transcriptReviewContract';
+
+/** 合成の要確認データ。本文 1 行目・3 行目に段落アンカーを持つ */
+const SYNTHETIC_REVIEW: TranscriptReview = {
+    version: 1,
+    threshold: 0.75,
+    sourceTextHash: '0'.repeat(64),
+    sourceJobId: 'job-synthetic',
+    summary: {
+        totalPhrases: 2, lowConfidence: 2, recognitionFlagged: 0, candidateTotal: 2,
+        unknownConfidence: 0, unknownRecognitionStatus: 0, noTimeCandidates: 0, savedCandidates: 2,
+    },
+    availability: 'complete',
+    candidates: [
+        { phraseId: 'p-0', reasons: ['low_confidence'], excerpt: '本日はお忙しい中', excerptTruncated: false, confidence: 0.5, startSec: 0.2, endSec: 3, paragraphStartLine: 1 },
+        { phraseId: 'p-1', reasons: ['low_confidence'], excerpt: 'いえ、こちらこそ', excerptTruncated: false, confidence: 0.6, startSec: 12.4, endSec: 14, paragraphStartLine: 3 },
+    ],
+};
+
+describe('音声 UI の有効化: 本文の時刻リンクが無くても review の有効時刻で有効化する（仕様 B3）', () => {
+    it('🔴 音声を持つ通常の議事録は、review が無ければ引き続き対象外', () => {
+        expect(shouldEnableTranscriptUi({ text: ORDINARY_DOCUMENT, audioStoragePath: 'audio/user-1/a.mp3' })).toBe(false);
+    });
+
+    it('編集で時刻リンクが全て消えた本文でも、review に有効時刻の候補があれば対象', () => {
+        expect(shouldEnableTranscriptUi({ text: ORDINARY_DOCUMENT, transcriptReview: SYNTHETIC_REVIEW })).toBe(true);
+    });
+
+    it('review があっても有効時刻の候補が無ければ対象外（audioStoragePath だけで有効化しない）', () => {
+        const noTime: TranscriptReview = {
+            ...SYNTHETIC_REVIEW,
+            candidates: [{ phraseId: 'p-0', reasons: ['recognition_status'], excerpt: '', excerptTruncated: false }],
+        };
+        expect(shouldEnableTranscriptUi({ text: ORDINARY_DOCUMENT, audioStoragePath: 'audio/user-1/a.mp3', transcriptReview: noTime })).toBe(false);
+    });
+});
+
+describe('要確認パネルを置く文書', () => {
+    it('🔴 時刻リンクの無い通常の議事録には置かない（見た目を変えない）', () => {
+        expect(shouldShowTranscriptReviewPanel({ text: ORDINARY_DOCUMENT, audioStoragePath: 'audio/user-1/a.mp3' })).toBe(false);
+    });
+
+    it('review を持つ文書・review の無い文字起こし文書には置く。処理中には置かない', () => {
+        expect(shouldShowTranscriptReviewPanel({ text: ORDINARY_DOCUMENT, transcriptReview: SYNTHETIC_REVIEW })).toBe(true);
+        expect(shouldShowTranscriptReviewPanel({ text: TRANSCRIPT_DOCUMENT })).toBe(true);
+        expect(shouldShowTranscriptReviewPanel({ text: TRANSCRIPT_DOCUMENT, status: 'processing', transcriptReview: SYNTHETIC_REVIEW })).toBe(false);
+    });
+});
+
+describe('🔴 回帰: 段落バッジは本文ハッシュの照合が済むまで描かない', () => {
+    it('review を渡しても照合前（SSR）は review 無しの描画と完全一致する', () => {
+        const without = renderToStaticMarkup(<TranscriptAwareMarkdown markdown={TRANSCRIPT_DOCUMENT} />);
+        const withReview = renderToStaticMarkup(
+            <TranscriptAwareMarkdown markdown={TRANSCRIPT_DOCUMENT} documentId="doc-1" review={SYNTHETIC_REVIEW} />,
+        );
+        expect(withReview).toBe(without);
+        expect(withReview).not.toContain('要確認');
+    });
+
+    it('通常の議事録に review を付けても、本文の描画は既定と完全一致する（アンカー行が無い）', () => {
+        const plain = renderToStaticMarkup(<MarkdownDocument markdown={ORDINARY_DOCUMENT} />);
+        const through = renderToStaticMarkup(
+            <TranscriptAwareMarkdown markdown={ORDINARY_DOCUMENT} documentId="doc-1" review={SYNTHETIC_REVIEW} />,
+        );
+        expect(through).toBe(plain);
+    });
+
+    it('アンカーを明示的に渡したときだけ、該当段落に選択不可・印刷非表示のバッジが付く', () => {
+        const components = createTranscriptMarkdownComponents({
+            markdown: TRANSCRIPT_DOCUMENT,
+            reviewAnchors: { documentId: 'doc-1', anchorsByLine: reviewAnchorsByLine(SYNTHETIC_REVIEW.candidates) },
+        });
+        const html = renderToStaticMarkup(<MarkdownDocument markdown={TRANSCRIPT_DOCUMENT} components={components} />);
+        expect(html).toContain('data-review-line="1"');
+        expect(html).toContain('data-review-line="3"');
+        expect(html).toContain('要確認 1 箇所');
+        expect(html).toContain('select-none');
+        expect(html).toContain('print:hidden');
+        // PDF 用の描画（MarkdownDocument 単体）には出ない
+        expect(renderToStaticMarkup(<MarkdownDocument markdown={TRANSCRIPT_DOCUMENT} />)).not.toContain('要確認');
+    });
+});
