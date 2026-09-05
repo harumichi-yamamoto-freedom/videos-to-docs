@@ -67,6 +67,34 @@ describe('pollBatchStatus', () => {
         const res = await pollBatchStatus('j1', { wait: noWait, timeoutMs: -1 });
         expect(res.status).toBe('running');
     });
+
+    it('🔴 一時的な状態確認エラー（502）で止まらず、次の周回で確定を拾う', async () => {
+        // 1回目 502（サーバの確定 commit が transient で落ちた等）→ 飲み込んで再試行 → 2回目 succeeded。
+        // これで止まると、サーバのリース切れ再確定に永遠に到達せず文書が processing で固まる（再レビュー major）。
+        const fetchMock = vi.spyOn(globalThis, 'fetch')
+            .mockResolvedValueOnce(jsonResponse({ error: 'upstream_error', message: '一時エラー' }, false, 502))
+            .mockResolvedValueOnce(jsonResponse({ status: 'succeeded', docId: 'd1' }));
+        const res = await pollBatchStatus('j1', { wait: noWait });
+        expect(res.status).toBe('succeeded');
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('🔴 一時エラーが続いてもタイムアウトまで諦めない', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            jsonResponse({ error: 'upstream_error', message: '一時エラー' }, false, 502));
+        const res = await pollBatchStatus('j1', { wait: noWait, timeoutMs: -1 });
+        expect(res.status).toBe('running'); // 諦めるが「失敗」にはしない
+    });
+
+    it('中止は一時エラーとして飲み込まず、即座に投げる', async () => {
+        const controller = new AbortController();
+        vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+            controller.abort(new Error('aborted-mid-flight'));
+            throw new Error('The operation was aborted');
+        });
+        await expect(pollBatchStatus('j1', { signal: controller.signal, wait: noWait }))
+            .rejects.toThrow('aborted-mid-flight');
+    });
 });
 
 describe('runBatchTranscription', () => {

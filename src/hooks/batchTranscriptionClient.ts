@@ -84,18 +84,35 @@ export interface PollOptions {
 
 const defaultWait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** 終端（succeeded/failed）になるまでポーリングする。中止は例外を投げる。 */
+/**
+ * 終端（succeeded/failed）になるまでポーリングする。中止は例外を投げる。
+ *
+ * 🔴 一時的な状態確認エラー（サーバの 502・回線断）でポーリングを止めない。
+ *    サーバ側は確定処理が途中で落ちても finalizing のリース切れ後に**次の poll で再確定**できる設計
+ *    （commitTerminalOutcome）。ここで一度の失敗で抜けると、その回復経路に永遠に到達せず、
+ *    文書が「処理中」のまま固まり、利用者が別ジョブを再提出して二重課金になる（再レビュー major）。
+ *    だから状態確認の失敗は飲み込んで待ち、次の周回で再試行する。中止（abort）は即座に投げる。
+ */
 export async function pollBatchStatus(jobId: string, options: PollOptions = {}): Promise<TranscribeStatusResponse> {
     const { signal, intervalMs = 15_000, timeoutMs = 90 * 60_000, onTick, wait = defaultWait } = options;
     const startedAt = Date.now();
     for (;;) {
         if (signal?.aborted) throw signal.reason ?? new Error('中止しました');
-        const status = await fetchBatchStatus(jobId, signal);
-        onTick?.(status);
-        if (status.status !== 'running') return status;
+        let status: TranscribeStatusResponse | null = null;
+        try {
+            status = await fetchBatchStatus(jobId, signal);
+        } catch (error) {
+            // 中止はそのまま伝える。それ以外（502・回線断）は一時障害として次の周回で再試行。
+            if (signal?.aborted) throw signal.reason ?? error;
+            status = null;
+        }
+        if (status) {
+            onTick?.(status);
+            if (status.status !== 'running') return status;
+        }
         if (Date.now() - startedAt > timeoutMs) {
             // ジョブは Azure 側で継続中。文書は「処理中」のまま残り、後で開けば確定できる。
-            return status;
+            return status ?? { status: 'running', docId: '' };
         }
         await wait(intervalMs);
     }
