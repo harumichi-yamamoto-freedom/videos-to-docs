@@ -219,6 +219,8 @@ function TranscriptLine({
         //    （currentSec）と ready が載っている。すると前文書の位置に対応する新文書の段落が一瞬 active と判定され、
         //    描画時の値で寄せると誤追従になる。前プレイヤーの離脱（＝ストア初期化）は、この create effect より前の
         //    destroy フェーズで走るので、flush 時に読み直せば正しく「まだ未接続（ready=false）」を見て寄せない。
+        //    ⚠ これは本文とプレイヤーが同じ document から同一コミットで再構成される前提に依る（現状 DocumentDetailPanel）。
+        //    本文とプレイヤーを別タイミングで供給する構成にすると、この保証は崩れる。
         //    依存配列は「再生位置が進む・follow / 一時停止が変わる」という描画由来の変化で再評価するための引き金。
         const snap = transcriptPlayback.getSnapshot();
         const followPausedNow = snap.followPauseDocId !== null && snap.followPauseDocId === currentDocumentId;

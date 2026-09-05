@@ -126,9 +126,18 @@ const createTranscriptPlaybackStore = () => {
         /**
          * 候補ジャンプ中の追従の一時停止を、その文書 ID で立てる（次の時刻更新でジャンプ先から引き戻さない）。
          * 🔴 `follow`（永続設定）は書き換えない。別文書の段落は自分の docId と照合するので自動的に無効になり、
-         *    音声の有無に依存しない。明示的な解除は setFollow / seek / reset。
+         *    音声の有無に依存しない。明示的な解除は setFollow / seek / clearFollowPauseForDocument（文書離脱）/ reset。
          */
         pauseFollowForJump: (documentId: string): void => patch({ followPauseDocId: documentId }),
+        /**
+         * 文書から離れる（本文の表示 documentId が変わる・アンマウント）ときに、その文書で立てた
+         * 候補ジャンプの一時停止を破棄する。🔴 プレイヤーの有無に依存しない解除経路（音声の無い文書では
+         * attach の終了処理が走らないため、docId 照合だけだと「A でジャンプ→別文書→A へ戻り A が音声を得る」で
+         * 一時停止が残り追従が死ぬ）。自分の文書の分だけ消す（別文書が既に立てた停止は壊さない）。
+         */
+        clearFollowPauseForDocument: (documentId: string): void => {
+            if (state.followPauseDocId === documentId) patch({ followPauseDocId: null });
+        },
         /** 音声の可用性を置く（URL の取得側とプレイヤーの両方から呼ぶ） */
         setAudio: (audio: TranscriptAudioStatus, reason: TranscriptAudioUnavailableReason | null = null): void =>
             patch({ audio, audioReason: audio === 'unavailable' ? reason : null }),

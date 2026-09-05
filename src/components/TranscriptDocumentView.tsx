@@ -52,6 +52,14 @@ export function TranscriptAwareMarkdown({
     const sourceHash = typeof review?.sourceTextHash === 'string' && review.sourceTextHash !== ''
         ? review.sourceTextHash
         : null;
+    // 🔴 文書から離れる（表示 documentId が変わる・アンマウント）ときに、この文書で立てた候補ジャンプの
+    //    追従一時停止を破棄する。音声の無い文書ではプレイヤーが attach されず終了処理も走らないため、
+    //    docId 照合だけだと「A でジャンプ → 別文書 → A へ戻り A が音声を得る」で一時停止が残り追従が死ぬ。
+    //    文書離脱で明示的に解除することで、戻った文書は最初から追従が効く（プレイヤーの有無に依存しない）。
+    useEffect(() => {
+        if (!documentId) return undefined;
+        return () => transcriptPlayback.clearFollowPauseForDocument(documentId);
+    }, [documentId]);
     const bodyHash = useTranscriptTextHash(markdown, sourceHash !== null && Boolean(documentId));
     const anchorsEnabled = sourceHash !== null && bodyHash !== null && bodyHash === sourceHash && Boolean(documentId);
     const components = useMemo(

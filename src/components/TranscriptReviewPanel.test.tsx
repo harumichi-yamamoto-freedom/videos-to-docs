@@ -822,6 +822,44 @@ describe('TranscriptAwareMarkdown の段落バッジ', () => {
 });
 
 // ---------------------------------------------------------------------------
+// TranscriptAwareMarkdown: 文書離脱で候補ジャンプの追従一時停止を破棄（プレイヤーの有無に依存しない解除経路）
+// 音声の無い文書で立てた一時停止が、別文書を経て戻ったときに残り追従を殺すのを防ぐ（往復 A→B→A）。
+// ---------------------------------------------------------------------------
+
+describe('TranscriptAwareMarkdown: 文書離脱で追従一時停止を破棄', () => {
+    it('🔴 文書 ID が変わると、その文書で立てた一時停止(followPauseDocId)を解除し、戻っても復活しない', async () => {
+        // 音声の無い文書 A で候補ジャンプ相当の一時停止を立てる（プレイヤーは載っていない）
+        transcriptPlayback.pauseFollowForJump('doc-A');
+        await render(<TranscriptAwareMarkdown markdown={TRANSCRIPT} documentId="doc-A" review={null} />);
+        expect(transcriptPlayback.getSnapshot().followPauseDocId).toBe('doc-A');
+
+        // 別文書 B へ切替（documentId 変化）: A の一時停止は破棄される（attach の終了処理に依存しない）
+        await render(<TranscriptAwareMarkdown markdown={TRANSCRIPT} documentId="doc-B" review={null} />);
+        expect(transcriptPlayback.getSnapshot().followPauseDocId).toBeNull();
+
+        // A へ戻っても一時停止は復活しない（戻った A は最初から追従が効く）
+        await render(<TranscriptAwareMarkdown markdown={TRANSCRIPT} documentId="doc-A" review={null} />);
+        expect(transcriptPlayback.getSnapshot().followPauseDocId).toBeNull();
+    });
+
+    it('同じ文書のまま再描画しても一時停止は保たれる（documentId 不変ならクリーンアップは走らない）', async () => {
+        transcriptPlayback.pauseFollowForJump('doc-A');
+        await render(<TranscriptAwareMarkdown markdown={TRANSCRIPT} documentId="doc-A" review={null} />);
+        // 同じ documentId で本文だけ変えて再描画（親の再描画・本文編集の再現）
+        await render(<TranscriptAwareMarkdown markdown={`${TRANSCRIPT}\n\n[05:00](#t=300) **営業** 追記。`} documentId="doc-A" review={null} />);
+        expect(transcriptPlayback.getSnapshot().followPauseDocId).toBe('doc-A');
+    });
+
+    it('別文書が既に立てた一時停止は、離脱する文書のクリーンアップで消さない（docId 照合）', async () => {
+        // A をマウント → B の一時停止を立てる → A から C へ離脱しても、消すのは A の分だけ＝B の停止は残る
+        await render(<TranscriptAwareMarkdown markdown={TRANSCRIPT} documentId="doc-A" review={null} />);
+        transcriptPlayback.pauseFollowForJump('doc-B');
+        await render(<TranscriptAwareMarkdown markdown={TRANSCRIPT} documentId="doc-C" review={null} />);
+        expect(transcriptPlayback.getSnapshot().followPauseDocId).toBe('doc-B');
+    });
+});
+
+// ---------------------------------------------------------------------------
 // TranscriptAudioBar: URL 取得の loading / 失敗 / 再試行 / メディアエラー
 // ---------------------------------------------------------------------------
 
