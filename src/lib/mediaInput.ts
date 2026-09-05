@@ -14,7 +14,8 @@ export const isAudioInput = (file: File): boolean => getSupportedMediaKind(file)
  * 音声ファイルでも「変換を飛ばして元ファイルをそのまま上げてよい」とは限らない。
  *
  * 🔴 実害 (2026-09-04): 1時間22分・16kHz ステレオの **WAV は 301MB** あり、
- * Storage ルールの 100MB 上限に当たって `storage/unauthorized` になっていた。
+ * 当時の Storage ルールの 100MB 上限に当たって `storage/unauthorized` になっていた
+ * （上限はその後 500MB=GENERATE_MAX_MEDIA_BYTES に引き上げ）。
  * 「権限がありません」と表示されるので原因が権限だと誤読され、しかも
  * **ビットレートの選択は変換を通らないため一切効かなかった**（64k にしても同じ 301MB が上がる）。
  *

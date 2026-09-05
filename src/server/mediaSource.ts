@@ -67,7 +67,7 @@ const toSizeBytes = (value: unknown): number => {
 
 /**
  * 存在とサイズだけ確認する (本文は取らない)。無ければ 404、上限超なら 413。
- * 🔴 `maxBytes` を渡せる。同期経路は 100MB (GENERATE_MAX_MEDIA_BYTES)、
+ * 🔴 `maxBytes` を渡せる。文書生成（Gemini）経路は 500MB (GENERATE_MAX_MEDIA_BYTES)、
  *    非同期バッチ経路は Azure の 1GB (AZURE_BATCH_MAX_AUDIO_BYTES) と、上限が違うため。
  */
 export async function statMedia(
