@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Transcription } from '@/lib/firestore';
+import type { TranscribeStatusResponse } from '@/lib/transcribeBatchContract';
 import DocumentsPage from './page';
 
 // jsdomはshowModal/closeを実装していないため、共通Dialogを使う画面のテストは
@@ -94,6 +95,7 @@ const mocks = vi.hoisted(() => ({
   detailFocus: vi.fn(),
   detailSave: vi.fn(),
   headerNavigation: vi.fn(),
+  reconcileProcessingDocument: vi.fn(),
   restoreTranscription: vi.fn(),
   updateTranscription: vi.fn(),
 }));
@@ -117,6 +119,10 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => mocks.authState,
+}));
+
+vi.mock('@/hooks/batchTranscriptionClient', () => ({
+  reconcileProcessingDocument: mocks.reconcileProcessingDocument,
 }));
 
 vi.mock('@/components/DocumentListSidebar', () => ({
@@ -439,6 +445,13 @@ async function click(element: HTMLElement): Promise<void> {
   });
 }
 
+async function publishLoadedDocuments(documents: Transcription[]): Promise<void> {
+  await act(async () => {
+    latestListSidebarProps?.onDocumentsChange?.(documents);
+    latestListSidebarProps?.onListStateChange?.({ status: 'success', count: documents.length });
+  });
+}
+
 function waitForPopStates(count: number): Promise<PopStateEvent[]> {
   return new Promise((resolve, reject) => {
     const events: PopStateEvent[] = [];
@@ -501,6 +514,9 @@ describe('DocumentsPage', () => {
     mocks.detailFocus.mockReset();
     mocks.detailSave.mockReset().mockResolvedValue(true);
     mocks.headerNavigation.mockReset();
+    mocks.reconcileProcessingDocument.mockReset().mockImplementation(async (docId: string) => ({
+      status: 'running', docId,
+    }));
     mocks.restoreTranscription.mockReset().mockResolvedValue(undefined);
     mocks.updateTranscription.mockReset().mockResolvedValue(undefined);
     vi.spyOn(window, 'confirm').mockImplementation(mocks.confirm);
@@ -526,6 +542,145 @@ describe('DocumentsPage', () => {
     }
     document.body.replaceChildren();
     vi.restoreAllMocks();
+  });
+
+  it('一覧ロード後、自分の processing 文書だけを 1 回確認し running なら再取得しない', async () => {
+    const mounted = await mountPage();
+    const processingDocument: Transcription = {
+      ...firstDocument, status: 'processing', ownerId: 'owner-1', ownerType: 'user',
+    };
+    const documents: Transcription[] = [
+      processingDocument,
+      { ...processingDocument, id: 'other-owner', ownerId: 'owner-2' },
+      { ...processingDocument, id: 'guest-document', ownerId: 'GUEST', ownerType: 'guest' },
+      { ...processingDocument, id: 'completed-document', status: 'completed' },
+    ];
+
+    await publishLoadedDocuments(documents);
+    await publishLoadedDocuments(documents.map(document => ({ ...document })));
+    await rerenderPage(mounted);
+
+    expect(mocks.reconcileProcessingDocument).toHaveBeenCalledExactlyOnceWith(
+      firstDocument.id, expect.any(AbortSignal),
+    );
+    expect(getByTestId(mounted.container, 'update-trigger').textContent).toBe('0');
+    expect(mocks.updateTranscription).not.toHaveBeenCalled();
+  });
+
+  it('処理中の文書がなければ状態確認を呼ばない', async () => {
+    const mounted = await mountPage();
+    await click(getByTestId(mounted.container, 'load-documents'));
+    expect(mocks.reconcileProcessingDocument).not.toHaveBeenCalled();
+  });
+
+  it.each(['succeeded', 'failed'] as const)('%s の確認後は既存の一覧再取得を起動する', async (status) => {
+    mocks.reconcileProcessingDocument.mockResolvedValue({ status, docId: firstDocument.id });
+    const mounted = await mountPage();
+    await publishLoadedDocuments([{
+      ...firstDocument, status: 'processing', ownerId: 'owner-1', ownerType: 'user',
+    }]);
+
+    expect(getByTestId(mounted.container, 'update-trigger').textContent).toBe('1');
+    expect(mocks.updateTranscription).not.toHaveBeenCalled();
+  });
+
+  it('一覧が再取得されても確認を重複させず、最大 5 件を直列で確認する', async () => {
+    let resolveFirst!: (status: TranscribeStatusResponse) => void;
+    mocks.reconcileProcessingDocument.mockImplementationOnce(() => new Promise(resolve => {
+      resolveFirst = resolve;
+    }));
+    await mountPage();
+    const documents: Transcription[] = Array.from({ length: 8 }, (_, index) => ({
+      ...firstDocument,
+      id: `processing-${index}`,
+      status: 'processing',
+      ownerId: 'owner-1',
+      ownerType: 'user',
+    }));
+
+    await publishLoadedDocuments(documents);
+    await publishLoadedDocuments([...documents]);
+    expect(mocks.reconcileProcessingDocument).toHaveBeenCalledTimes(1);
+
+    await act(async () => resolveFirst({ status: 'running', docId: 'processing-0' }));
+    await publishLoadedDocuments([...documents]);
+    expect(mocks.reconcileProcessingDocument.mock.calls.map(([docId]) => docId)).toEqual([
+      'processing-0', 'processing-1', 'processing-2', 'processing-3', 'processing-4',
+    ]);
+
+    // 一覧の自動確認上限を超えた文書も、詳細を開けば 1 回確認する。
+    await act(async () => latestListSidebarProps?.onDocumentClick(documents[6]));
+    await act(async () => latestListSidebarProps?.onDocumentClick(documents[6]));
+    await publishLoadedDocuments([...documents]);
+    expect(mocks.reconcileProcessingDocument).toHaveBeenCalledTimes(6);
+    expect(mocks.reconcileProcessingDocument.mock.calls[5][0]).toBe('processing-6');
+  });
+
+  it('確認失敗でも後続文書を確認し、一覧は表示し続ける', async () => {
+    mocks.reconcileProcessingDocument.mockRejectedValueOnce(new Error('synthetic status failure'));
+    const mounted = await mountPage();
+    await publishLoadedDocuments([firstDocument, secondDocument].map(document => ({
+      ...document, status: 'processing', ownerId: 'owner-1', ownerType: 'user',
+    })));
+
+    expect(mocks.reconcileProcessingDocument).toHaveBeenCalledTimes(2);
+    expect(getByTestId(mounted.container, 'list-sidebar')).toBeTruthy();
+    expect(getByTestId(mounted.container, 'update-trigger').textContent).toBe('0');
+  });
+
+  it('owner 切替で前の確認を中止し、その応答による一覧再取得を抑える', async () => {
+    let resolveFirst!: (status: TranscribeStatusResponse) => void;
+    mocks.reconcileProcessingDocument.mockImplementationOnce(() => new Promise(resolve => {
+      resolveFirst = resolve;
+    }));
+    const mounted = await mountPage();
+    await publishLoadedDocuments([firstDocument, secondDocument].map(document => ({
+      ...document, status: 'processing', ownerId: 'owner-1', ownerType: 'user',
+    })));
+    const signal = mocks.reconcileProcessingDocument.mock.calls[0][1] as AbortSignal;
+
+    mocks.authState.user = { uid: 'owner-2' };
+    await rerenderPage(mounted);
+    expect(signal.aborted).toBe(true);
+    await act(async () => resolveFirst({ status: 'succeeded', docId: firstDocument.id! }));
+    expect(getByTestId(mounted.container, 'update-trigger').textContent).toBe('0');
+    expect(mocks.reconcileProcessingDocument).toHaveBeenCalledTimes(1);
+
+    await publishLoadedDocuments([{
+      ...firstDocument, id: 'next-owner-document', status: 'processing', ownerId: 'owner-2', ownerType: 'user',
+    }]);
+    expect(mocks.reconcileProcessingDocument).toHaveBeenCalledTimes(2);
+    expect(mocks.reconcileProcessingDocument.mock.calls[1][0]).toBe('next-owner-document');
+  });
+
+  it('unmount で実行中の確認を中止し、待機中の文書には問い合わせない', async () => {
+    let resolveFirst!: (status: TranscribeStatusResponse) => void;
+    mocks.reconcileProcessingDocument.mockImplementationOnce(() => new Promise(resolve => {
+      resolveFirst = resolve;
+    }));
+    const mounted = await mountPage();
+    await publishLoadedDocuments([firstDocument, secondDocument].map(document => ({
+      ...document, status: 'processing', ownerId: 'owner-1', ownerType: 'user',
+    })));
+    const signal = mocks.reconcileProcessingDocument.mock.calls[0][1] as AbortSignal;
+
+    await unmountPage(mounted);
+    expect(signal.aborted).toBe(true);
+    await act(async () => resolveFirst({ status: 'succeeded', docId: firstDocument.id! }));
+    expect(mocks.reconcileProcessingDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it('ゲストは GUEST 所有の処理中文書だけを確認する', async () => {
+    mocks.authState.user = null;
+    await mountPage();
+    await publishLoadedDocuments([
+      { ...firstDocument, status: 'processing', ownerId: 'GUEST', ownerType: 'guest' },
+      { ...secondDocument, status: 'processing', ownerId: 'owner-1', ownerType: 'user' },
+    ]);
+
+    expect(mocks.reconcileProcessingDocument).toHaveBeenCalledExactlyOnceWith(
+      firstDocument.id, expect.any(AbortSignal),
+    );
   });
 
   it('一覧クリックで親stateを更新し、実mountを再描画して選択文書を切り替える', async () => {

@@ -25,6 +25,7 @@ export interface CreateProcessingDocInput {
     title?: string;
     originalFileType: string; // 'audio' | 'video'
     audioStoragePath?: string;
+    jobId?: string;
 }
 
 const PROCESSING_PLACEHOLDER = '（文字起こしを実行しています。完了すると自動で反映されます。数分〜十数分かかることがあります。）';
@@ -45,9 +46,25 @@ export async function createProcessingDocument(input: CreateProcessingDocInput):
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
         ...(input.audioStoragePath && { audioStoragePath: input.audioStoragePath }),
+        ...(input.jobId !== undefined && { jobId: input.jobId }),
     });
     logger.info('処理中の文書を作成', { docId: ref.id, ownerType: input.ownerType });
     return ref.id;
+}
+
+/**
+ * 文書作成後に採番されたジョブを紐付ける。削除済み・所有者変更済みの文書は触らない。
+ * 🔴 存在・所有者確認と書込みを**同一トランザクション**で行う。get→set の隙に文書が削除されると、
+ *    `{ jobId }` だけの文書が再作成され「削除済み文書は触らない」不変条件を破るため（他の書込みと同じ規律）。
+ */
+export async function attachJobToDocument(docId: string, jobId: string, expectedOwnerId: string): Promise<void> {
+    const db = getAdminFirestore();
+    const ref = db.collection(TRANSCRIPTIONS_COLLECTION).doc(docId);
+    await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists || snap.data()?.ownerId !== expectedOwnerId) return;
+        tx.set(ref, { jobId }, { merge: true });
+    });
 }
 
 /** 完了: 本文を書き込み、status を completed にする。 */

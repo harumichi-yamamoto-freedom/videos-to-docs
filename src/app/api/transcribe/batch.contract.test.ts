@@ -13,7 +13,7 @@ import type { AzureBatchResult } from '@/lib/azureBatchContract';
 const documentDb = vi.hoisted(() => ({
     data: undefined as Record<string, unknown> | undefined,
     jobData: undefined as Record<string, unknown> | undefined,
-    ref: { id: 'doc-1', path: 'transcriptions/doc-1' },
+    ref: { id: 'doc-1', path: 'transcriptions/doc-1', get: vi.fn(), set: vi.fn() },
     jobRef: { id: 'job-1', path: 'transcriptionJobs/job-1' },
     tx: { get: vi.fn(), set: vi.fn() },
     runTransaction: vi.fn(),
@@ -80,6 +80,7 @@ vi.mock('@/server/transcriptionDocument', async (importActual) => {
     return {
         ...actual,
         createProcessingDocument: vi.fn(async () => 'doc-1'),
+        attachJobToDocument: vi.fn(actual.attachJobToDocument),
     };
 });
 vi.mock('@/server/transcriptionJob', async (importActual) => {
@@ -90,6 +91,7 @@ vi.mock('@/server/transcriptionJob', async (importActual) => {
         commitTerminalOutcome: vi.fn(actual.commitTerminalOutcome),
         createTranscriptionJob: vi.fn(async () => 'job-1'),
         getTranscriptionJob: vi.fn(),
+        getTranscriptionJobByDocId: vi.fn(),
         updateTranscriptionJob: vi.fn(async () => undefined),
     };
 });
@@ -99,8 +101,8 @@ import { POST as statusPOST } from './status/route';
 import { resolveRequestSubject } from '@/server/auth';
 import { submitBatchJob, getAzureCredentials, getBatchJob, fetchBatchResult, deleteBatchJob } from '@/server/azureBatchTranscribe';
 import { getSignedReadUrl } from '@/server/mediaSource';
-import { createProcessingDocument } from '@/server/transcriptionDocument';
-import { claimJobForFinalize, commitTerminalOutcome, FINALIZE_LEASE_MS, createTranscriptionJob, getTranscriptionJob, updateTranscriptionJob } from '@/server/transcriptionJob';
+import { attachJobToDocument, createProcessingDocument } from '@/server/transcriptionDocument';
+import { claimJobForFinalize, commitTerminalOutcome, FINALIZE_LEASE_MS, createTranscriptionJob, getTranscriptionJob, getTranscriptionJobByDocId, updateTranscriptionJob } from '@/server/transcriptionJob';
 import { getTranscriptionDocuments, getTranscriptions, getTranscriptionsByOwnerId, restoreTranscription } from '@/lib/firestore';
 import * as finalization from '@/server/finalizeTranscription';
 
@@ -122,6 +124,13 @@ beforeEach(() => {
     documentDb.data = { ownerId: 'GUEST', status: 'processing', title: '合成の文書', transcription: '処理中' };
     documentDb.jobData = { status: 'finalizing' };
     documentDb.commitError = undefined;
+    documentDb.ref.get.mockImplementation(async () => ({
+        exists: documentDb.data !== undefined,
+        data: () => documentDb.data,
+    }));
+    documentDb.ref.set.mockImplementation(async (patch) => {
+        documentDb.data = { ...documentDb.data, ...patch };
+    });
     documentDb.tx.get.mockImplementation(async (ref) => {
         const data = ref.path === documentDb.jobRef.path ? documentDb.jobData : documentDb.data;
         return { exists: data !== undefined, data: () => data };
@@ -170,6 +179,12 @@ describe('POST /api/transcribe/submit（実ルートの配線）', () => {
         expect(submitBatchJob).toHaveBeenCalledTimes(1);
         expect(createProcessingDocument).toHaveBeenCalledTimes(1);
         expect(createTranscriptionJob).toHaveBeenCalledTimes(1);
+        expect(attachJobToDocument).toHaveBeenCalledExactlyOnceWith('doc-1', 'job-1', 'GUEST');
+        expect(vi.mocked(createProcessingDocument).mock.invocationCallOrder[0])
+            .toBeLessThan(vi.mocked(createTranscriptionJob).mock.invocationCallOrder[0]);
+        expect(vi.mocked(createTranscriptionJob).mock.invocationCallOrder[0])
+            .toBeLessThan(vi.mocked(attachJobToDocument).mock.invocationCallOrder[0]);
+        expect(documentDb.data).toMatchObject({ status: 'processing', jobId: 'job-1' });
         // ジョブは Azure の self URL と文書 ID を結びつけて持つ
         expect(vi.mocked(createTranscriptionJob).mock.calls[0][0]).toMatchObject({
             docId: 'doc-1',
@@ -212,8 +227,109 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
 
     beforeEach(() => {
         vi.mocked(getTranscriptionJob).mockResolvedValue(runningJob);
+        vi.mocked(getTranscriptionJobByDocId).mockResolvedValue(runningJob);
         vi.mocked(claimJobForFinalize).mockResolvedValue({ ...runningJob, status: 'finalizing', updatedAtMs: Date.now() });
     });
+
+    it('docId から文書の jobId を引き、完了結果をその場で文書とジョブへ確定する', async () => {
+        documentDb.data = { ...documentDb.data, jobId: 'job-1' };
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult).mockResolvedValue(sampleAzureResult());
+        const res = await statusPOST(req({ docId: 'doc-1' }));
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ status: 'succeeded', docId: 'doc-1' });
+        expect(documentDb.ref.get).toHaveBeenCalledTimes(1);
+        expect(getTranscriptionJob).toHaveBeenCalledExactlyOnceWith('job-1');
+        expect(getTranscriptionJobByDocId).not.toHaveBeenCalled();
+        expect(claimJobForFinalize).toHaveBeenCalledWith('job-1');
+        expect(documentDb.data).toMatchObject({
+            status: 'completed', jobId: 'job-1', transcription: expect.stringContaining('よろしくお願いします'),
+        });
+        expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+        expect(deleteBatchJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('jobId 未付与の既存文書も docId の逆引きから確定する', async () => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult).mockResolvedValue(sampleAzureResult());
+        const res = await statusPOST(req({ docId: 'doc-1' }));
+        expect(await res.json()).toEqual({ status: 'succeeded', docId: 'doc-1' });
+        expect(getTranscriptionJobByDocId).toHaveBeenCalledExactlyOnceWith('doc-1');
+        expect(getTranscriptionJob).not.toHaveBeenCalled();
+        expect(documentDb.data).toMatchObject({ status: 'completed' });
+        expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+    });
+
+    it('docId から Azure の失敗も文書とジョブへ確定する', async () => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Failed', error: '合成の失敗理由' });
+        const res = await statusPOST(req({ docId: 'doc-1' }));
+        expect(await res.json()).toEqual({ status: 'failed', docId: 'doc-1', error: '合成の失敗理由' });
+        expect(documentDb.data).toMatchObject({ status: 'failed', transcription: expect.stringContaining('合成の失敗理由') });
+        expect(documentDb.jobData).toMatchObject({ status: 'failed' });
+    });
+
+    it('docId の文書が他人の所有ならジョブも Azure も読まず 403', async () => {
+        documentDb.data = { ...documentDb.data, jobId: 'job-1', ownerId: 'synthetic-other-owner' };
+        const res = await statusPOST(req({ docId: 'doc-1' }));
+        expect(res.status).toBe(403);
+        expect(getTranscriptionJob).not.toHaveBeenCalled();
+        expect(getTranscriptionJobByDocId).not.toHaveBeenCalled();
+        expect(claimJobForFinalize).not.toHaveBeenCalled();
+        expect(getBatchJob).not.toHaveBeenCalled();
+    });
+
+    it.each(['attached', 'lookup'])('文書を所有していても %s のジョブ所有者が他人なら 403', async source => {
+        const otherJob = { ...runningJob, ownerId: 'synthetic-other-owner', ownerType: 'user' as const };
+        if (source === 'attached') {
+            documentDb.data = { ...documentDb.data, jobId: 'job-1' };
+            vi.mocked(getTranscriptionJob).mockResolvedValue(otherJob);
+        } else {
+            vi.mocked(getTranscriptionJobByDocId).mockResolvedValue(otherJob);
+        }
+        const res = await statusPOST(req({ docId: 'doc-1' }));
+        expect(res.status).toBe(403);
+        expect(claimJobForFinalize).not.toHaveBeenCalled();
+        expect(getBatchJob).not.toHaveBeenCalled();
+    });
+
+    it.each(['missing', 'different-document'])('保存された jobId が %s なら docId で引き直す', async state => {
+        documentDb.data = { ...documentDb.data, jobId: 'synthetic-stale-job' };
+        vi.mocked(getTranscriptionJob).mockResolvedValue(state === 'missing' ? null : {
+            ...runningJob, id: 'synthetic-stale-job', docId: 'synthetic-other-document',
+        });
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Running' });
+        const res = await statusPOST(req({ docId: 'doc-1' }));
+        expect(await res.json()).toEqual({ status: 'running', docId: 'doc-1' });
+        expect(getTranscriptionJob).toHaveBeenCalledWith('synthetic-stale-job');
+        expect(getTranscriptionJobByDocId).toHaveBeenCalledExactlyOnceWith('doc-1');
+        expect(claimJobForFinalize).toHaveBeenCalledExactlyOnceWith('job-1');
+        expect(commitTerminalOutcome).not.toHaveBeenCalled();
+    });
+
+    it('docId の文書が存在しなければ 404', async () => {
+        documentDb.data = undefined;
+        const res = await statusPOST(req({ docId: 'synthetic-missing' }));
+        expect(res.status).toBe(404);
+        expect(getTranscriptionJobByDocId).not.toHaveBeenCalled();
+        expect(getBatchJob).not.toHaveBeenCalled();
+    });
+
+    it('docId に対応するジョブがなければ 404', async () => {
+        vi.mocked(getTranscriptionJobByDocId).mockResolvedValue(null);
+        const res = await statusPOST(req({ docId: 'doc-1' }));
+        expect(res.status).toBe(404);
+        expect(claimJobForFinalize).not.toHaveBeenCalled();
+    });
+
+    it.each([{}, null, { jobId: 'job-1', docId: 'doc-1' }, { docId: '' }, { docId: 1 }, { jobId: ' ' }])(
+        'ID の両省略・両指定・不正な形式 %j は 400', async body => {
+            const res = await statusPOST(req(body));
+            expect(res.status).toBe(400);
+            expect(resolveRequestSubject).not.toHaveBeenCalled();
+            expect(getTranscriptionJob).not.toHaveBeenCalled();
+            expect(getTranscriptionJobByDocId).not.toHaveBeenCalled();
+        },
+    );
 
     it('Azure が Running のうちは文書を確定しない', async () => {
         vi.mocked(getTranscriptionJob).mockResolvedValue(runningJob);
@@ -548,7 +664,8 @@ describe('処理中の文書の読取・復元とバッチ確定', () => {
         ['getTranscriptionsByOwnerId', () => getTranscriptionsByOwnerId('GUEST')],
     ] as const;
 
-    it.each(readers)('%s は status を読取り、復元 payload と確定処理まで保持する', async (_name, read) => {
+    it.each(readers)('%s は status と jobId を読取り、復元 payload と確定処理まで保持する', async (_name, read) => {
+        documentDb.data = { ...documentDb.data, jobId: 'job-1' };
         clientDb.getDocs.mockResolvedValue({
             forEach: (fn: (snapshot: { id: string; data: () => Record<string, unknown> }) => void) => fn({
                 id: 'doc-1',
@@ -560,21 +677,22 @@ describe('処理中の文書の読取・復元とバッチ確定', () => {
         });
         const [document] = await read();
         expect(document.status).toBe('processing');
+        expect(document.jobId).toBe('job-1');
         const source = { ...document, text: 'text' in document ? document.text : document.transcription };
         documentDb.data = undefined;
         await restoreTranscription('doc-1', source, { title: '合成の復元文書' });
         expect(clientDb.tx.set).toHaveBeenCalledWith(documentDb.ref, expect.objectContaining({
-            status: 'processing', title: '合成の復元文書', transcription: '処理中',
+            status: 'processing', jobId: 'job-1', title: '合成の復元文書', transcription: '処理中',
         }), { merge: true });
         await expect(commitTerminalOutcome({
             jobId: 'job-1', docId: 'doc-1', expectedOwnerId: 'GUEST',
             outcome: { kind: 'succeeded', transcription: '復元後の合成本文', generatedByModel: '合成モデル', speakers: 1 },
         })).resolves.toBe('committed');
-        expect(documentDb.data).toMatchObject({ status: 'completed', transcription: '復元後の合成本文' });
+        expect(documentDb.data).toMatchObject({ status: 'completed', jobId: 'job-1', transcription: '復元後の合成本文' });
         expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
     });
 
-    it.each(readers)('%s は旧文書の status を undefined として読み、復元 payload に追加しない', async (_name, read) => {
+    it.each(readers)('%s は旧文書の status と jobId を undefined として読み、復元 payload に追加しない', async (_name, read) => {
         clientDb.getDocs.mockResolvedValue({
             forEach: (fn: (snapshot: { id: string; data: () => Record<string, unknown> }) => void) => fn({
                 id: 'doc-1', data: () => ({ title: '合成の旧文書', fileName: 'synthetic.mp3', transcription: '合成本文' }),
@@ -582,10 +700,12 @@ describe('処理中の文書の読取・復元とバッチ確定', () => {
         });
         const [document] = await read();
         expect(document.status).toBeUndefined();
+        expect(document.jobId).toBeUndefined();
         const source = { ...document, text: 'text' in document ? document.text : document.transcription };
         documentDb.data = undefined;
         await restoreTranscription('doc-1', source, {});
         expect(clientDb.tx.set).toHaveBeenCalledTimes(1);
         expect(clientDb.tx.set.mock.calls[0][1]).not.toHaveProperty('status');
+        expect(clientDb.tx.set.mock.calls[0][1]).not.toHaveProperty('jobId');
     });
 });

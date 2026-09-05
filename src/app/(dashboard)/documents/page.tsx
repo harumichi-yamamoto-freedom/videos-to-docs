@@ -27,6 +27,7 @@ import {
   updateTranscription,
 } from '@/lib/firestore';
 import { useAuth } from '@/hooks/useAuth';
+import { reconcileProcessingDocument } from '@/hooks/batchTranscriptionClient';
 
 type DocumentListState = {
   status: 'loading' | 'success' | 'error';
@@ -38,6 +39,7 @@ type DocumentTitlePatch = {
 };
 
 const HISTORY_GUARD_STATE_KEY = '__documentsUnsavedChangesGuard';
+const MAX_DOCUMENT_RECONCILES_PER_OPEN = 5;
 
 type HistoryGuardRole = 'base' | 'sentinel';
 
@@ -121,6 +123,12 @@ export default function DocumentsPage() {
   const componentMountedRef = useRef(false);
   const hasUnsavedChanges = isDirty || ownerChangeDraft !== null;
   const hasUnsavedChangesRef = useRef(hasUnsavedChanges);
+  const reconciliationRef = useRef<{
+    ownerKey: string;
+    controller: AbortController;
+    checkedDocumentIds: Set<string>;
+    pending: Promise<void>;
+  } | null>(null);
 
   const isOwnerContextChanged = activeOwnerKey !== ownerKey;
 
@@ -476,6 +484,59 @@ export default function DocumentsPage() {
   useLayoutEffect(() => {
     hasUnsavedChangesRef.current = hasUnsavedChanges;
   }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (!ownerKey) return;
+    const reconciliation = {
+      ownerKey,
+      controller: new AbortController(),
+      checkedDocumentIds: new Set<string>(),
+      pending: Promise.resolve(),
+    };
+    reconciliationRef.current = reconciliation;
+    return () => {
+      reconciliation.controller.abort();
+      reconciliationRef.current = null;
+    };
+  }, [ownerKey]);
+
+  useEffect(() => {
+    const reconciliation = reconciliationRef.current;
+    if (isOwnerContextChanged || listState.status !== 'success'
+      || !reconciliation || reconciliation.ownerKey !== ownerKey) return;
+
+    const ownerId = user?.uid ?? 'GUEST';
+    const ownerType = user ? 'user' : 'guest';
+    const processingDocuments = documents.filter(document =>
+      document.id && document.status === 'processing'
+      && document.ownerId === ownerId && document.ownerType === ownerType
+      && !reconciliation.checkedDocumentIds.has(document.id),
+    );
+    const documentsToReconcile = processingDocuments.slice(
+      0, Math.max(0, MAX_DOCUMENT_RECONCILES_PER_OPEN - reconciliation.checkedDocumentIds.size),
+    );
+    // 自動確認の上限を超える文書も、詳細を選択したときは同じ直列キューで確認する。
+    const selectedProcessingDocument = processingDocuments.find(document => document.id === selectedDocumentId);
+    if (selectedProcessingDocument && !documentsToReconcile.includes(selectedProcessingDocument)) {
+      documentsToReconcile.push(selectedProcessingDocument);
+    }
+
+    for (const document of documentsToReconcile) {
+      const docId = document.id!;
+      // 一覧の定期再取得・再描画でも同じ文書は 1 回だけ。問い合わせは必ず直列にする。
+      reconciliation.checkedDocumentIds.add(docId);
+      reconciliation.pending = reconciliation.pending.then(async () => {
+        const { signal } = reconciliation.controller;
+        if (signal.aborted) return;
+        try {
+          const result = await reconcileProcessingDocument(docId, signal);
+          if (!signal.aborted && result.status !== 'running') handleRequestLatestDocument();
+        } catch {
+          // 確認失敗で一覧表示を止めない。次に一覧を開いたときに再確認できる。
+        }
+      });
+    }
+  }, [documents, handleRequestLatestDocument, isOwnerContextChanged, listState.status, ownerKey, selectedDocumentId, user]);
 
   useEffect(() => {
     componentMountedRef.current = true;

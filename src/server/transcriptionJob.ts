@@ -108,6 +108,18 @@ export async function getTranscriptionJob(jobId: string): Promise<TranscriptionJ
     return parseJob(jobId, snap.exists ? snap.data() : undefined);
 }
 
+/** jobId 未付与の既存文書も、docId から最新のジョブを引けるようにする。 */
+export async function getTranscriptionJobByDocId(docId: string): Promise<TranscriptionJob | null> {
+    // docId 単一等値・自動索引を使う。createdAt の比較は取得後に行い、複合索引を不要にする。
+    const snapshot = await db().collection(TRANSCRIPTION_JOBS_COLLECTION).where('docId', '==', docId).get();
+    let latest: TranscriptionJob | null = null;
+    for (const doc of snapshot.docs) {
+        const job = parseJob(doc.id, doc.data());
+        if (job && (!latest || job.createdAtMs > latest.createdAtMs)) latest = job;
+    }
+    return latest;
+}
+
 /** 確定権を取得する。処理中のリースが切れた場合だけ、別リクエストで再取得できる。 */
 export async function claimJobForFinalize(jobId: string): Promise<TranscriptionJob | null> {
     const firestore = db();

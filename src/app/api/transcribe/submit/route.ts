@@ -23,7 +23,7 @@ import { GenerateApiError } from '@/server/errors';
 import { getSignedReadUrl, isOwnedBySubject, parseStoragePath, statMedia } from '@/server/mediaSource';
 import { clientIpFromHeaders, enforceRateLimit } from '@/server/rateLimit';
 import { getAzureCredentials, submitBatchJob } from '@/server/azureBatchTranscribe';
-import { createProcessingDocument } from '@/server/transcriptionDocument';
+import { attachJobToDocument, createProcessingDocument } from '@/server/transcriptionDocument';
 import { createTranscriptionJob } from '@/server/transcriptionJob';
 
 export const runtime = 'nodejs';
@@ -136,6 +136,7 @@ export async function POST(request: Request): Promise<Response> {
             storagePath: body.storagePath,
             promptName: body.promptName,
         });
+        await attachJobToDocument(docId, jobId, parsed.ownerId);
 
         console.log(JSON.stringify({
             event: 'transcribe.submit',

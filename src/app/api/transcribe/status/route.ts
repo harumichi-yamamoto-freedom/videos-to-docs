@@ -15,6 +15,8 @@ import { isTerminalBatchStatus } from '@/lib/azureBatchContract';
 import { resolveRequestSubject } from '@/server/auth';
 import { GenerateApiError } from '@/server/errors';
 import { isOwnedBySubject } from '@/server/mediaSource';
+import { getAdminFirestore } from '@/server/firebaseAdmin';
+import { TRANSCRIPTIONS_COLLECTION } from '@/server/transcriptionDocument';
 import {
     getAzureCredentials,
     getBatchJob,
@@ -28,6 +30,7 @@ import {
     commitTerminalOutcome,
     FINALIZE_LEASE_MS,
     getTranscriptionJob,
+    getTranscriptionJobByDocId,
     updateTranscriptionJob,
     type TranscriptionJob,
 } from '@/server/transcriptionJob';
@@ -53,10 +56,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export function validateStatusBody(raw: unknown): TranscribeStatusRequest {
-    if (!isRecord(raw) || typeof raw.jobId !== 'string' || !raw.jobId) {
-        throw invalid('ジョブ ID がありません。ページを再読み込みしてください。');
+    if (!isRecord(raw) || (raw.jobId === undefined) === (raw.docId === undefined)) {
+        throw invalid('ジョブ ID または文書 ID のどちらかを指定してください。');
     }
-    return { jobId: raw.jobId };
+    if (raw.jobId !== undefined) {
+        if (typeof raw.jobId !== 'string' || !raw.jobId.trim()) throw invalid('ジョブ ID が不正です。');
+        return { jobId: raw.jobId };
+    }
+    if (typeof raw.docId !== 'string' || !raw.docId.trim()) throw invalid('文書 ID が不正です。');
+    return { docId: raw.docId };
 }
 
 /**
@@ -153,7 +161,22 @@ export async function POST(request: Request): Promise<Response> {
         }));
         const subject = await resolveRequestSubject(request.headers);
 
-        const job = await getTranscriptionJob(body.jobId);
+        let job: TranscriptionJob | null;
+        if (body.docId !== undefined) {
+            const snap = await getAdminFirestore().collection(TRANSCRIPTIONS_COLLECTION).doc(body.docId).get();
+            if (!snap.exists) throw new GenerateApiError('media_not_found', '文書が見つかりません。');
+            const document = snap.data();
+            if (!isOwnedBySubject(String(document?.ownerId ?? ''), subject)) {
+                throw new GenerateApiError('forbidden', 'この文書を参照する権限がありません。');
+            }
+            job = typeof document?.jobId === 'string' && document.jobId
+                ? await getTranscriptionJob(document.jobId)
+                : null;
+            // jobId 未付与の既存文書や、紐付けが残っていない文書も再確定できる。
+            if (!job || job.docId !== body.docId) job = await getTranscriptionJobByDocId(body.docId);
+        } else {
+            job = await getTranscriptionJob(body.jobId);
+        }
         if (!job) throw new GenerateApiError('media_not_found', '文字起こしジョブが見つかりません。');
         if (!isOwnedBySubject(job.ownerId, subject)) {
             throw new GenerateApiError('forbidden', 'このジョブを参照する権限がありません。');
