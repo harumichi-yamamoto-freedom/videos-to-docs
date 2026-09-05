@@ -30,6 +30,7 @@ export interface TranscriptionDocument {
     fileName: string;
     originalFileType: string; // 'video' or 'audio'
     transcription: string;
+    status?: string;
     promptName: string; // 使用したプロンプト名
     generatedByModel?: string;
     generatedByThinkingLevel?: string;
@@ -50,6 +51,7 @@ export interface Transcription {
     title: string; // 文書タイトル（デフォルトはfileName）
     fileName: string;
     text: string; // transcription のエイリアス
+    status?: string;
     promptName: string;
     originalFileType?: string;
     generatedByModel?: string;
@@ -266,6 +268,7 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
                 fileName: data.fileName,
                 originalFileType: data.originalFileType,
                 transcription: data.transcription ?? data.text ?? '',
+                status: data.status,
                 promptName: data.promptName || '不明',
                 generatedByModel: data.generatedByModel,
                 generatedByThinkingLevel: data.generatedByThinkingLevel,
@@ -347,6 +350,7 @@ export async function getTranscriptions(
                 title: data.title || data.fileName, // 既存データの後方互換性
                 fileName: data.fileName,
                 text: data.transcription ?? data.text ?? '', // transcription を text にマッピング
+                status: data.status,
                 promptName: data.promptName || '不明',
                 originalFileType: data.originalFileType,
                 generatedByModel: data.generatedByModel,
@@ -391,6 +395,7 @@ export async function getTranscriptionsByOwnerId(ownerId: string, limitCount: nu
                 title: data.title || data.fileName,
                 fileName: data.fileName,
                 text: data.transcription ?? data.text ?? '',
+                status: data.status,
                 promptName: data.promptName || '不明',
                 originalFileType: data.originalFileType,
                 generatedByModel: data.generatedByModel,
@@ -609,6 +614,7 @@ export async function restoreTranscription(
         createdBy: source.createdBy ?? sourceOwnerId,
         createdAt: source.createdAt,
         updatedAt: serverTimestamp(),
+        ...(source.status !== undefined && { status: source.status }),
         ...(source.generatedByModel !== undefined && {
             generatedByModel: source.generatedByModel,
         }),

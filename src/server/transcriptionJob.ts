@@ -10,6 +10,7 @@
  */
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { getAdminFirestore } from './firebaseAdmin';
+import { TRANSCRIPTIONS_COLLECTION, type TranscriptionDocStatus } from './transcriptionDocument';
 import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('server/transcriptionJob');
@@ -55,6 +56,10 @@ export interface CreateTranscriptionJobInput {
     storagePath: string;
     promptName: string;
 }
+
+export type TerminalOutcome =
+    | { kind: 'succeeded'; transcription: string; generatedByModel: string; speakers: number }
+    | { kind: 'failed'; reason: string };
 
 const db = (): Firestore => getAdminFirestore();
 
@@ -118,6 +123,57 @@ export async function claimJobForFinalize(jobId: string): Promise<TranscriptionJ
         tx.update(ref, { status: 'finalizing', updatedAt: FieldValue.serverTimestamp() });
         // serverTimestamp は commit 時に確定するため、戻り値には取得時刻を使う。
         return { ...job, status: 'finalizing', updatedAtMs: nowMs };
+    });
+}
+
+/** 文書とジョブを同時に終端化する。失敗時は両方の更新を取り消し、リース切れ後に再確定できる。 */
+export async function commitTerminalOutcome(params: {
+    jobId: string;
+    docId: string;
+    expectedOwnerId: string;
+    outcome: TerminalOutcome;
+}): Promise<'committed' | 'not_owner'> {
+    const { jobId, docId, expectedOwnerId, outcome } = params;
+    const firestore = db();
+    const jobRef = firestore.collection(TRANSCRIPTION_JOBS_COLLECTION).doc(jobId);
+    const docRef = firestore.collection(TRANSCRIPTIONS_COLLECTION).doc(docId);
+    return firestore.runTransaction(async tx => {
+        const jobSnap = await tx.get(jobRef);
+        if (!jobSnap.exists || jobSnap.data()?.status !== 'finalizing') return 'not_owner';
+
+        const docSnap = await tx.get(docRef);
+        const doc = docSnap.data();
+        const updatedAt = FieldValue.serverTimestamp();
+        if (!docSnap.exists) {
+            logger.warn('削除済みの文書の終端更新をスキップ', { docId });
+        } else if (doc?.ownerId !== expectedOwnerId) {
+            logger.warn('所有者が異なる文書の終端更新をスキップ', { docId });
+        } else if (doc.status !== 'processing') {
+            logger.warn('処理中でない文書の終端更新をスキップ', { docId });
+        } else {
+            tx.set(docRef, outcome.kind === 'succeeded' ? {
+                transcription: outcome.transcription,
+                generatedByModel: outcome.generatedByModel,
+                status: 'completed' satisfies TranscriptionDocStatus,
+                updatedAt,
+            } : {
+                transcription: `文字起こしに失敗しました。\n\n理由: ${outcome.reason}\n\nお手数ですが、もう一度お試しください。`,
+                status: 'failed' satisfies TranscriptionDocStatus,
+                updatedAt,
+            }, { merge: true });
+        }
+
+        // 文書が削除・変更されていてもジョブは終端化し、同じ結果の取り込みを繰り返さない。
+        tx.set(jobRef, outcome.kind === 'succeeded' ? {
+            status: 'succeeded' satisfies TranscriptionJobStatus,
+            speakers: outcome.speakers,
+            updatedAt,
+        } : {
+            status: 'failed' satisfies TranscriptionJobStatus,
+            error: outcome.reason,
+            updatedAt,
+        }, { merge: true });
+        return 'committed';
     });
 }
 

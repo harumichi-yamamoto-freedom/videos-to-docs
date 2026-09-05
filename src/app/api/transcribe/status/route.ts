@@ -2,7 +2,7 @@
  * POST /api/transcribe/status — 非同期バッチの**状態確認と確定**（設計 §3.7 改訂・2026-09-05）。
  *
  * クライアントが時々叩く。Azure が完了していれば、この短命関数が**その場で確定処理**する
- * （結果取得 → Markdown 化 → 文書更新 → ジョブ更新 → Azure ジョブ削除）。
+ * （結果取得 → Markdown 化 → 文書とジョブを原子的に更新 → Azure ジョブ削除）。
  * 🔴 webhook が無くても poll だけで完結する（Hobby でも堅牢）。確定は job.status で冪等。
  */
 import { createLogger } from '@/lib/logger';
@@ -23,9 +23,9 @@ import {
     parseBatchResult,
 } from '@/server/azureBatchTranscribe';
 import { buildTranscriptMarkdownFromBatch, describeBatchModel } from '@/server/finalizeTranscription';
-import { completeTranscriptionDocument, failTranscriptionDocument } from '@/server/transcriptionDocument';
 import {
     claimJobForFinalize,
+    commitTerminalOutcome,
     FINALIZE_LEASE_MS,
     getTranscriptionJob,
     updateTranscriptionJob,
@@ -61,8 +61,8 @@ export function validateStatusBody(raw: unknown): TranscribeStatusRequest {
 
 /**
  * Azure が終端に達していれば確定処理（呼び出し側が CAS で確定権を取得済み）。
- * 成功: 結果 → Markdown → 文書完成 → ジョブ succeeded → Azure ジョブ削除。
- * 失敗: 文書に理由を残す → ジョブ failed → Azure ジョブ削除。
+ * 成功: 結果 → Markdown → 文書とジョブを原子的に確定 → Azure ジョブ削除。
+ * 失敗: 文書に理由を残してジョブと原子的に確定。取り込み失敗では Azure の結果を残す。
  * 未完: ジョブを running に戻し、次の poll で再確認する。
  */
 async function finalizeIfTerminal(job: TranscriptionJob): Promise<TranscribeJobPublicStatusInternal> {
@@ -85,31 +85,46 @@ async function finalizeIfTerminal(job: TranscriptionJob): Promise<TranscribeJobP
     }
     if (state.status === 'Failed') {
         const reason = state.error ?? 'Azure 側で処理に失敗しました。';
-        await failTranscriptionDocument(job.docId, reason, job.ownerId);
-        await updateTranscriptionJob(job.id, { status: 'failed', error: reason });
+        const committed = await commitTerminalOutcome({
+            jobId: job.id,
+            docId: job.docId,
+            expectedOwnerId: job.ownerId,
+            outcome: { kind: 'failed', reason },
+        });
+        if (committed === 'not_owner') return getCurrentPublicStatus(job.id);
         await deleteBatchJob(job.azureSelfUrl, credentials);
         return { status: 'failed', docId: job.docId, error: reason };
     }
     // Succeeded
     let parsed: ReturnType<typeof parseBatchResult>;
     let markdown: string;
+    let generatedByModel: string;
     try {
         const result = await fetchBatchResult(job.azureSelfUrl, credentials);
         parsed = parseBatchResult(result);
         markdown = buildTranscriptMarkdownFromBatch(parsed);
-        await completeTranscriptionDocument(job.docId, markdown, describeBatchModel(parsed), job.ownerId);
+        generatedByModel = describeBatchModel(parsed);
     } catch {
         const reason = '文字起こし結果の取り込みに失敗しました。もう一度お試しください。';
         logger.warn('文字起こし結果の取り込みに失敗', { jobId: job.id });
-        try {
-            await failTranscriptionDocument(job.docId, reason, job.ownerId);
-        } finally {
-            await updateTranscriptionJob(job.id, { status: 'failed', error: reason });
-        }
+        const committed = await commitTerminalOutcome({
+            jobId: job.id,
+            docId: job.docId,
+            expectedOwnerId: job.ownerId,
+            outcome: { kind: 'failed', reason },
+        });
+        if (committed === 'not_owner') return getCurrentPublicStatus(job.id);
         // 未取り込みの結果は削除せず、Azure 側の TTL に任せる。
         return { status: 'failed', docId: job.docId, error: reason };
     }
-    await updateTranscriptionJob(job.id, { status: 'succeeded', speakers: parsed.speakers });
+    // 保存失敗は取り込み失敗として確定せず、finalizing のリース切れ後に再試行する。
+    const committed = await commitTerminalOutcome({
+        jobId: job.id,
+        docId: job.docId,
+        expectedOwnerId: job.ownerId,
+        outcome: { kind: 'succeeded', transcription: markdown, generatedByModel, speakers: parsed.speakers },
+    });
+    if (committed === 'not_owner') return getCurrentPublicStatus(job.id);
     await deleteBatchJob(job.azureSelfUrl, credentials);
     logger.info('文字起こしを確定', { jobId: job.id, speakers: parsed.speakers, chars: markdown.length });
     return { status: 'succeeded', docId: job.docId };
@@ -119,6 +134,16 @@ interface TranscribeJobPublicStatusInternal {
     status: 'running' | 'succeeded' | 'failed';
     docId: string;
     error?: string;
+}
+
+async function getCurrentPublicStatus(jobId: string): Promise<TranscribeJobPublicStatusInternal> {
+    const current = await getTranscriptionJob(jobId);
+    if (!current) throw new GenerateApiError('media_not_found', '文字起こしジョブが見つかりません。');
+    return {
+        status: current.status === 'finalizing' ? 'running' : current.status,
+        docId: current.docId,
+        ...(current.error ? { error: current.error } : {}),
+    };
 }
 
 export async function POST(request: Request): Promise<Response> {
