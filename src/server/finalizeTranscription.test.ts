@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
 import type { TranscriptAnnotation } from '@/lib/transcribeApiContract';
 import {
     LOW_CONFIDENCE_THRESHOLD,
@@ -43,6 +46,58 @@ const parsedOf = (annotations: TranscriptAnnotation[], patch: Partial<ParsedBatc
     droppedAnnotations: [],
     ...patch,
 });
+
+/** 描画側（micromark）と同じ改行規則で行に分ける。CRLF・単独 CR・LF はいずれも 1 改行。 */
+const splitLines = (markdown: string): string[] => markdown.split(/\r\n?|\n/);
+
+interface RenderedBlock {
+    type: string;
+    startLine: number;
+    endLine: number;
+    /** 段落なら先頭の子要素の種類（時刻リンクなら 'link'） */
+    firstChildType?: string;
+    /** 先頭の子要素がリンクならその URL（`#t=<秒>`） */
+    firstChildUrl?: string;
+}
+
+/**
+ * 描画側（MarkdownDocument: react-markdown + remark-gfm）と同じ構文解析（unified + remark-parse + remark-gfm）で
+ * ブロックの種類と開始行を得る。アンカーが「描画上の段落」と一致することの検算に使う。
+ */
+const renderedBlocksOf = (markdown: string): RenderedBlock[] => {
+    const root = unified().use(remarkParse).use(remarkGfm).parse(markdown);
+    return root.children.map((node) => {
+        const first = node.type === 'paragraph' ? node.children[0] : undefined;
+        return {
+            type: node.type,
+            startLine: node.position?.start.line ?? -1,
+            endLine: node.position?.end.line ?? -1,
+            firstChildType: first?.type,
+            firstChildUrl: first?.type === 'link' ? first.url : undefined,
+        };
+    });
+};
+
+/**
+ * 対応の付いた句ごとに、その行から始まる描画上の段落が存在し、先頭が元の句の開始秒の時刻リンクであることを確かめる。
+ * 描画側の構文解析に対する検算（文字列上の行番号だけでなく、実際にその行が段落として描かれること）。
+ */
+const expectAnchorsToMatchRenderedParagraphs = (parsed: ParsedBatch): void => {
+    const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed);
+    const blocks = renderedBlocksOf(markdown);
+    for (const [phraseIndex, line] of phraseLineByIndex) {
+        const annotation = parsed.annotations.find((a) => a.phraseIndex === phraseIndex);
+        expect(annotation, `phraseIndex ${phraseIndex} の句`).toBeDefined();
+        const block = blocks.find((b) => b.startLine === line);
+        expect(block, `${line} 行目から始まるブロック（phraseIndex ${phraseIndex}）`).toMatchObject({
+            type: 'paragraph',
+            firstChildType: 'link',
+        });
+        // 段落の先頭の時刻リンクは、その段落の開始秒（= 段落先頭の句の開始秒）。句は段落内のどこかにあるので開始秒以下
+        const seconds = Number(/^#t=(\d+)$/.exec(block?.firstChildUrl ?? '')?.[1]);
+        expect(seconds).toBeLessThanOrEqual(Math.floor(annotation?.startSec ?? Number.NEGATIVE_INFINITY));
+    }
+};
 
 const twoSpeakers = (): ParsedBatch => parsedOf([
     phrase(0, 'こんにちは。', 0.5, 2, 'spk:1'),
@@ -167,6 +222,142 @@ describe('buildTranscriptWithAnchors', () => {
         expect(markdown).toBe(buildTranscriptMarkdownFromBatch(parsed));
         expect(phraseLineByIndex.size).toBe(0);
         expect(warnMock).toHaveBeenCalledWith('段落アンカーの算出に失敗（本文は保存・アンカー無し）', { reason: '合成の内部エラー' });
+    });
+});
+
+/** 話者を交互にして、句ごとに 1 段落になる合成入力 */
+const alternating = (texts: string[]): ParsedBatch =>
+    parsedOf(texts.map((text, i) => phrase(i, text, i, i + 1, `spk:${(i % 2) + 1}`)));
+
+describe('buildTranscriptWithAnchors: 行の数え方と Markdown 構文（アンカーの堅牢性）', () => {
+    it('対応の付いた句は、描画側と同じ構文解析でもその行から始まる段落になる（話者交替のプレーンな段落）', () => {
+        expectAnchorsToMatchRenderedParagraphs(twoSpeakers());
+        const many = Array.from({ length: 120 }, (_, i) => phrase(i, `句${i}。`, i, i + 1, `spk:${i % 3}`));
+        expectAnchorsToMatchRenderedParagraphs(parsedOf(many, { speakers: 3 }));
+    });
+
+    it('🔴 CRLF を含む本文: 行は CRLF を 1 改行として数え、その句には付けず、後続の段落は正しい行', () => {
+        const parsed = alternating(['一段落目。', '一行目\r\n二行目', '三段落目。']);
+        const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed);
+        expect(markdown).toBe(buildTranscriptMarkdownFromBatch(parsed));
+        const lines = splitLines(markdown);
+        expect(lines).toHaveLength(6);
+        expect(lines[2]).toBe('[00:01](#t=1) **spk:2** 一行目');
+        expect(lines[3]).toBe('二行目');
+        expect(lines[4]).toBe('');
+        expect(lines[5]).toBe('[00:02](#t=2) **spk:1** 三段落目。');
+        expect([...phraseLineByIndex.entries()]).toEqual([[0, 1], [2, 6]]);
+        expectAnchorsToMatchRenderedParagraphs(parsed);
+    });
+
+    it('🔴 単独 CR を含む本文: Markdown は CR も改行として扱うので、LF だけを数えた行番号（5）ではなく 6 行目に対応する', () => {
+        const parsed = alternating(['一段落目。', '一行目\r二行目', '三段落目。']);
+        const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed);
+        expect(splitLines(markdown)[5]).toBe('[00:02](#t=2) **spk:1** 三段落目。');
+        expect([...phraseLineByIndex.entries()]).toEqual([[0, 1], [2, 6]]);
+        // 描画側の構文解析でも 3 段落目は 6 行目から始まる（5 行目からではない）
+        expect(renderedBlocksOf(markdown).map((b) => [b.type, b.startLine])).toEqual([
+            ['paragraph', 1], ['paragraph', 3], ['paragraph', 6],
+        ]);
+        expectAnchorsToMatchRenderedParagraphs(parsed);
+    });
+
+    it('🔴 本文末尾の CR は区切りの LF と合流して 1 つの CRLF になる（後続の行番号を 1 多く数えない）', () => {
+        const parsed = alternating(['一段落目。', '末尾がCR\r', '三段落目。']);
+        const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed);
+        expect(markdown).toBe('[00:00](#t=0) **spk:1** 一段落目。\n\n[00:01](#t=1) **spk:2** 末尾がCR\r\n\n[00:02](#t=2) **spk:1** 三段落目。');
+        const lines = splitLines(markdown);
+        expect(lines).toHaveLength(5);
+        expect(lines[4]).toBe('[00:02](#t=2) **spk:1** 三段落目。');
+        // CR を含む句は付けない（保守的）。後続は 6 行目ではなく 5 行目
+        expect([...phraseLineByIndex.entries()]).toEqual([[0, 1], [2, 5]]);
+        expect(renderedBlocksOf(markdown).map((b) => [b.type, b.startLine])).toEqual([
+            ['paragraph', 1], ['paragraph', 3], ['paragraph', 5],
+        ]);
+        expectAnchorsToMatchRenderedParagraphs(parsed);
+    });
+
+    it('🔴 Markdown の目印になり得る本文（フェンス・先頭の # > - 数字. | ・<）の句には付けず、後続の段落は正しい行', () => {
+        const parsed = alternating([
+            'プレーン。',
+            '```',
+            '# 見出しに見える',
+            '> 引用に見える',
+            '- 箇条書きに見える',
+            '1. 番号付きに見える',
+            '| 表に見える |',
+            'a<b',
+            '最後もプレーン。',
+        ]);
+        const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed);
+        expect(markdown).toBe(buildTranscriptMarkdownFromBatch(parsed));
+        const lines = splitLines(markdown);
+        expect(lines).toHaveLength(17);
+        expect(lines[16]).toBe('[00:08](#t=8) **spk:1** 最後もプレーン。');
+        expect([...phraseLineByIndex.entries()]).toEqual([[0, 1], [8, 17]]);
+        // 時刻リンクで始まる 1 行の段落は描画上は全て段落（省略は保守的な判定）。後続の行番号は汚れない
+        expect(renderedBlocksOf(markdown).map((b) => b.type)).toEqual(Array(9).fill('paragraph'));
+        expectAnchorsToMatchRenderedParagraphs(parsed);
+    });
+
+    it('目印にならない書き方（小数点・語中のハイフン・文中の # や *）はプレーンな段落として付ける', () => {
+        const parsed = alternating(['3.5パーセント', 'Wi-Fi の設定', 'ハッシュ #1 番', '-5度から 2*3 まで']);
+        const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed);
+        expect([...phraseLineByIndex.entries()]).toEqual([[0, 1], [1, 3], [2, 5], [3, 7]]);
+        expect(renderedBlocksOf(markdown).map((b) => b.type)).toEqual(Array(4).fill('paragraph'));
+        expectAnchorsToMatchRenderedParagraphs(parsed);
+    });
+
+    it('🔴 改行を含む段落の続きの行がコードフェンスを開き得るなら、以降の段落は全て付けない（描画上は段落でない）', () => {
+        const parsed = alternating(['一段落目。', '説明\n```', '三段落目。', '四段落目。']);
+        const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed);
+        expect(markdown).toBe(buildTranscriptMarkdownFromBatch(parsed));
+        // 文字列上は 3 段落目が 6 行目にあるが、閉じていないフェンスが文末まで飲み込むので描画上は段落でない
+        expect(splitLines(markdown)[5]).toBe('[00:02](#t=2) **spk:1** 三段落目。');
+        expect(renderedBlocksOf(markdown).map((b) => [b.type, b.startLine, b.endLine])).toEqual([
+            ['paragraph', 1, 1], ['paragraph', 3, 3], ['code', 4, 8],
+        ]);
+        expect([...phraseLineByIndex.entries()]).toEqual([[0, 1]]);
+    });
+
+    it('🔴 改行を含む段落の続きの行が HTML ブロック（<script / <!--）を開き得る場合も、以降の段落は全て付けない', () => {
+        for (const opener of ['<script>', '<!-- コメント', '  <pre>']) {
+            const parsed = alternating(['一段落目。', `説明\n${opener}`, '三段落目。']);
+            const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed);
+            expect(renderedBlocksOf(markdown).map((b) => b.type), opener).toEqual(['paragraph', 'paragraph', 'html']);
+            expect([...phraseLineByIndex.entries()], opener).toEqual([[0, 1]]);
+        }
+    });
+
+    it('続きの行が `<` で始まれば HTML ブロックの種類を見ずに保守的に以降を付けない（<div> は空行で終わるが同じ扱い）', () => {
+        const parsed = alternating(['一段落目。', '説明\n<div>', '三段落目。']);
+        const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed);
+        expect(renderedBlocksOf(markdown).map((b) => [b.type, b.startLine])).toEqual([
+            ['paragraph', 1], ['paragraph', 3], ['html', 4], ['paragraph', 6],
+        ]);
+        expect([...phraseLineByIndex.entries()]).toEqual([[0, 1]]);
+    });
+
+    it('改行を含む段落でも、続きの行の構文が空行で終わる（引用・箇条書き・見出し・区切り線）なら後続の段落は正しい行', () => {
+        for (const continuation of ['> 引用', '- 項目', '# 見出し', '---']) {
+            const parsed = alternating(['一段落目。', `説明\n${continuation}`, '三段落目。']);
+            const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed);
+            expect(splitLines(markdown)[5], continuation).toBe('[00:02](#t=2) **spk:1** 三段落目。');
+            expect([...phraseLineByIndex.entries()], continuation).toEqual([[0, 1], [2, 6]]);
+            expectAnchorsToMatchRenderedParagraphs(parsed);
+        }
+    });
+
+    it('同一話者に畳まれた段落のどれかの句に CR や目印があれば、その段落全体の句に付けない（後続は正しい行）', () => {
+        const { phraseLineByIndex } = buildTranscriptWithAnchors(parsedOf([
+            phrase(0, '先頭。', 0, 1, 'spk:1'),
+            phrase(1, '途中に\rCR。', 1, 2, 'spk:1'),
+            phrase(2, '次の話者。', 2, 3, 'spk:2'),
+            phrase(3, '```', 3, 4, 'spk:1'),
+            phrase(4, '同じ段落の続き。', 4, 5, 'spk:1'),
+            phrase(5, '最後の話者。', 5, 6, 'spk:2'),
+        ]));
+        expect([...phraseLineByIndex.entries()]).toEqual([[2, 4], [5, 8]]);
     });
 });
 
