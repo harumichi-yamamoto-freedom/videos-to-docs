@@ -9,11 +9,13 @@ import React, {
     useState,
 } from 'react';
 import {
+    AlertCircle,
     Check,
     Clock,
     Download,
     Edit2,
     FileText,
+    Hourglass,
     RefreshCw,
     Search,
     Trash2,
@@ -27,6 +29,7 @@ import {
     updateTranscription,
 } from '@/lib/firestore';
 import { useAuth } from '@/hooks/useAuth';
+import { describeProgressStage } from '@/hooks/batchTranscriptionClient';
 import { createLogger } from '@/lib/logger';
 
 const documentListLogger = createLogger('DocumentListSidebar');
@@ -119,10 +122,22 @@ const getLegacyContentKey = (transcription: Transcription): string => JSON.strin
     getTimestampKey(transcription.createdAt as ComparableTimestamp | undefined),
 ]);
 
-const hasSameDocumentVersion = (
+// 進捗投影（processingProgress）と status は、本文・updatedAt・並び順を変えずに更新される（仕様 §A3）。
+// 版印（updatedAt）だけで同一視すると「開始待ち→取り込み中」の前進が画面に出ないので、同一版判定に加える。
+const getProcessingStateKey = (transcription: Transcription): string => JSON.stringify([
+    transcription.status ?? null,
+    transcription.processingProgress?.stage ?? null,
+    transcription.processingProgress?.stageObservedAtMs ?? null,
+    transcription.processingProgress?.jobCreatedAtMs ?? null,
+    transcription.processingProgress?.audioSec ?? null,
+]);
+
+export const hasSameDocumentVersion = (
     currentDocument: Transcription,
     nextDocument: Transcription,
 ): boolean => {
+    if (getProcessingStateKey(currentDocument) !== getProcessingStateKey(nextDocument)) return false;
+
     const currentUpdatedAtKey = getTimestampKey(
         currentDocument.updatedAt as ComparableTimestamp | undefined,
     );
@@ -137,6 +152,25 @@ const hasSameDocumentVersion = (
     return getLegacyContentKey(currentDocument) === getLegacyContentKey(nextDocument)
         // ハッシュ衝突で変更を見逃さないよう、指紋一致時は本文も厳密比較する。
         && currentDocument.text === nextDocument.text;
+};
+
+/**
+ * 一覧行の段階バッジ文言（仕様 §A1・A4）。一覧は保存された投影しか持たないので、
+ * 「最終確認時」の情報だと分かる表現にし、投影の無い旧 processing 文書は「処理中・詳細を確認」。
+ * 一覧の全行を継続 status 照会する構成にはしない（詳細を開いた文書だけが継続確認される）。
+ */
+export const describeProcessingBadge = (
+    transcription: Pick<Transcription, 'status' | 'processingProgress'>,
+    formatObservedAt: (ms: number) => string,
+): string | null => {
+    if (transcription.status === 'failed') return '文字起こしに失敗しました';
+    if (transcription.status !== 'processing') return null;
+    const progress = transcription.processingProgress;
+    if (!progress) return '処理中・詳細を確認';
+    const label = describeProgressStage(progress.stage);
+    return progress.stageObservedAtMs !== undefined
+        ? `最終確認時: ${label}（${formatObservedAt(progress.stageObservedAtMs)}）`
+        : `最終確認時: ${label}`;
 };
 
 const preserveUnchangedDocumentReferences = (
@@ -874,6 +908,11 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                             const isDeleting = deletingDocumentId === documentId;
                             const isSaving = savingDocumentId === documentId;
                             const hasActiveOperation = savingDocumentId !== null || deletingDocumentId !== null;
+                            const processingBadge = describeProcessingBadge(
+                                transcription,
+                                (ms) => formatDate(new Date(ms)),
+                            );
+                            const isFailedDocument = transcription.status === 'failed';
 
                             return (
                                 <article
@@ -940,7 +979,9 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                                                 onClick={() => onDocumentClick(transcription)}
                                                 className="w-full min-h-32 rounded-xl p-4 pr-40 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2"
                                                 aria-current={isSelected ? 'true' : undefined}
-                                                aria-label={`「${transcription.title}」を選択`}
+                                                aria-label={processingBadge
+                                                    ? `「${transcription.title}」を選択（${processingBadge}）`
+                                                    : `「${transcription.title}」を選択`}
                                             >
                                                 <h3 className="text-sm font-semibold text-gray-900 truncate group-hover:text-purple-700 transition-colors">
                                                     {transcription.title}
@@ -951,6 +992,21 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                                                 <p className="text-xs text-purple-600 mt-1 font-medium truncate">
                                                     {transcription.promptName}
                                                 </p>
+                                                {processingBadge && (
+                                                    // 段階はテキストとアイコンで伝える。色だけに依存せず、スピナーも回さない（一覧は静的な「最終確認時」）
+                                                    <span
+                                                        data-processing-badge={isFailedDocument ? 'failed' : 'processing'}
+                                                        className={`mt-2 inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${isFailedDocument
+                                                            ? 'border-red-200 bg-red-50 text-red-800'
+                                                            : 'border-amber-200 bg-amber-50 text-amber-900'
+                                                            }`}
+                                                    >
+                                                        {isFailedDocument
+                                                            ? <AlertCircle className="h-3 w-3 shrink-0" aria-hidden="true" />
+                                                            : <Hourglass className="h-3 w-3 shrink-0" aria-hidden="true" />}
+                                                        <span className="truncate">{processingBadge}</span>
+                                                    </span>
+                                                )}
                                                 <span className="flex items-center space-x-2 mt-2 text-xs text-gray-500">
                                                     <Clock className="w-3 h-3" />
                                                     <span>{formatDate(transcription.createdAt)}</span>

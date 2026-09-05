@@ -10,13 +10,14 @@ import type {
     TranscribeStatusRequest,
     TranscribeStatusResponse,
     TranscribeBatchErrorBody,
+    TranscribeProgressStage,
 } from '@/lib/transcribeBatchContract';
-import { isTerminalBatchStatus } from '@/lib/azureBatchContract';
+import { isTerminalBatchStatus, type AzureBatchStatus } from '@/lib/azureBatchContract';
 import { resolveRequestSubject } from '@/server/auth';
 import { GenerateApiError } from '@/server/errors';
 import { isOwnedBySubject } from '@/server/mediaSource';
 import { getAdminFirestore } from '@/server/firebaseAdmin';
-import { TRANSCRIPTIONS_COLLECTION } from '@/server/transcriptionDocument';
+import { TRANSCRIPTIONS_COLLECTION, writeProcessingProgress } from '@/server/transcriptionDocument';
 import {
     getAzureCredentials,
     getBatchJob,
@@ -31,6 +32,7 @@ import {
     FINALIZE_LEASE_MS,
     getTranscriptionJob,
     getTranscriptionJobByDocId,
+    recordAzureObservation,
     updateTranscriptionJob,
     type TranscriptionJob,
 } from '@/server/transcriptionJob';
@@ -47,8 +49,53 @@ const jsonResponse = (body: unknown, status: number): Response =>
         headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
     });
 
-const errorResponse = (error: GenerateApiError): Response =>
-    jsonResponse({ error: error.code, message: error.message } satisfies TranscribeBatchErrorBody, error.status);
+const isPositiveFinite = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+const isAzureStatus = (value: unknown): value is AzureBatchStatus =>
+    value === 'NotStarted' || value === 'Running' || value === 'Succeeded' || value === 'Failed';
+
+/** finalizing は確定権であり、表示段階は最後の有効な Azure 観測からのみ導出する。 */
+const observedStage = (job: TranscriptionJob): Exclude<TranscribeProgressStage, 'completed' | 'failed'> => {
+    switch (job.azureStatus) {
+        case 'NotStarted': return 'queued';
+        case 'Running': return 'transcribing';
+        case 'Succeeded': return 'importing';
+        default: return 'checking';
+    }
+};
+
+const progressMetadata = (job: TranscriptionJob) => ({
+    ...(isPositiveFinite(job.azureStatusCheckedAtMs) && { azureStatusCheckedAtMs: job.azureStatusCheckedAtMs }),
+    ...(isPositiveFinite(job.createdAtMs) && { createdAtMs: job.createdAtMs }),
+    ...(isPositiveFinite(job.audioSec) && { audioSec: job.audioSec }),
+});
+
+const statusResponse = (job: TranscriptionJob, stage = observedStage(job)): Response => {
+    const response: TranscribeStatusResponse = {
+        status: job.status === 'finalizing' ? 'running' : job.status,
+        docId: job.docId,
+        ...(job.error ? { error: job.error } : {}),
+        stage: job.status === 'succeeded' ? 'completed' : job.status === 'failed' ? 'failed' : stage,
+        ...progressMetadata(job),
+        serverNowMs: Date.now(),
+    };
+    return jsonResponse(response, 200);
+};
+
+/** 確認失敗でも HTTP エラーを維持し、最後の有効観測の時刻を進めず返す。 */
+const errorResponse = (error: GenerateApiError, job?: TranscriptionJob): Response =>
+    jsonResponse({
+        error: error.code,
+        message: error.message,
+        ...(job && { docId: job.docId, stage: 'checking', ...progressMetadata(job) }),
+        serverNowMs: Date.now(),
+    } satisfies TranscribeBatchErrorBody & Partial<TranscribeStatusResponse>, error.status);
+
+const statusCheckError = (error: unknown): GenerateApiError => error instanceof GenerateApiError
+    ? error
+    : new GenerateApiError('upstream_error',
+        '文字起こしの状態確認でエラーが発生しました。しばらくしてから再試行してください。');
 
 const invalid = (message: string): GenerateApiError => new GenerateApiError('invalid_request', message);
 
@@ -73,23 +120,45 @@ export function validateStatusBody(raw: unknown): TranscribeStatusRequest {
  * 失敗: 文書に理由を残してジョブと原子的に確定。取り込み失敗では Azure の結果を残す。
  * 未完: ジョブを running に戻し、次の poll で再確認する。
  */
-async function finalizeIfTerminal(job: TranscriptionJob): Promise<TranscribeJobPublicStatusInternal> {
+async function finalizeIfTerminal(job: TranscriptionJob): Promise<Response> {
     const credentials = getAzureCredentials();
     if (!credentials) {
         // 設定が消えた等。設定を直せば次の poll で進むよう、確定権を解放する。
         await updateTranscriptionJob(job.id, { status: 'running' });
-        return { status: 'running', docId: job.docId };
+        return statusResponse({ ...job, status: 'running' }, 'checking');
     }
     let state: Awaited<ReturnType<typeof getBatchJob>>;
     try {
         state = await getBatchJob(job.azureSelfUrl, credentials);
+        if (!isAzureStatus(state.status)) {
+            throw new GenerateApiError('upstream_error', '文字起こしの状態を確認できませんでした。しばらくしてから再試行してください。');
+        }
     } catch (error) {
         await updateTranscriptionJob(job.id, { status: 'running' });
-        throw error;
+        const failure = statusCheckError(error);
+        logger.warn('Azure の状態確認に失敗', { jobId: job.id, code: failure.code });
+        return errorResponse(failure, job);
     }
+    const observedJob = await recordAzureObservation(job.id, state.status);
+    if (!observedJob) throw new GenerateApiError('media_not_found', '文字起こしジョブが見つかりません。');
+    job = observedJob;
+    // 遅れた照会中に別リクエストが終端化した場合は、現在の終端を優先する。
+    if (job.status === 'succeeded' || job.status === 'failed') return statusResponse(job);
+    if (job.azureStatus !== state.status) {
+        // 保存済み Azure 終端から逆戻りする観測は採用せず、鮮度も更新しない。
+        await updateTranscriptionJob(job.id, { status: 'running' });
+        return errorResponse(new GenerateApiError('upstream_error',
+            '文字起こしの状態を確認できませんでした。しばらくしてから再試行してください。'), job);
+    }
+    await writeProcessingProgress(job.docId, job.ownerId, {
+        jobId: job.id,
+        stage: observedStage(job),
+        ...(isPositiveFinite(job.createdAtMs) && { jobCreatedAtMs: job.createdAtMs }),
+        ...(isPositiveFinite(job.audioSec) && { audioSec: job.audioSec }),
+    });
     if (!isTerminalBatchStatus(state.status)) {
         await updateTranscriptionJob(job.id, { status: 'running' });
-        return { status: 'running', docId: job.docId };
+        return statusResponse({ ...job, status: 'running' });
     }
     if (state.status === 'Failed') {
         const reason = state.error ?? 'Azure 側で処理に失敗しました。';
@@ -101,7 +170,7 @@ async function finalizeIfTerminal(job: TranscriptionJob): Promise<TranscribeJobP
         });
         if (committed === 'not_owner') return getCurrentPublicStatus(job.id);
         await deleteBatchJob(job.azureSelfUrl, credentials);
-        return { status: 'failed', docId: job.docId, error: reason };
+        return statusResponse({ ...job, status: 'failed', error: reason });
     }
     // Succeeded
     let parsed: ReturnType<typeof parseBatchResult>;
@@ -123,7 +192,7 @@ async function finalizeIfTerminal(job: TranscriptionJob): Promise<TranscribeJobP
         });
         if (committed === 'not_owner') return getCurrentPublicStatus(job.id);
         // 未取り込みの結果は削除せず、Azure 側の TTL に任せる。
-        return { status: 'failed', docId: job.docId, error: reason };
+        return statusResponse({ ...job, status: 'failed', error: reason });
     }
     // 保存失敗は取り込み失敗として確定せず、finalizing のリース切れ後に再試行する。
     const committed = await commitTerminalOutcome({
@@ -135,23 +204,13 @@ async function finalizeIfTerminal(job: TranscriptionJob): Promise<TranscribeJobP
     if (committed === 'not_owner') return getCurrentPublicStatus(job.id);
     await deleteBatchJob(job.azureSelfUrl, credentials);
     logger.info('文字起こしを確定', { jobId: job.id, speakers: parsed.speakers, chars: markdown.length });
-    return { status: 'succeeded', docId: job.docId };
+    return statusResponse({ ...job, status: 'succeeded' });
 }
 
-interface TranscribeJobPublicStatusInternal {
-    status: 'running' | 'succeeded' | 'failed';
-    docId: string;
-    error?: string;
-}
-
-async function getCurrentPublicStatus(jobId: string): Promise<TranscribeJobPublicStatusInternal> {
+async function getCurrentPublicStatus(jobId: string): Promise<Response> {
     const current = await getTranscriptionJob(jobId);
     if (!current) throw new GenerateApiError('media_not_found', '文字起こしジョブが見つかりません。');
-    return {
-        status: current.status === 'finalizing' ? 'running' : current.status,
-        docId: current.docId,
-        ...(current.error ? { error: current.error } : {}),
-    };
+    return statusResponse(current);
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -186,33 +245,15 @@ export async function POST(request: Request): Promise<Response> {
         const expiredFinalize = job.status === 'finalizing'
             && Date.now() - job.updatedAtMs > FINALIZE_LEASE_MS;
         if (job.status !== 'running' && !expiredFinalize) {
-            const response: TranscribeStatusResponse = {
-                status: job.status === 'finalizing' ? 'running' : job.status,
-                docId: job.docId,
-                ...(job.error ? { error: job.error } : {}),
-            };
-            return jsonResponse(response, 200);
+            return statusResponse(job);
         }
 
         const claimedJob = await claimJobForFinalize(job.id);
         if (!claimedJob) {
-            const current = await getTranscriptionJob(job.id);
-            if (!current) throw new GenerateApiError('media_not_found', '文字起こしジョブが見つかりません。');
-            const response: TranscribeStatusResponse = {
-                status: current.status === 'finalizing' ? 'running' : current.status,
-                docId: current.docId,
-                ...(current.error ? { error: current.error } : {}),
-            };
-            return jsonResponse(response, 200);
+            return await getCurrentPublicStatus(job.id);
         }
 
-        const outcome = await finalizeIfTerminal(claimedJob);
-        const response: TranscribeStatusResponse = {
-            status: outcome.status,
-            docId: outcome.docId,
-            ...(outcome.error ? { error: outcome.error } : {}),
-        };
-        return jsonResponse(response, 200);
+        return await finalizeIfTerminal(claimedJob);
     } catch (error) {
         if (error instanceof GenerateApiError) {
             logger.warn('status を拒否/失敗', { code: error.code, status: error.status });

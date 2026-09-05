@@ -17,12 +17,38 @@ import {
     serverTimestamp,
 } from 'firebase/firestore';
 import { getCurrentUserId, getOwnerType } from './auth';
+import type { DocumentProcessingProgress } from './transcribeBatchContract';
 import { logAudit } from './auditLog';
 import { validateDocumentSize } from './adminSettings';
 import { updateUserStats } from './userManagement';
 import { createLogger } from './logger';
 
 const firestoreLogger = createLogger('firestore');
+
+
+/**
+ * 文書に保存された進捗投影を読取境界で正規化する（設計 §A3）。
+ * 保存側は stageObservedAt を Firestore Timestamp で書くので、ここで ms へ直す。
+ * 不正・欠損は undefined を返し、UI 側は投影なしとして扱う。
+ */
+const normalizeProcessingProgress = (raw: unknown): DocumentProcessingProgress | undefined => {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const r = raw as Record<string, unknown>;
+    const stage = r.stage;
+    const validStages = ['checking', 'queued', 'transcribing', 'importing', 'completed', 'failed'];
+    if (typeof stage !== 'string' || !validStages.includes(stage)) return undefined;
+    const observed = r.stageObservedAt;
+    const stageObservedAtMs = observed instanceof Timestamp ? observed.toMillis()
+        : typeof (observed as { toMillis?: () => number })?.toMillis === 'function'
+            ? (observed as { toMillis: () => number }).toMillis()
+            : typeof observed === 'number' ? observed : undefined;
+    return {
+        stage: stage as DocumentProcessingProgress['stage'],
+        ...(typeof stageObservedAtMs === 'number' && { stageObservedAtMs }),
+        ...(typeof r.jobCreatedAtMs === 'number' && { jobCreatedAtMs: r.jobCreatedAtMs }),
+        ...(typeof r.audioSec === 'number' && { audioSec: r.audioSec }),
+    };
+};
 
 export interface TranscriptionDocument {
     id?: string;
@@ -32,6 +58,8 @@ export interface TranscriptionDocument {
     transcription: string;
     status?: string;
     jobId?: string;
+    /** 表示専用の進捗投影（設計 §A3・processing 文書のみ・サーバが書く） */
+    processingProgress?: DocumentProcessingProgress;
     promptName: string; // 使用したプロンプト名
     generatedByModel?: string;
     generatedByThinkingLevel?: string;
@@ -54,6 +82,7 @@ export interface Transcription {
     text: string; // transcription のエイリアス
     status?: string;
     jobId?: string;
+    processingProgress?: DocumentProcessingProgress;
     promptName: string;
     originalFileType?: string;
     generatedByModel?: string;
@@ -272,6 +301,7 @@ export async function getTranscriptionDocuments(limitCount: number = 20): Promis
                 transcription: data.transcription ?? data.text ?? '',
                 status: data.status,
                 jobId: data.jobId,
+                processingProgress: normalizeProcessingProgress(data.processingProgress),
                 promptName: data.promptName || '不明',
                 generatedByModel: data.generatedByModel,
                 generatedByThinkingLevel: data.generatedByThinkingLevel,
@@ -355,6 +385,7 @@ export async function getTranscriptions(
                 text: data.transcription ?? data.text ?? '', // transcription を text にマッピング
                 status: data.status,
                 jobId: data.jobId,
+                processingProgress: normalizeProcessingProgress(data.processingProgress),
                 promptName: data.promptName || '不明',
                 originalFileType: data.originalFileType,
                 generatedByModel: data.generatedByModel,
@@ -401,6 +432,7 @@ export async function getTranscriptionsByOwnerId(ownerId: string, limitCount: nu
                 text: data.transcription ?? data.text ?? '',
                 status: data.status,
                 jobId: data.jobId,
+                processingProgress: normalizeProcessingProgress(data.processingProgress),
                 promptName: data.promptName || '不明',
                 originalFileType: data.originalFileType,
                 generatedByModel: data.generatedByModel,

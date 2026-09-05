@@ -47,8 +47,10 @@ vi.mock('@/lib/logger', () => ({
 
 import {
     DOCUMENT_LIST_POLL_INTERVAL_MS,
+    describeProcessingBadge,
     DocumentListSidebar,
     DocumentListStatus,
+    hasSameDocumentVersion,
 } from './DocumentListSidebar';
 import type { Transcription } from '@/lib/firestore';
 
@@ -272,6 +274,57 @@ function renderSidebar(props: Partial<React.ComponentProps<typeof DocumentListSi
     );
 }
 
+describe('DocumentListSidebar 進捗投影と同一版判定（仕様 §A3）', () => {
+    const processingDocument: Transcription = {
+        ...documentFixture,
+        status: 'processing',
+        processingProgress: { stage: 'queued', stageObservedAtMs: 1_000, jobCreatedAtMs: 500 },
+    };
+
+    it('🔴 updatedAt が同じでも processingProgress が進めば別版として扱い、参照を再利用しない', () => {
+        const advanced: Transcription = {
+            ...processingDocument,
+            processingProgress: { stage: 'importing', stageObservedAtMs: 2_000, jobCreatedAtMs: 500 },
+        };
+        expect(hasSameDocumentVersion(processingDocument, advanced)).toBe(false);
+        // 投影も版印も同じなら再利用する（定期取得で再描画を増やさない）
+        expect(hasSameDocumentVersion(processingDocument, { ...processingDocument })).toBe(true);
+    });
+
+    it('投影が消えて status が completed になれば、版印の有無に関わらず置き換える', () => {
+        const completed: Transcription = {
+            ...documentFixture,
+            status: 'completed',
+            updatedAt: processingDocument.updatedAt,
+        };
+        expect(hasSameDocumentVersion(processingDocument, completed)).toBe(false);
+    });
+
+    it('updatedAt の無い legacy 文書でも投影の変化で置き換える', () => {
+        const legacy: Transcription = { ...processingDocument, updatedAt: undefined };
+        const legacyAdvanced: Transcription = {
+            ...legacy,
+            processingProgress: { stage: 'transcribing', stageObservedAtMs: 3_000 },
+        };
+        expect(hasSameDocumentVersion(legacy, { ...legacy })).toBe(true);
+        expect(hasSameDocumentVersion(legacy, legacyAdvanced)).toBe(false);
+    });
+
+    it('describeProcessingBadge: 投影あり→最終確認時＋段階＋時刻、投影なし→処理中・詳細を確認、failed→失敗、他→null', () => {
+        const at = (ms: number) => `T${ms}`;
+        expect(describeProcessingBadge(
+            { status: 'processing', processingProgress: { stage: 'transcribing', stageObservedAtMs: 123 } }, at,
+        )).toBe('最終確認時: 文字起こし中（T123）');
+        expect(describeProcessingBadge(
+            { status: 'processing', processingProgress: { stage: 'importing' } }, at,
+        )).toBe('最終確認時: 結果を文書に取り込んでいます');
+        expect(describeProcessingBadge({ status: 'processing' }, at)).toBe('処理中・詳細を確認');
+        expect(describeProcessingBadge({ status: 'failed' }, at)).toBe('文字起こしに失敗しました');
+        expect(describeProcessingBadge({ status: 'completed' }, at)).toBeNull();
+        expect(describeProcessingBadge({}, at)).toBeNull();
+    });
+});
+
 describe('DocumentListSidebar', () => {
     let layoutEffects: LayoutEffect[];
 
@@ -326,6 +379,45 @@ describe('DocumentListSidebar', () => {
         expect(markup).toContain('文書一覧を取得できませんでした');
         expect(markup).not.toContain('文書がまだありません');
         expect(markup).not.toContain('全0件');
+    });
+
+    it('processing 行には「最終確認時」と分かる段階バッジを描き、選択ボタンの aria-label にも含める', () => {
+        configureHookState({
+            subjectKey: userSubjectKey,
+            status: 'success',
+            documents: [{
+                ...documentFixture,
+                status: 'processing',
+                processingProgress: { stage: 'queued', stageObservedAtMs: Date.UTC(2026, 8, 5, 3, 4, 0) },
+            }],
+        });
+
+        const markup = renderSidebar();
+
+        expect(markup).toContain('data-processing-badge="processing"');
+        expect(markup).toContain('最終確認時: 開始待ち（');
+        expect(markup).toMatch(/aria-label="「文書A」を選択（最終確認時: 開始待ち（[^）]*））"/);
+        // 一覧は静的な「最終確認時」。スピナーは回さない
+        expect(markup).not.toContain('animate-spin');
+    });
+
+    it('投影の無い旧 processing 文書は「処理中・詳細を確認」、failed は失敗バッジ、完成文書はバッジ無し', () => {
+        configureHookState({
+            subjectKey: userSubjectKey,
+            status: 'success',
+            documents: [
+                { ...documentFixture, id: 'legacy-processing', title: '旧処理中', status: 'processing' },
+                { ...documentFixture, id: 'failed-doc', title: '失敗文書', status: 'failed' },
+                { ...documentFixture, id: 'done-doc', title: '完成文書', status: 'completed' },
+            ],
+        });
+
+        const markup = renderSidebar();
+
+        expect(markup).toContain('aria-label="「旧処理中」を選択（処理中・詳細を確認）"');
+        expect(markup).toContain('data-processing-badge="failed"');
+        expect(markup).toContain('aria-label="「失敗文書」を選択（文字起こしに失敗しました）"');
+        expect(markup).toContain('aria-label="「完成文書」を選択"');
     });
 
     it('成功後だけ件数を表示し、主操作と副操作の入力方式別UI契約を保つ', () => {

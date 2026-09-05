@@ -12,6 +12,7 @@ import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { getAdminFirestore } from './firebaseAdmin';
 import { TRANSCRIPTIONS_COLLECTION, type TranscriptionDocStatus } from './transcriptionDocument';
 import { createLogger } from '@/lib/logger';
+import type { AzureBatchStatus } from '@/lib/azureBatchContract';
 
 const logger = createLogger('server/transcriptionJob');
 
@@ -45,6 +46,10 @@ export interface TranscriptionJob {
     speakers?: number;
     createdAtMs: number;
     updatedAtMs: number;
+    /** 最後に取得した有効な Azure 状態。内部の finalizing とは区別する。 */
+    azureStatus?: AzureBatchStatus;
+    /** 有効観測のサーバ時刻。updatedAt のリース時計には使わない。 */
+    azureStatusCheckedAtMs?: number;
 }
 
 export interface CreateTranscriptionJobInput {
@@ -64,15 +69,23 @@ export type TerminalOutcome =
 const db = (): Firestore => getAdminFirestore();
 
 const toMs = (v: unknown): number => {
-    if (v && typeof v === 'object' && typeof (v as { toMillis?: () => number }).toMillis === 'function') {
-        return (v as { toMillis: () => number }).toMillis();
+    try {
+        const ms = v && typeof v === 'object' && typeof (v as { toMillis?: () => number }).toMillis === 'function'
+            ? (v as { toMillis: () => number }).toMillis()
+            : v;
+        return typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : 0;
+    } catch {
+        return 0;
     }
-    return typeof v === 'number' ? v : 0;
 };
+
+const isAzureBatchStatus = (value: unknown): value is AzureBatchStatus =>
+    value === 'NotStarted' || value === 'Running' || value === 'Succeeded' || value === 'Failed';
 
 const parseJob = (id: string, data: FirebaseFirestore.DocumentData | undefined): TranscriptionJob | null => {
     if (!data) return null;
     if (typeof data.azureSelfUrl !== 'string' || typeof data.docId !== 'string') return null;
+    const azureStatusCheckedAtMs = toMs(data.azureStatusCheckedAt);
     return {
         id,
         ownerId: String(data.ownerId ?? ''),
@@ -87,6 +100,8 @@ const parseJob = (id: string, data: FirebaseFirestore.DocumentData | undefined):
         ...(typeof data.speakers === 'number' && { speakers: data.speakers }),
         createdAtMs: toMs(data.createdAt),
         updatedAtMs: toMs(data.updatedAt),
+        ...(isAzureBatchStatus(data.azureStatus) && { azureStatus: data.azureStatus }),
+        ...(azureStatusCheckedAtMs > 0 && { azureStatusCheckedAtMs }),
     };
 };
 
@@ -106,6 +121,25 @@ export async function createTranscriptionJob(input: CreateTranscriptionJobInput)
 export async function getTranscriptionJob(jobId: string): Promise<TranscriptionJob | null> {
     const snap = await db().collection(TRANSCRIPTION_JOBS_COLLECTION).doc(jobId).get();
     return parseJob(jobId, snap.exists ? snap.data() : undefined);
+}
+
+/**
+ * 有効な Azure 観測だけを保存する。進捗確認で finalizing のリース時計 updatedAt を延ばさない。
+ * 遅延したリクエストが終端状態や既に得た Azure 終端観測を巻き戻すことも防ぐ。
+ */
+export async function recordAzureObservation(jobId: string, azureStatus: AzureBatchStatus): Promise<TranscriptionJob | null> {
+    const firestore = db();
+    const ref = firestore.collection(TRANSCRIPTION_JOBS_COLLECTION).doc(jobId);
+    return firestore.runTransaction(async tx => {
+        const snap = await tx.get(ref);
+        const job = parseJob(jobId, snap.exists ? snap.data() : undefined);
+        if (!job || job.status === 'succeeded' || job.status === 'failed' || !isAzureBatchStatus(azureStatus)) return job;
+        if ((job.azureStatus === 'Succeeded' || job.azureStatus === 'Failed') && job.azureStatus !== azureStatus) return job;
+
+        tx.set(ref, { azureStatus, azureStatusCheckedAt: FieldValue.serverTimestamp() }, { merge: true });
+        // serverTimestamp は commit 時に確定するため、応答にはサーバでの観測時刻を使う。
+        return { ...job, azureStatus, azureStatusCheckedAtMs: Date.now() };
+    });
 }
 
 /** jobId 未付与の既存文書も、docId から最新のジョブを引けるようにする。 */
@@ -162,15 +196,19 @@ export async function commitTerminalOutcome(params: {
             logger.warn('所有者が異なる文書の終端更新をスキップ', { docId });
         } else if (doc.status !== 'processing') {
             logger.warn('処理中でない文書の終端更新をスキップ', { docId });
+        } else if (doc.jobId !== undefined && doc.jobId !== jobId) {
+            logger.warn('ジョブが異なる文書の終端更新をスキップ', { docId });
         } else {
             tx.set(docRef, outcome.kind === 'succeeded' ? {
                 transcription: outcome.transcription,
                 generatedByModel: outcome.generatedByModel,
                 status: 'completed' satisfies TranscriptionDocStatus,
+                processingProgress: FieldValue.delete(),
                 updatedAt,
             } : {
                 transcription: `文字起こしに失敗しました。\n\n理由: ${outcome.reason}\n\nお手数ですが、もう一度お試しください。`,
                 status: 'failed' satisfies TranscriptionDocStatus,
+                processingProgress: FieldValue.delete(),
                 updatedAt,
             }, { merge: true });
         }
@@ -193,7 +231,19 @@ export async function updateTranscriptionJob(
     jobId: string,
     patch: Partial<Pick<TranscriptionJob, 'status' | 'error' | 'speakers'>>,
 ): Promise<void> {
-    await db().collection(TRANSCRIPTION_JOBS_COLLECTION).doc(jobId).set(
+    const firestore = db();
+    const ref = firestore.collection(TRANSCRIPTION_JOBS_COLLECTION).doc(jobId);
+    if (patch.status === 'running' || patch.status === 'finalizing') {
+        // 遅れて届いた確定権の解放で、削除済み・終端化済みのジョブを復活させない。
+        await firestore.runTransaction(async tx => {
+            const snap = await tx.get(ref);
+            const status = snap.data()?.status;
+            if (!snap.exists || status === 'succeeded' || status === 'failed') return;
+            tx.set(ref, { ...patch, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        });
+        return;
+    }
+    await ref.set(
         { ...patch, updatedAt: FieldValue.serverTimestamp() },
         { merge: true },
     );

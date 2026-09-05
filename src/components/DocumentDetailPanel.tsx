@@ -7,12 +7,16 @@ import React, {
     useState,
 } from 'react';
 import {
+    AlertCircle,
     ArrowLeft,
     Check,
+    CheckCircle2,
     Eye,
     FileText,
     FileTextIcon,
+    Loader2,
     Printer,
+    RefreshCw,
 } from 'lucide-react';
 import type { Timestamp } from 'firebase/firestore';
 import {
@@ -21,6 +25,16 @@ import {
     Transcription,
     TranscriptionConflictError,
 } from '@/lib/firestore';
+import type { TranscribeProgressStage } from '@/lib/transcribeBatchContract';
+import {
+    describeElapsed,
+    describeProgressStage,
+    estimateServerNowMs,
+    formatClockTime,
+    resolveProgressObservation,
+    type DocumentStatusWatchSnapshot,
+    type ProgressObservation,
+} from '@/hooks/batchTranscriptionClient';
 import { createLogger } from '@/lib/logger';
 import { MarkdownDocument } from '@/components/MarkdownDocument';
 import { TranscriptAudioBar, TranscriptAwareMarkdown } from '@/components/TranscriptDocumentView';
@@ -94,6 +108,13 @@ export interface DocumentDetailPanelProps {
     /** 保存競合時の「最新の内容を読み込む」導線。親が一覧の再取得を引き受ける。 */
     onRequestLatestDocument?: () => void;
     onBackToList?: () => void;
+    /**
+     * 選択中の processing 文書の継続確認スナップショット（親が保持・仕様 §A2 手順3）。
+     * processing 以外の文書では無視する。無ければ保存された投影だけで状態カードを描く。
+     */
+    processingWatch?: DocumentStatusWatchSnapshot | null;
+    /** 状態カードの「状態を確認」。実行中の重複送信は継続確認側が抑える。 */
+    onCheckProcessingStatus?: () => void;
 }
 
 type SaveErrorState = {
@@ -111,6 +132,8 @@ export function DocumentDetailPanelView({
     onDraftDiscarded,
     onRequestLatestDocument,
     onBackToList,
+    processingWatch = null,
+    onCheckProcessingStatus,
 }: DocumentDetailPanelProps, ref?: React.ForwardedRef<DocumentDetailPanelHandle>) {
     const [isViewMode, setIsViewMode] = useState(true);
     const [editedTitle, setEditedTitle] = useState(document?.title ?? '');
@@ -537,12 +560,17 @@ export function DocumentDetailPanelView({
     const autoFontLabel =
         PDF_FONTS.find(font => font.id === resolvePdfFontId('auto', pdfTheme))
             ?.label.split('（')[0] ?? '';
-    const canPrintPdf = isViewMode && !saving && !isPreparing;
-    const pdfButtonTitle = saving
-        ? '保存完了後に印刷できます'
-        : !isViewMode
-            ? '保存後に印刷できます'
-            : undefined;
+    // 処理中の文書は本文がまだ無い（静的な仮本文だけ）。完成本文に対する操作は無効にする（仕様 §A4）。
+    // タイトルの変更は一覧側の既存操作で引き続きできる。
+    const isProcessingDocument = document.status === 'processing';
+    const canPrintPdf = isViewMode && !saving && !isPreparing && !isProcessingDocument;
+    const pdfButtonTitle = isProcessingDocument
+        ? '文字起こしが完了すると印刷できます'
+        : saving
+            ? '保存完了後に印刷できます'
+            : !isViewMode
+                ? '保存後に印刷できます'
+                : undefined;
 
     const handlePrintPdf = (): void => {
         if (!canPrintPdf) {
@@ -649,11 +677,14 @@ export function DocumentDetailPanelView({
                                             setSaveError(null);
                                             setIsViewMode(false);
                                         }}
-                                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 ${!isViewMode
+                                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center space-x-2 disabled:cursor-not-allowed disabled:opacity-50 ${!isViewMode
                                             ? 'bg-purple-100 text-purple-700'
                                             : 'text-gray-600 hover:text-gray-900'
                                             }`}
-                                        disabled={saving}
+                                        disabled={saving || isProcessingDocument}
+                                        title={isProcessingDocument
+                                            ? '文字起こしが完了すると本文を編集できます（タイトルは一覧から変更できます）'
+                                            : undefined}
                                     >
                                         <FileText className="w-4 h-4" />
                                         <span>編集</span>
@@ -730,7 +761,14 @@ export function DocumentDetailPanelView({
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-gray-50">
-                {isViewMode ? (
+                {isViewMode && isProcessingDocument ? (
+                    // 🔴 processing の仮本文は文字起こし結果ではない。静的プレースホルダの代わりに状態カードを出す（仕様 §A4）
+                    <ProcessingStateCard
+                        document={document}
+                        watch={processingWatch}
+                        onCheck={onCheckProcessingStatus}
+                    />
+                ) : isViewMode ? (
                     <div
                         className={`pdf-preview pdf-preview--reading pdf-theme-${pdfTheme} pdf-font-${resolvedPdfFont} shadow`}
                     >
@@ -760,8 +798,9 @@ export function DocumentDetailPanelView({
                 )}
             </div>
 
-            {/* 文書に従属する細い帯。時刻リンクを持たない文書では、この要素ごと null になる */}
-            <TranscriptAudioBar document={document} />
+            {/* 文書に従属する細い帯。時刻リンクを持たない文書では、この要素ごと null になる。
+                処理中の仮本文は文字起こし結果として解釈しないので、帯も出さない */}
+            {!isProcessingDocument && <TranscriptAudioBar document={document} />}
 
             {isEditable && !isViewMode && (
                 <div className="flex items-center justify-end space-x-3 p-4 border-t bg-white">
@@ -865,3 +904,183 @@ export function DocumentDetailPanelView({
 export const DocumentDetailPanel = React.forwardRef(DocumentDetailPanelView);
 
 DocumentDetailPanel.displayName = 'DocumentDetailPanel';
+
+// ---------------------------------------------------------------------------------------------
+// 処理中文書の状態カード（仕様 §A1・A4）。
+// 🔴 パネル本体と別コンポーネントに切り出しているのは意図的（TranscriptDocumentView と同じ理由）。
+//    パネルのテストはコンポーネントを素の関数として呼び、useState/useEffect/useRef/useImperativeHandle
+//    だけをモックする。ここに切り出せば、パネル側は「要素を 1 つ置く」だけになり、
+//    カードのフック（経過時間の 30 秒更新）は実描画のときにしか走らない。
+// ---------------------------------------------------------------------------------------------
+
+/** 経過時間の再計算間隔。時刻表示のために API を叩かず、30 秒より細かく更新しない（仕様 §A1） */
+export const PROCESSING_ELAPSED_REFRESH_MS = 30_000;
+
+/** 「開始待ち → 文字起こし → 取り込み → 完了」。等間隔は所要時間の比率を意味しない（仕様 §A4） */
+const PROGRESS_STEPS: readonly { stage: TranscribeProgressStage; label: string }[] = [
+    { stage: 'queued', label: '開始待ち' },
+    { stage: 'transcribing', label: '文字起こし' },
+    { stage: 'importing', label: '取り込み' },
+    { stage: 'completed', label: '完了' },
+];
+
+const timestampToMillis = (timestamp: Timestamp | Date | undefined): number | undefined => {
+    if (!timestamp) return undefined;
+    if (timestamp instanceof Date) return timestamp.getTime();
+    return typeof timestamp.toMillis === 'function' ? timestamp.toMillis() : undefined;
+};
+
+/**
+ * 「状態の鮮度」の文言（仕様 §A1）。通信失敗・オフライン・確認停止は処理段階でもジョブ失敗でもない。
+ * 最後の有効観測を残して「最終確認時は〜」を併記し、過去の観測が無いときだけ「状態を確認できません」。
+ */
+export function describeProcessingFreshness(
+    watch: DocumentStatusWatchSnapshot | null,
+    observation: ProgressObservation | null,
+): string {
+    const lastSeen = observation
+        ? `最終確認時は「${describeProgressStage(observation.stage, 'detail')}」でした。`
+        : '';
+    if (!watch) {
+        return observation
+            ? `保存された記録です。${lastSeen}「状態を確認」で最新の状態を取得できます。`
+            : '状態を確認できません。「状態を確認」をお試しください。';
+    }
+    switch (watch.mode) {
+        case 'checking':
+            return '状態を確認しています…';
+        case 'waiting':
+            return watch.lastError
+                ? `現在の状態を確認できません（${watch.lastError.message}）。${lastSeen}自動で再試行します。`
+                : '表示中は自動で状態を確認しています。';
+        case 'paused_hidden':
+            return `画面が非表示のため自動確認を止めています。${lastSeen}表示に戻ると確認を再開します。`;
+        case 'paused_offline':
+            return `オフラインのため自動確認を止めています。${lastSeen}回線が戻ると確認を再開します。`;
+        case 'stopped_limit':
+            return `自動確認を停止しました。文字起こしはサーバーで継続します。${lastSeen}「状態を確認」で確認を再開できます。`;
+        case 'stopped_auth':
+            return `権限または認証を確認してください。状態を確認できませんでした。${lastSeen}`;
+        case 'stopped_not_found':
+            return '文書またはジョブを確認できません。自動確認を停止しました（再提出は行いません）。';
+        case 'terminal':
+            return '結果を受け取りました。最新の文書を読み込んでいます…';
+        case 'disposed':
+            return lastSeen || '状態を確認できません。';
+        default:
+            return lastSeen || '状態を確認できません。';
+    }
+}
+
+export interface ProcessingStateCardProps {
+    document: Transcription;
+    watch: DocumentStatusWatchSnapshot | null;
+    onCheck?: () => void;
+}
+
+export function ProcessingStateCard({ document, watch, onCheck }: ProcessingStateCardProps): React.ReactElement {
+    // 経過時間はローカルで足す。30 秒ごとの刻みと、応答の受信時刻のうち新しい方を「今」とし、
+    // それ以外の理由で描き直さない（時刻表示のために API を叩かない・仕様 §A1）
+    const [tickMs, setTickMs] = useState(() => Date.now());
+    useEffect(() => {
+        const timer = window.setInterval(() => setTickMs(Date.now()), PROCESSING_ELAPSED_REFRESH_MS);
+        return () => window.clearInterval(timer);
+    }, []);
+    const lastResponseAtMs = watch?.lastResponseAtMs ?? null;
+    const nowMs = Math.max(tickMs, lastResponseAtMs ?? 0);
+
+    const observation = resolveProgressObservation(document.processingProgress, watch?.lastResponse);
+    const stage = observation?.stage;
+    const stageLabel = stage ? describeProgressStage(stage, 'detail') : '処理中・状態を確認しています';
+    const jobCreatedAtMs = observation?.jobCreatedAtMs
+        ?? document.processingProgress?.jobCreatedAtMs
+        ?? timestampToMillis(document.createdAt);
+    const serverNowMs = estimateServerNowMs(watch?.lastResponse, lastResponseAtMs, nowMs);
+    const elapsedLabel = jobCreatedAtMs !== undefined ? describeElapsed(serverNowMs - jobCreatedAtMs) : null;
+    const observedAtLabel = observation?.observedAtMs !== undefined ? formatClockTime(observation.observedAtMs) : null;
+    const lastCheckedLabel = lastResponseAtMs !== null ? formatClockTime(lastResponseAtMs) : null;
+    const isChecking = watch?.mode === 'checking';
+    const isFailed = stage === 'failed';
+    const isCompleted = stage === 'completed';
+    const currentStepIndex = stage ? PROGRESS_STEPS.findIndex(step => step.stage === stage) : -1;
+    const StageIcon = isFailed ? AlertCircle : isCompleted ? CheckCircle2 : Loader2;
+
+    return (
+        <section
+            aria-label="文字起こしの状態"
+            data-testid="processing-state-card"
+            className="rounded-xl border border-purple-100 bg-white p-5 shadow-sm"
+        >
+            <h3 className="text-sm font-semibold text-gray-700">文字起こしの状態</h3>
+            <p className={`mt-2 flex items-center gap-2 text-lg font-semibold ${isFailed ? 'text-red-800' : 'text-purple-900'}`}>
+                {/* スピナーは装飾。段階はテキストで伝え、動きを減らす設定では静止アイコンにする */}
+                <StageIcon
+                    className={`h-5 w-5 shrink-0 ${isFailed
+                        ? 'text-red-600'
+                        : isCompleted
+                            ? 'text-green-600'
+                            : 'text-purple-600 motion-safe:animate-spin'}`}
+                    aria-hidden="true"
+                />
+                {/* 段階変化だけを 1 つの live 領域で通知する。経過・時刻の更新は読み上げない */}
+                <span role="status" aria-live="polite">{stageLabel}</span>
+            </p>
+            {!isFailed && (
+                <ol
+                    aria-label="文字起こしの段階（順序のみ。所要時間の比率ではありません）"
+                    className="mt-3 flex flex-wrap gap-2 text-xs"
+                >
+                    {PROGRESS_STEPS.map((step, index) => {
+                        const state = index < currentStepIndex ? 'done' : index === currentStepIndex ? 'current' : 'todo';
+                        return (
+                            <li
+                                key={step.stage}
+                                aria-current={state === 'current' ? 'step' : undefined}
+                                className={`rounded-full border px-2 py-0.5 ${state === 'current'
+                                    ? 'border-purple-400 bg-purple-50 font-semibold text-purple-900'
+                                    : state === 'done'
+                                        ? 'border-green-200 bg-green-50 text-green-800'
+                                        : 'border-gray-200 bg-white text-gray-500'}`}
+                            >
+                                {state === 'done' ? '済 ' : state === 'current' ? '現在: ' : ''}{step.label}
+                            </li>
+                        );
+                    })}
+                </ol>
+            )}
+            {isFailed && document.text && (
+                <p className="mt-3 whitespace-pre-line text-sm text-red-800">{document.text}</p>
+            )}
+            <dl className="mt-3 grid gap-2 text-xs text-gray-600 sm:grid-cols-3">
+                <div>
+                    <dt className="font-medium text-gray-500">受付からの経過</dt>
+                    <dd className="text-gray-800">{elapsedLabel ?? '不明'}</dd>
+                </div>
+                <div>
+                    <dt className="font-medium text-gray-500">状態の観測時刻</dt>
+                    <dd className="text-gray-800">{observedAtLabel ?? '未観測'}</dd>
+                </div>
+                <div>
+                    <dt className="font-medium text-gray-500">最終確認</dt>
+                    <dd className="text-gray-800">{lastCheckedLabel ?? 'この画面ではまだ確認していません'}</dd>
+                </div>
+            </dl>
+            <p className="mt-3 text-sm text-gray-700">{describeProcessingFreshness(watch, observation)}</p>
+            {onCheck && !isCompleted && (
+                <button
+                    type="button"
+                    onClick={onCheck}
+                    disabled={isChecking}
+                    aria-busy={isChecking || undefined}
+                    className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg bg-purple-600 px-4 text-sm font-medium text-white transition-colors hover:bg-purple-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                    <RefreshCw className={`h-4 w-4 ${isChecking ? 'motion-safe:animate-spin' : ''}`} aria-hidden="true" />
+                    {isChecking ? '確認しています…' : '状態を確認'}
+                </button>
+            )}
+            <p className="mt-3 text-xs text-gray-500">
+                この画面を離れても文字起こしは継続します。文書を開くと最新の状態を確認できます。
+            </p>
+        </section>
+    );
+}

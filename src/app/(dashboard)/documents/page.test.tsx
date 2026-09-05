@@ -5,6 +5,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Transcription } from '@/lib/firestore';
 import type { TranscribeStatusResponse } from '@/lib/transcribeBatchContract';
+import type {
+  DocumentStatusWatchOptions,
+  DocumentStatusWatchSnapshot,
+} from '@/hooks/batchTranscriptionClient';
 import DocumentsPage from './page';
 
 // jsdomはshowModal/closeを実装していないため、共通Dialogを使う画面のテストは
@@ -51,7 +55,33 @@ type DetailPanelProps = {
   onDirtyChange?: (dirty: boolean) => void;
   onDraftDiscarded?: () => void;
   onRequestLatestDocument?: () => void;
+  processingWatch?: DocumentStatusWatchSnapshot | null;
+  onCheckProcessingStatus?: () => void;
 };
+
+// 継続確認の偽物。page が渡した onChange/onTerminal をテストから叩けるように保持する。
+type FakeWatch = {
+  docId: string;
+  options: DocumentStatusWatchOptions;
+  stop: ReturnType<typeof vi.fn>;
+  checkNow: ReturnType<typeof vi.fn>;
+  getSnapshot: ReturnType<typeof vi.fn>;
+};
+const fakeWatches: FakeWatch[] = [];
+
+const watchSnapshot = (
+  docId: string,
+  overrides: Partial<DocumentStatusWatchSnapshot> = {},
+): DocumentStatusWatchSnapshot => ({
+  docId,
+  mode: 'checking',
+  lastResponse: null,
+  lastResponseAtMs: null,
+  lastError: null,
+  consecutiveFailures: 0,
+  startedAtMs: 0,
+  ...overrides,
+});
 
 type MountedPage = {
   container: HTMLDivElement;
@@ -96,6 +126,7 @@ const mocks = vi.hoisted(() => ({
   detailSave: vi.fn(),
   headerNavigation: vi.fn(),
   reconcileProcessingDocument: vi.fn(),
+  startDocumentStatusWatch: vi.fn(),
   restoreTranscription: vi.fn(),
   updateTranscription: vi.fn(),
 }));
@@ -123,6 +154,7 @@ vi.mock('@/hooks/useAuth', () => ({
 
 vi.mock('@/hooks/batchTranscriptionClient', () => ({
   reconcileProcessingDocument: mocks.reconcileProcessingDocument,
+  startDocumentStatusWatch: mocks.startDocumentStatusWatch,
 }));
 
 vi.mock('@/components/DocumentListSidebar', () => ({
@@ -321,7 +353,16 @@ vi.mock('@/components/DocumentDetailPanel', async () => {
           data-document-id={props.document?.id ?? ''}
           data-document-title={props.document?.title ?? ''}
           data-document-text={props.document?.text ?? ''}
+          data-watch-mode={props.processingWatch?.mode ?? ''}
+          data-watch-doc-id={props.processingWatch?.docId ?? ''}
         >
+          <button
+            type="button"
+            data-testid="check-processing-status"
+            onClick={() => props.onCheckProcessingStatus?.()}
+          >
+            状態を確認
+          </button>
           <button
             type="button"
             data-testid="mark-dirty"
@@ -517,6 +558,23 @@ describe('DocumentsPage', () => {
     mocks.reconcileProcessingDocument.mockReset().mockImplementation(async (docId: string) => ({
       status: 'running', docId,
     }));
+    fakeWatches.length = 0;
+    mocks.startDocumentStatusWatch.mockReset().mockImplementation((
+      docId: string,
+      options: DocumentStatusWatchOptions = {},
+    ) => {
+      const watch: FakeWatch = {
+        docId,
+        options,
+        stop: vi.fn(),
+        checkNow: vi.fn(async () => null),
+        getSnapshot: vi.fn(() => watchSnapshot(docId)),
+      };
+      fakeWatches.push(watch);
+      // 実装と同じく、開始時に「確認中」のスナップショットを同期で 1 回流す。
+      options.onChange?.(watchSnapshot(docId));
+      return watch;
+    });
     mocks.restoreTranscription.mockReset().mockResolvedValue(undefined);
     mocks.updateTranscription.mockReset().mockResolvedValue(undefined);
     vi.spyOn(window, 'confirm').mockImplementation(mocks.confirm);
@@ -608,12 +666,114 @@ describe('DocumentsPage', () => {
       'processing-0', 'processing-1', 'processing-2', 'processing-3', 'processing-4',
     ]);
 
-    // 一覧の自動確認上限を超えた文書も、詳細を開けば 1 回確認する。
+    // 一覧の自動確認上限を超えた文書も、詳細を開けば確認される。ただし選択中の文書は
+    // 直列キューではなく継続確認（watch）が受け持ち、同じ文書を二重に問い合わせない（仕様 §A2 手順3）。
     await act(async () => latestListSidebarProps?.onDocumentClick(documents[6]));
     await act(async () => latestListSidebarProps?.onDocumentClick(documents[6]));
     await publishLoadedDocuments([...documents]);
-    expect(mocks.reconcileProcessingDocument).toHaveBeenCalledTimes(6);
-    expect(mocks.reconcileProcessingDocument.mock.calls[5][0]).toBe('processing-6');
+    expect(mocks.reconcileProcessingDocument).toHaveBeenCalledTimes(5);
+    expect(mocks.startDocumentStatusWatch).toHaveBeenCalledTimes(1);
+    expect(mocks.startDocumentStatusWatch.mock.calls[0][0]).toBe('processing-6');
+  });
+
+  describe('選択中の processing 文書の継続確認（仕様 §A2 手順3〜5・A4）', () => {
+    const processingFirst: Transcription = {
+      ...firstDocument, status: 'processing', ownerId: 'owner-1', ownerType: 'user',
+      processingProgress: { stage: 'queued' },
+    };
+    const completedSecond: Transcription = {
+      ...secondDocument, status: 'completed', ownerId: 'owner-1', ownerType: 'user',
+    };
+
+    it('processing 文書を選ぶと継続確認を開始し、鮮度スナップショットを詳細へ渡す。選択を変えると止める', async () => {
+      const mounted = await mountPage();
+      await publishLoadedDocuments([processingFirst, completedSecond]);
+      expect(mocks.startDocumentStatusWatch).not.toHaveBeenCalled();
+
+      await act(async () => latestListSidebarProps?.onDocumentClick(processingFirst));
+      expect(mocks.startDocumentStatusWatch).toHaveBeenCalledExactlyOnceWith(
+        firstDocument.id, expect.objectContaining({ onChange: expect.any(Function), onTerminal: expect.any(Function) }),
+      );
+      expect(getByTestId(mounted.container, 'detail-panel').dataset.watchMode).toBe('checking');
+      expect(getByTestId(mounted.container, 'detail-panel').dataset.watchDocId).toBe(firstDocument.id);
+
+      // 一覧の定期取得（同じ内容）では watch を作り直さない。
+      await publishLoadedDocuments([{ ...processingFirst }, completedSecond]);
+      expect(mocks.startDocumentStatusWatch).toHaveBeenCalledTimes(1);
+      expect(fakeWatches[0].stop).not.toHaveBeenCalled();
+
+      await act(async () => fakeWatches[0].options.onChange?.(watchSnapshot(firstDocument.id!, { mode: 'waiting' })));
+      expect(getByTestId(mounted.container, 'detail-panel').dataset.watchMode).toBe('waiting');
+
+      await act(async () => latestListSidebarProps?.onDocumentClick(completedSecond));
+      expect(fakeWatches[0].stop).toHaveBeenCalledOnce();
+      // completed 文書は継続確認の対象にしない（一覧の全行を照会する構成にもしない）。
+      expect(mocks.startDocumentStatusWatch).toHaveBeenCalledTimes(1);
+      expect(getByTestId(mounted.container, 'detail-panel').dataset.watchMode).toBe('');
+    });
+
+    it('🔴 終端応答を受けたら一覧を再取得し、文書が completed になれば継続確認を止める', async () => {
+      const mounted = await mountPage();
+      await publishLoadedDocuments([processingFirst]);
+      await act(async () => latestListSidebarProps?.onDocumentClick(processingFirst));
+      expect(getByTestId(mounted.container, 'update-trigger').textContent).toBe('0');
+
+      await act(async () => {
+        fakeWatches[0].options.onTerminal?.({ status: 'succeeded', docId: firstDocument.id!, stage: 'completed' });
+      });
+      expect(getByTestId(mounted.container, 'update-trigger').textContent).toBe('1');
+      expect(mocks.updateTranscription).not.toHaveBeenCalled();
+
+      await publishLoadedDocuments([{ ...processingFirst, status: 'completed', text: '完成した本文' }]);
+      expect(fakeWatches[0].stop).toHaveBeenCalledOnce();
+      expect(getByTestId(mounted.container, 'detail-panel').dataset.documentText).toBe('完成した本文');
+      expect(getByTestId(mounted.container, 'detail-panel').dataset.watchMode).toBe('');
+    });
+
+    it('「状態を確認」は継続確認の checkNow を呼ぶ（新しい確認経路や submit を作らない）', async () => {
+      const mounted = await mountPage();
+      await publishLoadedDocuments([processingFirst]);
+      await act(async () => latestListSidebarProps?.onDocumentClick(processingFirst));
+
+      const reconcileCallsBeforeClick = mocks.reconcileProcessingDocument.mock.calls.length;
+      await click(getByTestId(mounted.container, 'check-processing-status'));
+      expect(fakeWatches[0].checkNow).toHaveBeenCalledOnce();
+      // 手動確認は継続確認の経路を使う。一度限りの再確定キューを新たに叩かない
+      expect(mocks.reconcileProcessingDocument).toHaveBeenCalledTimes(reconcileCallsBeforeClick);
+    });
+
+    it('unmount で継続確認を止める', async () => {
+      const mounted = await mountPage();
+      await publishLoadedDocuments([processingFirst]);
+      await act(async () => latestListSidebarProps?.onDocumentClick(processingFirst));
+      expect(fakeWatches).toHaveLength(1);
+
+      await unmountPage(mounted);
+      expect(fakeWatches[0].stop).toHaveBeenCalledOnce();
+    });
+
+    it('owner 切替で継続確認を止め、新 owner には古い監視を渡さない', async () => {
+      const mounted = await mountPage();
+      await publishLoadedDocuments([processingFirst]);
+      await act(async () => latestListSidebarProps?.onDocumentClick(processingFirst));
+
+      mocks.authState.user = { uid: 'owner-2' };
+      await rerenderPage(mounted);
+      expect(fakeWatches[0].stop).toHaveBeenCalledOnce();
+      expect(getByTestId(mounted.container, 'detail-panel').dataset.watchMode).toBe('');
+      expect(mocks.startDocumentStatusWatch).toHaveBeenCalledTimes(1);
+    });
+
+    it('他 owner の processing 文書や completed 文書は継続確認しない', async () => {
+      const mounted = await mountPage();
+      const otherOwner: Transcription = { ...processingFirst, id: 'other-owner', ownerId: 'owner-2' };
+      await publishLoadedDocuments([otherOwner, completedSecond]);
+
+      await act(async () => latestListSidebarProps?.onDocumentClick(otherOwner));
+      await act(async () => latestListSidebarProps?.onDocumentClick(completedSecond));
+      expect(mocks.startDocumentStatusWatch).not.toHaveBeenCalled();
+      expect(getByTestId(mounted.container, 'detail-panel').dataset.watchMode).toBe('');
+    });
   });
 
   it('確認失敗でも後続文書を確認し、一覧は表示し続ける', async () => {

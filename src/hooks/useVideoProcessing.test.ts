@@ -17,6 +17,18 @@ const serviceMocks = vi.hoisted(() => ({
     validatePromptPermission: vi.fn(),
 }));
 
+// 全文文字起こし（バッチ）の提出・確認再開だけを差し替える。段階のヘルパは実物を使う。
+const batchMocks = vi.hoisted(() => ({
+    runBatchTranscription: vi.fn(),
+    resumeBatchTranscription: vi.fn(),
+}));
+
+vi.mock('@/hooks/batchTranscriptionClient', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@/hooks/batchTranscriptionClient')>()),
+    runBatchTranscription: batchMocks.runBatchTranscription,
+    resumeBatchTranscription: batchMocks.resumeBatchTranscription,
+}));
+
 vi.mock('react', () => ({
     useCallback: <T extends (...args: never[]) => unknown>(callback: T) => callback,
     useEffect: () => undefined,
@@ -74,6 +86,8 @@ import {
     resolveSavePendingPromptIds,
     useVideoProcessing,
 } from './useVideoProcessing';
+import { TRANSCRIPT_PROMPT_ID } from '@/lib/transcriptPrompt';
+import type { RunBatchTranscriptionInput, RunBatchTranscriptionResult } from './batchTranscriptionClient';
 
 const FILE_ID = 'file-1';
 
@@ -1091,5 +1105,133 @@ describe('useVideoProcessing サーバ経由の文書生成 (#4)', () => {
         expect(serviceMocks.generateDocument).not.toHaveBeenCalled();
         expect(getCurrentStatus()).toMatchObject({ status: 'error', failedPhase: 'text_generation' });
         expect(getCurrentStatus().error).toContain('[デバッグ]');
+    });
+});
+
+describe('useVideoProcessing 全文文字起こし（バッチ）の確認待ちと再開（仕様 §A4）', () => {
+    const transcriptPrompt = createPrompt(TRANSCRIPT_PROMPT_ID, '全文文字起こし');
+    const audioBlob = new Blob(['audio'], { type: 'audio/mpeg' });
+    const submitted = { jobId: 'job-1', docId: 'doc-1' };
+    const pendingResult: RunBatchTranscriptionResult = {
+        outcome: 'pending', success: false, pending: true, ...submitted, lastStatus: null,
+    };
+    const succeededResult: RunBatchTranscriptionResult = { outcome: 'succeeded', success: true, ...submitted };
+
+    beforeEach(() => {
+        batchMocks.runBatchTranscription.mockReset();
+        batchMocks.resumeBatchTranscription.mockReset();
+    });
+
+    it('🔴 確認上限の pending は赤い失敗にせず「確認待ち」にし、段階と ID を処理欄へ残す', async () => {
+        batchMocks.runBatchTranscription.mockImplementation(async (input: RunBatchTranscriptionInput) => {
+            input.onSubmitted?.(submitted);
+            input.onTick?.({ status: 'running', docId: 'doc-1', stage: 'queued' });
+            input.onTick?.({ status: 'running', docId: 'doc-1', stage: 'transcribing', azureStatusCheckedAtMs: 1_700_000_000_000 });
+            return pendingResult;
+        });
+        const hook = useProcessingHarness([transcriptPrompt]);
+
+        await hook.processTranscription(createJob(createFile([TRANSCRIPT_PROMPT_ID])), audioBlob, '192k', 44100);
+
+        const status = getCurrentStatus();
+        expect(status.status).toBe('pending_confirmation');
+        expect(status.phase).toBe('awaiting_confirmation');
+        expect(status.error).toBeUndefined();
+        expect(status.failedPhase).toBeUndefined();
+        expect(status.promptStates[TRANSCRIPT_PROMPT_ID]).toBe('awaiting_confirmation');
+        expect(status.batch).toMatchObject({
+            jobId: 'job-1', docId: 'doc-1', promptId: TRANSCRIPT_PROMPT_ID,
+            stage: 'transcribing', observedAtMs: 1_700_000_000_000, confirmation: 'pending',
+        });
+        expect(status.completedPromptIds).toEqual([]);
+        expect(serviceMocks.saveTranscription).not.toHaveBeenCalled();
+    });
+
+    it('🔴 確認待ちからの再開は保存した ID で確認を再開し、submit も音声の再アップロードもしない', async () => {
+        batchMocks.runBatchTranscription.mockImplementation(async (input: RunBatchTranscriptionInput) => {
+            input.onSubmitted?.(submitted);
+            return pendingResult;
+        });
+        batchMocks.resumeBatchTranscription.mockResolvedValue(succeededResult);
+        const hook = useProcessingHarness([transcriptPrompt]);
+        const file = createFile([TRANSCRIPT_PROMPT_ID]);
+
+        await hook.processTranscription(createJob(file), audioBlob, '192k', 44100);
+        expect(getCurrentStatus().status).toBe('pending_confirmation');
+        expect(serviceMocks.uploadAudioToStorage).toHaveBeenCalledTimes(1);
+
+        await hook.processTranscriptionResume(createJob(file), audioBlob, [], '192k', 44100);
+
+        expect(batchMocks.runBatchTranscription).toHaveBeenCalledTimes(1);
+        expect(serviceMocks.uploadAudioToStorage).toHaveBeenCalledTimes(1);
+        expect(batchMocks.resumeBatchTranscription).toHaveBeenCalledExactlyOnceWith(
+            expect.objectContaining({ jobId: 'job-1', docId: 'doc-1', signal: expect.any(AbortSignal) }),
+        );
+        expect(getCurrentStatus()).toMatchObject({
+            status: 'completed',
+            transcriptionCount: 1,
+            completedPromptIds: [TRANSCRIPT_PROMPT_ID],
+        });
+        expect(getCurrentStatus().batch).toMatchObject({ jobId: 'job-1', stage: 'completed', confirmation: 'done' });
+    });
+
+    it('提出後の中止は「この画面での確認の停止」として ID と段階を残し、再開でも submit しない', async () => {
+        batchMocks.runBatchTranscription.mockImplementation((input: RunBatchTranscriptionInput) => {
+            input.onSubmitted?.(submitted);
+            input.onTick?.({ status: 'running', docId: 'doc-1', stage: 'transcribing' });
+            return new Promise<RunBatchTranscriptionResult>((_resolve, reject) => {
+                input.signal?.addEventListener('abort', () => reject(input.signal?.reason), { once: true });
+            });
+        });
+        const hook = useProcessingHarness([transcriptPrompt]);
+        const file = createFile([TRANSCRIPT_PROMPT_ID]);
+
+        const processing = hook.processTranscription(createJob(file), audioBlob, '192k', 44100);
+        await vi.waitFor(() => expect(batchMocks.runBatchTranscription).toHaveBeenCalledTimes(1));
+        hook.cancelJob(FILE_ID, 'この画面での確認を停止しました。');
+        await processing;
+
+        expect(getCurrentStatus()).toMatchObject({ status: 'canceled', phase: 'canceled' });
+        expect(getCurrentStatus().batch).toMatchObject({ jobId: 'job-1', stage: 'transcribing', confirmation: 'stopped' });
+
+        batchMocks.resumeBatchTranscription.mockResolvedValue(succeededResult);
+        await hook.processTranscriptionResume(createJob(file), audioBlob, [], '192k', 44100);
+
+        expect(batchMocks.runBatchTranscription).toHaveBeenCalledTimes(1);
+        expect(batchMocks.resumeBatchTranscription).toHaveBeenCalledExactlyOnceWith(
+            expect.objectContaining({ jobId: 'job-1', docId: 'doc-1' }),
+        );
+        expect(getCurrentStatus().status).toBe('completed');
+    });
+
+    it('サーバが失敗を確定した場合はこれまでどおり理由つきの失敗にする', async () => {
+        batchMocks.runBatchTranscription.mockImplementation(async (input: RunBatchTranscriptionInput) => {
+            input.onSubmitted?.(submitted);
+            return { outcome: 'failed', success: false, ...submitted, error: '音声が長すぎます' };
+        });
+        const hook = useProcessingHarness([transcriptPrompt]);
+
+        await hook.processTranscription(createJob(createFile([TRANSCRIPT_PROMPT_ID])), audioBlob, '192k', 44100);
+
+        expect(getCurrentStatus()).toMatchObject({ status: 'error', failedPhase: 'text_generation' });
+        expect(getCurrentStatus().error).toContain('音声が長すぎます');
+    });
+
+    it('成功時は batch を完了で閉じ、再開しても submit も確認再開も呼ばない（冪等）', async () => {
+        batchMocks.runBatchTranscription.mockImplementation(async (input: RunBatchTranscriptionInput) => {
+            input.onSubmitted?.(submitted);
+            input.onTick?.({ status: 'succeeded', docId: 'doc-1', stage: 'completed' });
+            return succeededResult;
+        });
+        const hook = useProcessingHarness([transcriptPrompt]);
+        const file = createFile([TRANSCRIPT_PROMPT_ID]);
+
+        await hook.processTranscription(createJob(file), audioBlob, '192k', 44100);
+        expect(getCurrentStatus()).toMatchObject({ status: 'completed', transcriptionCount: 1 });
+        expect(getCurrentStatus().batch).toMatchObject({ stage: 'completed', confirmation: 'done' });
+
+        await hook.processTranscriptionResume(createJob(file), audioBlob, [TRANSCRIPT_PROMPT_ID], '192k', 44100);
+        expect(batchMocks.runBatchTranscription).toHaveBeenCalledTimes(1);
+        expect(batchMocks.resumeBatchTranscription).not.toHaveBeenCalled();
     });
 });
