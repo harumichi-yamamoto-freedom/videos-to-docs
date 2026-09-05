@@ -106,10 +106,12 @@ describe('意味トークン (E2)', () => {
     });
 
     it('REQUIRED_TOKENS が実参照と同期している（定義だけの錠にしない）', () => {
+        // 🔴 referencedTokenIds() は src 配下を全走査するため、ソース増で遅くなる。
+        //    既定 5000ms は全体実行時の負荷で超えることがある（単体では約 100ms）。余裕を持たせる。
         for (const token of REQUIRED_TOKENS) {
             expect(referencedTokenIds(), token).toContain(token.replace(/^--/, ''));
         }
-    });
+    }, 20_000);
 
     it('@theme に未参照のトークンを残さない', () => {
         // 使われないトークンは「定義されている」錠だけを緑にして実物を守らない。

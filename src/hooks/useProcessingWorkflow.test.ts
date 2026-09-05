@@ -496,7 +496,9 @@ describe('conversion queue wait limit (V8)', () => {
         } finally {
             vi.useRealTimers();
         }
-    });
+    // 🔴 フェイクタイマー間の実マイクロタスクが全体実行時の並列負荷で遅延する。
+    //    既定 5000ms は超えることがある（単体では約 1s）。余裕を持たせる。
+    }, 20_000);
 });
 
 
