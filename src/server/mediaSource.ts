@@ -65,8 +65,15 @@ const toSizeBytes = (value: unknown): number => {
     return Number.isFinite(n) && n >= 0 ? n : 0;
 };
 
-/** 存在とサイズだけ確認する (本文は取らない)。無ければ 404、上限超なら 413 */
-export async function statMedia(storagePath: string): Promise<MediaObjectInfo> {
+/**
+ * 存在とサイズだけ確認する (本文は取らない)。無ければ 404、上限超なら 413。
+ * 🔴 `maxBytes` を渡せる。同期経路は 100MB (GENERATE_MAX_MEDIA_BYTES)、
+ *    非同期バッチ経路は Azure の 1GB (AZURE_BATCH_MAX_AUDIO_BYTES) と、上限が違うため。
+ */
+export async function statMedia(
+    storagePath: string,
+    maxBytes: number = GENERATE_MAX_MEDIA_BYTES,
+): Promise<MediaObjectInfo> {
     const file = getAdminBucket().file(storagePath);
     const [exists] = await file.exists();
     if (!exists) {
@@ -76,11 +83,27 @@ export async function statMedia(storagePath: string): Promise<MediaObjectInfo> {
     const [metadata] = await file.getMetadata();
     const sizeBytes = toSizeBytes(metadata?.size);
     const contentType = typeof metadata?.contentType === 'string' ? metadata.contentType : undefined;
-    if (sizeBytes > GENERATE_MAX_MEDIA_BYTES) {
-        logger.warn('Storage 上のファイルが上限超', { storagePath, sizeBytes, limit: GENERATE_MAX_MEDIA_BYTES });
-        throw new GenerateApiError('media_too_large', TOO_LARGE_MESSAGE);
+    if (sizeBytes > maxBytes) {
+        logger.warn('Storage 上のファイルが上限超', { storagePath, sizeBytes, limit: maxBytes });
+        throw new GenerateApiError('media_too_large',
+            `ファイルが大きすぎます (上限 ${Math.floor(maxBytes / 1024 / 1024)}MB)。`);
     }
     return { storagePath, sizeBytes, contentType };
+}
+
+/**
+ * Azure が音声を取得するための **署名付き読み取り URL** を作る（v4）。
+ * 🔴 非同期バッチは音声を URL で受け取る。Firebase Storage の署名 URL を Azure が fetch する。
+ *    鍵ではなく期限つきの URL なので、TTL を短く保つ（ジョブ完了までの数十分で十分）。
+ */
+export async function getSignedReadUrl(storagePath: string, ttlMs: number): Promise<string> {
+    const file = getAdminBucket().file(storagePath);
+    const [url] = await file.getSignedUrl({
+        version: 'v4',
+        action: 'read',
+        expires: Date.now() + ttlMs,
+    });
+    return url;
 }
 
 /** 本文を Buffer で取る。ダウンロード後のサイズも再検査する (メタと実体がずれた時の保険) */

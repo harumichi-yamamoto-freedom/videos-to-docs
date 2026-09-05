@@ -421,5 +421,13 @@ service cloud.firestore {
       // 削除した瞬間から isApprovedSupervisorOf は false になり、以後の読取は拒否される。
       allow delete: if isRelationshipParticipant();
     }
+
+    // 非同期バッチ文字起こしのジョブ状態(設計 §3.7 改訂・2026-09-05)。
+    // 🔴 サーバ(Admin SDK)専用。クライアントは /api/transcribe/status 経由でしか状態を見ない。
+    //    Admin SDK はルールをバイパスするので、ここは明示的に全拒否にして意図を固定する
+    //    (rateLimits と同じく、既定拒否に頼らず「クライアントからは触れない」を宣言する)。
+    match /transcriptionJobs/{jobId} {
+      allow read, write: if false;
+    }
   }
 }
