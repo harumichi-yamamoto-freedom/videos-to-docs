@@ -966,6 +966,36 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         },
     );
 
+    it('🔴 本文だけで 1 MiB を超えるときは末尾を省いて completed にする（終端 commit を失敗させて「処理中」で固めない）', async () => {
+        // 240 分の時間上限内でも密度が高いと本文が 1 MiB を超えうる。従来はそのまま書いて終端 commit が失敗し、
+        // finalizing のまま処理中で固まっていた。末尾を省いてでも必ず completed にすること。
+        const hugeBodyChars = 1_500_000; // ~1.43 MiB（Firestore 1 MiB 上限を明確に超える）
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult).mockResolvedValue({
+            durationMilliseconds: 60_000,
+            recognizedPhrases: [{
+                offsetMilliseconds: 0, durationMilliseconds: 2000, speaker: 1, recognitionStatus: 'Success',
+                nBest: [{ display: 'あ'.repeat(hugeBodyChars), confidence: 0.95 }],
+            }],
+        });
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+        // 502 で固まらず succeeded を返す
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
+        // 文書は completed に終端化し、ジョブも succeeded、Azure 結果も後始末される（＝再確定ループにならない）
+        expect(documentDb.data).toMatchObject({ status: 'completed' });
+        expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+        expect(deleteBatchJob).toHaveBeenCalledTimes(1);
+        // 🔴 実際に Firestore へ書ける大きさ（1 MiB 以内）に収まっている
+        expect(Buffer.byteLength(JSON.stringify(documentDb.data), 'utf8')).toBeLessThanOrEqual(1024 * 1024);
+        // 本文は末尾を省いた断りで終わり、元の巨大本文より短い
+        const body = documentDb.data?.transcription as string;
+        expect(body).toContain('この文字起こしは長すぎて全文を保存できなかった');
+        expect(body.length).toBeLessThan(hugeBodyChars);
+        // 末尾を省くと候補の行番号がずれるため候補は載せない
+        expect(documentDb.data).not.toHaveProperty('transcriptReview');
+    });
+
     it('commit 失敗後の再確定でも要確認候補は同じ入力から同じ内容になる（append しない）', async () => {
         vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
         vi.mocked(fetchBatchResult).mockResolvedValue(reviewAzureResult());

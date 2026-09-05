@@ -31,6 +31,32 @@ const FIRESTORE_DOC_LIMIT_BYTES = 1024 * 1024;
 const DOC_WRITE_MARGIN_BYTES = 32 * 1024;
 
 /**
+ * 本文だけで 1 文書上限を超えるとき、末尾を省いて保存する旨の断り。
+ * 🔴 240 分の時間上限内でも密度が高い文字起こしは 1 MiB を超えうる。超えたまま書くと終端 commit が失敗し、
+ *    ジョブが finalizing のまま「処理中」で固まる（リース切れごとに同じ失敗を繰り返す）。本文優先（B4）で、
+ *    review を落とし、それでも超えるなら本文の末尾を省いてでも**必ず終端化する**。
+ */
+const TRANSCRIPT_TRUNCATION_NOTICE =
+    '\n\n---\n（この文字起こしは長すぎて全文を保存できなかったため、ここまでを保存しました。'
+    + '全文が必要な場合は、録音を分割してから再度お試しください。）';
+
+/**
+ * UTF-8 バイト数で maxBytes 以下に収まる最大の前置きを返す。可能なら行境界（改行）で切る。
+ * 多バイト文字を途中で割らない（割れた末尾は継続バイトを後退して落とす）。
+ */
+function truncateUtf8AtLine(text: string, maxBytes: number): string {
+    const buf = Buffer.from(text, 'utf8');
+    if (buf.length <= maxBytes) return text;
+    let cut = Math.max(0, Math.min(maxBytes, buf.length));
+    // 継続バイト (10xxxxxx) の途中で切らないよう後退する
+    while (cut > 0 && (buf[cut] & 0xc0) === 0x80) cut--;
+    let sliced = buf.subarray(0, cut).toString('utf8');
+    const lastNewline = sliced.lastIndexOf('\n');
+    if (lastNewline > 0) sliced = sliced.slice(0, lastNewline);
+    return sliced;
+}
+
+/**
  * `finalizing` は確定処理中の一時状態（内部用）。
  * 🔴 並行に status が 2 回叩かれても確定を 1 回にするための CAS ロック（設計 §3.7・冪等性）。
  *    利用者向けの公開ステータスは running / succeeded / failed の 3 値だけ（finalizing は running 相当に見せる）。
@@ -220,34 +246,59 @@ export async function commitTerminalOutcome(params: {
             logger.warn('処理中でない文書の終端更新をスキップ', { docId });
         } else if (doc.jobId !== undefined && doc.jobId !== jobId) {
             logger.warn('ジョブが異なる文書の終端更新をスキップ', { docId });
-        } else {
-            // 🔴 文書全体（既存フィールド＋本文＋review）が 1MiB を超えないか、実フィールドで最終判定する。
-            //    超えるなら review を落として本文だけ保存する（B4: 本文は必ず完成させる）。
-            let reviewToWrite = outcome.kind === 'succeeded' ? outcome.review : undefined;
-            if (reviewToWrite !== undefined && outcome.kind === 'succeeded') {
-                const projected = {
+        } else if (outcome.kind === 'succeeded') {
+            // 🔴 文書全体（既存フィールド＋本文＋review）が 1MiB を超えると終端 commit 自体が失敗し、
+            //    ジョブが finalizing のまま「処理中」で固まる（リース切れごとに同じ失敗を繰り返す）。
+            //    必ず収まるよう、まず review を落とし（本文優先・B4）、それでも本文だけで超えるなら本文の末尾を省く。
+            const budget = FIRESTORE_DOC_LIMIT_BYTES - DOC_WRITE_MARGIN_BYTES;
+            const projectedBytes = (body: string, review: TranscriptReview | undefined): number => {
+                const projected: Record<string, unknown> = {
                     ...doc,
-                    transcription: outcome.transcription,
+                    transcription: body,
                     generatedByModel: outcome.generatedByModel,
                     status: 'completed',
-                    transcriptReview: reviewToWrite,
+                    ...(review !== undefined && { transcriptReview: review }),
                 };
-                delete (projected as Record<string, unknown>).processingProgress;
-                const projectedBytes = Buffer.byteLength(JSON.stringify(projected), 'utf8');
-                if (projectedBytes > FIRESTORE_DOC_LIMIT_BYTES - DOC_WRITE_MARGIN_BYTES) {
-                    logger.warn('文書全体が保存上限に近いため要確認データを省いて本文だけ保存', { docId, projectedBytes });
-                    reviewToWrite = undefined;
-                }
+                delete projected.processingProgress;
+                return Buffer.byteLength(JSON.stringify(projected), 'utf8');
+            };
+
+            let reviewToWrite = outcome.review;
+            let transcriptionToWrite = outcome.transcription;
+            if (reviewToWrite !== undefined && projectedBytes(transcriptionToWrite, reviewToWrite) > budget) {
+                logger.warn('文書全体が保存上限に近いため要確認データを省いて本文だけ保存', { docId });
+                reviewToWrite = undefined;
             }
-            tx.set(docRef, outcome.kind === 'succeeded' ? {
-                transcription: outcome.transcription,
+            // 🔴 本文以外（title 等）を除いた余地に本文が収まらないときだけ末尾を省く。
+            //    超過が本文以外だけで起きているなら、本文を削っても収まらない＝削らない（本文を無駄に失わない）。
+            const overheadBytes = projectedBytes('', undefined);
+            if (overheadBytes < budget && projectedBytes(transcriptionToWrite, undefined) > budget) {
+                // 本文だけで上限を超える。末尾を省いてでも必ず終端化する（finalizing で固めない）。
+                let maxBodyBytes = Math.max(
+                    0, budget - overheadBytes - Buffer.byteLength(TRANSCRIPT_TRUNCATION_NOTICE, 'utf8'));
+                transcriptionToWrite = truncateUtf8AtLine(outcome.transcription, maxBodyBytes) + TRANSCRIPT_TRUNCATION_NOTICE;
+                // JSON エスケープ（改行・引用符）で概算を超えることがあるので、収まるまで詰める（有界: 0.9 倍ずつ）
+                while (maxBodyBytes > 0 && projectedBytes(transcriptionToWrite, undefined) > budget) {
+                    maxBodyBytes = Math.floor(maxBodyBytes * 0.9);
+                    transcriptionToWrite = truncateUtf8AtLine(outcome.transcription, maxBodyBytes) + TRANSCRIPT_TRUNCATION_NOTICE;
+                }
+                reviewToWrite = undefined; // 末尾を省くと候補の行番号がずれるので候補は載せない
+                logger.warn('本文が保存上限を超えるため末尾を省いて保存', { docId });
+            } else if (overheadBytes >= budget) {
+                // 本文以外だけで上限超（例: 極端に長い title）。本文の切り詰めでは収まらない異常ケース。
+                logger.warn('本文以外のフィールドだけで保存上限を超えている（本文の切り詰めでは収まらない）', { docId });
+            }
+            tx.set(docRef, {
+                transcription: transcriptionToWrite,
                 generatedByModel: outcome.generatedByModel,
                 // 書く先は processing 文書だけ（上の分岐）。processing 文書は候補を持たないので merge で旧候補と混ざらない。
                 ...(reviewToWrite !== undefined && { transcriptReview: reviewToWrite }),
                 status: 'completed' satisfies TranscriptionDocStatus,
                 processingProgress: FieldValue.delete(),
                 updatedAt,
-            } : {
+            }, { merge: true });
+        } else {
+            tx.set(docRef, {
                 transcription: `文字起こしに失敗しました。\n\n理由: ${outcome.reason}\n\nお手数ですが、もう一度お試しください。`,
                 status: 'failed' satisfies TranscriptionDocStatus,
                 processingProgress: FieldValue.delete(),
