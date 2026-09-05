@@ -27,7 +27,12 @@ import {
   updateTranscription,
 } from '@/lib/firestore';
 import { useAuth } from '@/hooks/useAuth';
-import { reconcileProcessingDocument } from '@/hooks/batchTranscriptionClient';
+import {
+  reconcileProcessingDocument,
+  startDocumentStatusWatch,
+  type DocumentStatusWatch,
+  type DocumentStatusWatchSnapshot,
+} from '@/hooks/batchTranscriptionClient';
 
 type DocumentListState = {
   status: 'loading' | 'success' | 'error';
@@ -129,6 +134,9 @@ export default function DocumentsPage() {
     checkedDocumentIds: Set<string>;
     pending: Promise<void>;
   } | null>(null);
+  // 選択中の processing 文書 1 件の継続確認（仕様 §A2 手順3〜5）。状態カードの鮮度情報の出所。
+  const [processingWatch, setProcessingWatch] = useState<DocumentStatusWatchSnapshot | null>(null);
+  const processingWatchRef = useRef<DocumentStatusWatch | null>(null);
 
   const isOwnerContextChanged = activeOwnerKey !== ownerKey;
 
@@ -515,10 +523,13 @@ export default function DocumentsPage() {
     const documentsToReconcile = processingDocuments.slice(
       0, Math.max(0, MAX_DOCUMENT_RECONCILES_PER_OPEN - reconciliation.checkedDocumentIds.size),
     );
-    // 自動確認の上限を超える文書も、詳細を選択したときは同じ直列キューで確認する。
+    // 選択中の processing 文書は継続確認（下の watch effect）が即時に 1 回確認し、以後 15 秒間隔で
+    // 続ける。直列キューでは扱わず、同じ文書を二重に問い合わせない（仕様 §A2 手順3）。
     const selectedProcessingDocument = processingDocuments.find(document => document.id === selectedDocumentId);
-    if (selectedProcessingDocument && !documentsToReconcile.includes(selectedProcessingDocument)) {
-      documentsToReconcile.push(selectedProcessingDocument);
+    if (selectedProcessingDocument) {
+      reconciliation.checkedDocumentIds.add(selectedProcessingDocument.id!);
+      const selectedIndex = documentsToReconcile.indexOf(selectedProcessingDocument);
+      if (selectedIndex >= 0) documentsToReconcile.splice(selectedIndex, 1);
     }
 
     for (const document of documentsToReconcile) {
@@ -537,6 +548,39 @@ export default function DocumentsPage() {
       });
     }
   }, [documents, handleRequestLatestDocument, isOwnerContextChanged, listState.status, ownerKey, selectedDocumentId, user]);
+
+  // 継続確認の対象: 自分が所有する、選択中の processing 文書 1 件だけ（一覧の全行は照会しない）。
+  // 選択変更・owner 変更・終端（一覧の再取得で status が変わる）・画面離脱で対象が外れ、watch は止まる。
+  const watchedDocumentId = !isOwnerContextChanged
+    && listState.status === 'success'
+    && selectedDocument?.id
+    && selectedDocument.status === 'processing'
+    && selectedDocument.ownerId === (user?.uid ?? 'GUEST')
+    && selectedDocument.ownerType === (user ? 'user' : 'guest')
+    ? selectedDocument.id
+    : null;
+
+  useEffect(() => {
+    if (!watchedDocumentId) {
+      setProcessingWatch(null);
+      return;
+    }
+    const watch = startDocumentStatusWatch(watchedDocumentId, {
+      onChange: setProcessingWatch,
+      // 終端応答: サーバは既に文書を確定済み。最新文書を取り直し、状態カードから本文/失敗理由へ切り替える。
+      onTerminal: () => handleRequestLatestDocument(),
+    });
+    processingWatchRef.current = watch;
+    return () => {
+      watch.stop();
+      if (processingWatchRef.current === watch) processingWatchRef.current = null;
+    };
+  }, [handleRequestLatestDocument, watchedDocumentId]);
+
+  // 状態カードの「状態を確認」。継続確認と同じ経路を使い、実行中は重複送信しない（仕様 §A2 手順4）。
+  const handleCheckProcessingStatus = useCallback(() => {
+    void processingWatchRef.current?.checkNow();
+  }, []);
 
   useEffect(() => {
     componentMountedRef.current = true;
@@ -1153,6 +1197,8 @@ export default function DocumentsPage() {
                     onDraftDiscarded={handleDetailDraftDiscarded}
                     onRequestLatestDocument={handleRequestLatestDocument}
                     onBackToList={handleBackToList}
+                    processingWatch={processingWatch}
+                    onCheckProcessingStatus={handleCheckProcessingStatus}
                   />
                 </div>
               </div>

@@ -11,9 +11,12 @@ import {
     type Transcription,
 } from '@/lib/firestore';
 import {
+    describeProcessingFreshness,
     DocumentDetailPanelView as DocumentDetailPanel,
+    ProcessingStateCard,
     type DocumentDetailPanelHandle,
 } from './DocumentDetailPanel';
+import type { DocumentStatusWatchSnapshot } from '@/hooks/batchTranscriptionClient';
 import { PdfDocumentHeader } from './PdfDocumentHeader';
 
 const { createPortal, documentPrintPortal, printPdf } = vi.hoisted(() => ({
@@ -1608,6 +1611,168 @@ describe('DocumentDetailPanel', () => {
         findButtonByText(tree, 'キャンセル')?.props.onClick();
 
         expect(setShowDiscardConfirmation).toHaveBeenCalledWith(true);
+    });
+
+    describe('処理中文書の状態カード（仕様 §A1・A4）', () => {
+        const observedAtMs = Date.UTC(2026, 8, 5, 3, 10, 0);
+        const jobCreatedAtMs = Date.UTC(2026, 8, 5, 3, 0, 0);
+        const processingDocument: Transcription = {
+            ...document,
+            id: 'processing-1',
+            status: 'processing',
+            text: '（文字起こしを実行しています。完了すると自動で反映されます。）',
+            processingProgress: { stage: 'queued', stageObservedAtMs: observedAtMs - 60_000, jobCreatedAtMs },
+        };
+        const snapshot = (overrides: Partial<DocumentStatusWatchSnapshot> = {}): DocumentStatusWatchSnapshot => ({
+            docId: 'processing-1',
+            mode: 'waiting',
+            lastResponse: {
+                status: 'running',
+                docId: 'processing-1',
+                stage: 'transcribing',
+                azureStatusCheckedAtMs: observedAtMs,
+                createdAtMs: jobCreatedAtMs,
+                serverNowMs: observedAtMs + 5_000,
+            },
+            lastResponseAtMs: observedAtMs + 5_000,
+            lastError: null,
+            consecutiveFailures: 0,
+            startedAtMs: observedAtMs,
+            ...overrides,
+        });
+
+        type AnyElement = React.ReactElement<Record<string, unknown> & { children?: React.ReactNode }>;
+        const findElement = (
+            node: React.ReactNode,
+            predicate: (element: AnyElement) => boolean,
+        ): AnyElement | null => {
+            if (Array.isArray(node)) {
+                for (const child of node) {
+                    const found = findElement(child, predicate);
+                    if (found) return found;
+                }
+                return null;
+            }
+            if (!React.isValidElement<Record<string, unknown> & { children?: React.ReactNode }>(node)) return null;
+            if (predicate(node)) return node;
+            return findElement(node.props.children, predicate);
+        };
+        const renderCard = (props: React.ComponentProps<typeof ProcessingStateCard>): React.ReactNode => {
+            // カードは実描画でしかフックを走らせない設計。ここでは素の関数として呼び、
+            // useState は初期値をそのまま返す・useEffect は走らせない
+            vi.mocked(useState).mockReset();
+            vi.mocked(useState).mockImplementation(((initialValue?: unknown) =>
+                [resolveInitialValue(initialValue), vi.fn()]) as never);
+            return ProcessingStateCard(props);
+        };
+
+        it('🔴 processing 文書では本文プレビューの代わりに状態カードを置き、本文編集・PDF 出力を無効にする', () => {
+            mockPanelState();
+            const onCheckProcessingStatus = vi.fn();
+            const tree = DocumentDetailPanel({
+                document: processingDocument,
+                onDocumentUpdate: async () => undefined,
+                processingWatch: snapshot(),
+                onCheckProcessingStatus,
+            });
+
+            expect(findPdfPreview(tree)).toBeNull();
+            const card = findElement(tree, element => element.type === ProcessingStateCard);
+            expect(card).not.toBeNull();
+            expect(card?.props.document).toBe(processingDocument);
+            expect(card?.props.watch).toEqual(snapshot());
+            expect(card?.props.onCheck).toBe(onCheckProcessingStatus);
+
+            expect(findButtonByText(tree, '編集')?.props.disabled).toBe(true);
+            expect(findPdfButton(tree)?.props.disabled).toBe(true);
+            expect(findPdfButton(tree)?.props.title).toBe('文字起こしが完了すると印刷できます');
+            // タイトルは表示（見出し）のまま。変更は一覧側の既存操作で行う
+            expect(getText(tree)).toContain(processingDocument.title);
+        });
+
+        it('completed（status なしの既存文書を含む）では従来どおり本文プレビューを出し、編集も有効', () => {
+            mockPanelState();
+            const tree = DocumentDetailPanel({ document, onDocumentUpdate: async () => undefined });
+
+            expect(findPdfPreview(tree)).not.toBeNull();
+            expect(findElement(tree, element => element.type === ProcessingStateCard)).toBeNull();
+            expect(findButtonByText(tree, '編集')?.props.disabled).toBe(false);
+            expect(findPdfButton(tree)?.props.disabled).toBe(false);
+        });
+
+        it('状態カードは段階を 1 つの live 領域に出し、経過・観測時刻・最終確認・「状態を確認」を持つ', () => {
+            const onCheck = vi.fn();
+            const tree = renderCard({ document: processingDocument, watch: snapshot(), onCheck });
+            const text = getText(tree);
+
+            const live = findElement(tree, element => element.props.role === 'status');
+            expect(live?.props['aria-live']).toBe('polite');
+            // status 応答の観測（transcribing）は投影（queued・古い）より新しいので採用される
+            expect(getText(live)).toBe('文字起こし中');
+            expect(text).toContain('受付からの経過');
+            expect(text).toContain('状態の観測時刻');
+            expect(text).toContain('最終確認');
+            expect(text).toContain('この画面を離れても文字起こしは継続します');
+            expect(text).not.toContain('%');
+
+            const current = findElement(tree, element => element.props['aria-current'] === 'step');
+            expect(getText(current)).toContain('文字起こし');
+
+            const button = findButtonByText(tree, '状態を確認');
+            expect(button?.props.disabled).toBe(false);
+            button?.props.onClick();
+            expect(onCheck).toHaveBeenCalledOnce();
+        });
+
+        it('確認中は「状態を確認」を無効にし、文言で伝える（色・スピナーだけに依存しない）', () => {
+            const tree = renderCard({ document: processingDocument, watch: snapshot({ mode: 'checking' }), onCheck: vi.fn() });
+            const button = findButtonByText(tree, '確認しています…');
+            expect(button?.props.disabled).toBe(true);
+            expect(getText(tree)).toContain('状態を確認しています…');
+        });
+
+        it('継続確認が無い（保存された投影だけ）でも段階を出し、「最終確認時」の記録だと分かる', () => {
+            const tree = renderCard({ document: processingDocument, watch: null });
+            const live = findElement(tree, element => element.props.role === 'status');
+            expect(getText(live)).toBe('文字起こしの開始を待っています');
+            expect(getText(tree)).toContain('保存された記録です');
+            expect(getText(tree)).toContain('この画面ではまだ確認していません');
+        });
+
+        it('failed 段階は理由（本文）を出し、手順の一覧を出さない', () => {
+            const failedDocument: Transcription = {
+                ...processingDocument, text: '文字起こしに失敗しました。\n\n理由: 音声が長すぎます',
+            };
+            const tree = renderCard({
+                document: failedDocument,
+                watch: snapshot({ lastResponse: { status: 'failed', docId: 'processing-1', error: '音声が長すぎます' }, mode: 'terminal' }),
+            });
+            expect(getText(findElement(tree, element => element.props.role === 'status'))).toBe('文字起こしに失敗しました');
+            expect(getText(tree)).toContain('理由: 音声が長すぎます');
+            expect(findElement(tree, element => element.type === 'ol')).toBeNull();
+        });
+
+        it('鮮度の文言: 通信失敗・停止は処理段階でもジョブ失敗でもなく、最後の観測を残す', () => {
+            const observation = { stage: 'transcribing' as const, source: 'status' as const };
+            expect(describeProcessingFreshness(snapshot({ lastError: { message: '通信に失敗しました。', httpStatus: 502 } }), observation))
+                .toBe('現在の状態を確認できません（通信に失敗しました。）。最終確認時は「文字起こし中」でした。自動で再試行します。');
+            expect(describeProcessingFreshness(snapshot({ lastError: { message: '通信に失敗しました。' } }), null))
+                .toBe('現在の状態を確認できません（通信に失敗しました。）。自動で再試行します。');
+            expect(describeProcessingFreshness(snapshot({ mode: 'stopped_limit' }), observation))
+                .toBe('自動確認を停止しました。文字起こしはサーバーで継続します。最終確認時は「文字起こし中」でした。「状態を確認」で確認を再開できます。');
+            expect(describeProcessingFreshness(snapshot({ mode: 'stopped_not_found' }), observation))
+                .toContain('文書またはジョブを確認できません');
+            expect(describeProcessingFreshness(snapshot({ mode: 'stopped_not_found' }), observation))
+                .toContain('再提出は行いません');
+            expect(describeProcessingFreshness(snapshot({ mode: 'stopped_auth' }), observation))
+                .toContain('権限または認証を確認してください');
+            expect(describeProcessingFreshness(snapshot({ mode: 'paused_offline' }), observation))
+                .toContain('オフラインのため自動確認を止めています');
+            expect(describeProcessingFreshness(snapshot({ mode: 'paused_hidden' }), null))
+                .toBe('画面が非表示のため自動確認を止めています。表示に戻ると確認を再開します。');
+            expect(describeProcessingFreshness(null, null))
+                .toBe('状態を確認できません。「状態を確認」をお試しください。');
+        });
     });
 });
 

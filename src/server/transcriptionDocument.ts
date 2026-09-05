@@ -10,6 +10,7 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminFirestore } from './firebaseAdmin';
 import { createLogger } from '@/lib/logger';
+import type { TranscribeProgressStage } from '@/lib/transcribeBatchContract';
 
 const logger = createLogger('server/transcriptionDocument');
 
@@ -67,6 +68,53 @@ export async function attachJobToDocument(docId: string, jobId: string, expected
     });
 }
 
+export interface ProcessingProgressInput {
+    jobId: string;
+    stage: Exclude<TranscribeProgressStage, 'completed' | 'failed'>;
+    jobCreatedAtMs?: number;
+    audioSec?: number;
+}
+
+/** 段階が変わったときだけ小さな投影を更新する。本文・更新日時・一覧の並び順には触れない。 */
+export async function writeProcessingProgress(
+    docId: string,
+    expectedOwnerId: string,
+    progress: ProcessingProgressInput,
+): Promise<void> {
+    const db = getAdminFirestore();
+    const ref = db.collection(TRANSCRIPTIONS_COLLECTION).doc(docId);
+    await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const doc = snap.data();
+        if (!snap.exists || doc?.ownerId !== expectedOwnerId || doc.status !== 'processing') return;
+        if (doc.jobId !== undefined && doc.jobId !== progress.jobId) return;
+        if (doc.processingProgress?.stage === progress.stage) return;
+
+        const needsJobId = doc.jobId === undefined;
+        if (needsJobId) {
+            // ジョブ未登録の提出途中は次回確認へ回す。循環 import を避け、同じコレクションを直接読む。
+            const jobRef = db.collection('transcriptionJobs').doc(progress.jobId);
+            const jobSnap = await tx.get(jobRef);
+            const job = jobSnap.data();
+            if (!jobSnap.exists || job?.docId !== docId || job.ownerId !== expectedOwnerId) return;
+        }
+
+        tx.set(ref, {
+            ...(needsJobId && { jobId: progress.jobId }),
+            processingProgress: {
+                stage: progress.stage,
+                stageObservedAt: FieldValue.serverTimestamp(),
+                ...(typeof progress.jobCreatedAtMs === 'number'
+                    && Number.isFinite(progress.jobCreatedAtMs) && progress.jobCreatedAtMs > 0
+                    && { jobCreatedAtMs: progress.jobCreatedAtMs }),
+                ...(typeof progress.audioSec === 'number'
+                    && Number.isFinite(progress.audioSec) && progress.audioSec > 0
+                    && { audioSec: progress.audioSec }),
+            },
+        }, { merge: true });
+    });
+}
+
 /** 完了: 本文を書き込み、status を completed にする。 */
 export async function completeTranscriptionDocument(
     docId: string,
@@ -95,6 +143,7 @@ export async function completeTranscriptionDocument(
             transcription,
             generatedByModel,
             status: 'completed' satisfies TranscriptionDocStatus,
+            processingProgress: FieldValue.delete(),
             updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
         return true;
@@ -127,6 +176,7 @@ export async function failTranscriptionDocument(docId: string, reason: string, e
         tx.set(ref, {
             transcription: `文字起こしに失敗しました。\n\n理由: ${reason}\n\nお手数ですが、もう一度お試しください。`,
             status: 'failed' satisfies TranscriptionDocStatus,
+            processingProgress: FieldValue.delete(),
             updatedAt: FieldValue.serverTimestamp(),
         }, { merge: true });
         return true;

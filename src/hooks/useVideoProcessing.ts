@@ -5,6 +5,7 @@ import { saveTranscription } from '@/lib/firestore';
 import { uploadAudioToStorage } from '@/lib/storage';
 import { GENERATE_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
 import {
+    BatchTranscriptionProgress,
     FileProcessingStatus,
     FileWithPrompts,
     DebugErrorMode,
@@ -14,7 +15,13 @@ import {
 } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
 import { isTranscriptPrompt } from '@/lib/transcriptPrompt';
-import { runBatchTranscription } from '@/hooks/batchTranscriptionClient';
+import {
+    resumeBatchTranscription,
+    runBatchTranscription,
+    stageFromStatusResponse,
+    type RunBatchTranscriptionResult,
+} from '@/hooks/batchTranscriptionClient';
+import type { TranscribeStatusResponse } from '@/lib/transcribeBatchContract';
 import { validatePromptPermission } from '@/lib/promptPermissions';
 import { getCurrentUserId } from '@/lib/auth';
 import { createLogger } from '@/lib/logger';
@@ -198,6 +205,10 @@ export const useVideoProcessing = (
     const savedKeysRef = useRef<Set<string>>(new Set());
     // 生成済みで保存だけが残っている下書き。保存のみの再試行に使う
     const draftsRef = useRef<Map<string, GeneratedDraft>>(new Map());
+    // 提出済みの全文文字起こしジョブ {jobId, docId}（(fileId, promptId) 単位）。
+    // 🔴 確認停止・確認待ちからの「再開」は新規 submit ではなく、この ID の確認再開で行う（仕様 §A4）。
+    //    完了の確定で消す。ここに無い＝まだ提出していない、だけが submit の条件
+    const batchJobsRef = useRef<Map<string, { jobId: string; docId: string }>>(new Map());
 
     const updateStatus = useCallback((
         fileId: string,
@@ -288,6 +299,7 @@ export const useVideoProcessing = (
     const clearProcessingState = useCallback(() => {
         savedKeysRef.current.clear();
         draftsRef.current.clear();
+        batchJobsRef.current.clear();
         setProcessingStatuses([]);
         setIsProcessing(false);
         setIsCanceling(false);
@@ -329,7 +341,7 @@ export const useVideoProcessing = (
     /** 待機中のまま中止されたファイルなど、ジョブ本体を通らない経路から終端状態を書く */
     const markJobCanceled = useCallback((fileId: string, message: string) => {
         updateStatus(fileId, status => (
-            status.status === 'completed' || status.status === 'error'
+            status.status === 'completed' || status.status === 'error' || status.status === 'pending_confirmation'
                 ? status
                 : {
                     ...withPromptStates(status, cancelPromptStates(status.promptStates)),
@@ -400,6 +412,8 @@ export const useVideoProcessing = (
 
         const savedPromptIds = [...alreadyCompletedPromptIds];
         const failures: string[] = [];
+        // バッチ提出済みで、確認の上限に達して決着を確認できなかったプロンプト（失敗ではない）
+        const pendingConfirmationPromptIds: string[] = [];
         let failedPhase: ProcessingFailedPhase = 'text_generation';
 
         const failJob = (phase: ProcessingFailedPhase, messages: string[]) => {
@@ -418,6 +432,9 @@ export const useVideoProcessing = (
                 status: 'canceled',
                 phase: 'canceled',
                 error: message,
+                // 提出後の中止は「この画面での確認の停止」であって Azure ジョブの取消ではない（仕様 §A4）。
+                // ID は batchJobsRef に残り、再開は同じジョブの確認から始まる
+                ...(status.batch && { batch: { ...status.batch, confirmation: 'stopped' as const } }),
             }));
         };
 
@@ -511,9 +528,11 @@ export const useVideoProcessing = (
             });
 
             const originalFileType = file.file.type.startsWith('video/') ? 'video' as const : 'audio' as const;
-            // H7: 生成済みの下書きしか残っていないなら、アップロードをやり直さず保存だけ再試行する
+            // H7: 生成済みの下書きしか残っていないなら、アップロードをやり直さず保存だけ再試行する。
+            // 提出済みのバッチ（確認の再開だけが残る）も同様に、音声を上げ直さない
             const needsGeneration = remainingPrompts.some(
                 prompt => !draftsRef.current.has(`${fileId}::${prompt.id}`)
+                    && !batchJobsRef.current.has(`${fileId}::${prompt.id}`)
             );
 
             updateStatus(fileId, status => ({
@@ -607,33 +626,92 @@ export const useVideoProcessing = (
                 if (isTranscriptPrompt(prompt)) {
                     if (!savedKeysRef.current.has(idempotencyKey)) {
                         throwIfAborted();
-                        const media = uploadedMedia;
-                        if (!media) {
-                            throw new PromptPhaseError(
-                                'upload',
-                                '送信用の音声データが準備されていません。音声変換からやり直してください。'
-                            );
-                        }
+                        // 段階（仕様 §A1）を処理欄へ届ける。%・チャンク数は無い。観測時刻と受信時刻は別に持つ
+                        const applyBatchTick = (response: TranscribeStatusResponse) => {
+                            const stage = stageFromStatusResponse(response);
+                            updateStatus(fileId, status => (status.batch?.promptId === promptId
+                                ? {
+                                    ...status,
+                                    batch: {
+                                        ...status.batch,
+                                        ...(stage && { stage }),
+                                        ...(response.azureStatusCheckedAtMs !== undefined
+                                            && { observedAtMs: response.azureStatusCheckedAtMs }),
+                                        lastCheckedAtMs: Date.now(),
+                                    },
+                                }
+                                : status));
+                        };
+                        const setBatch = (batch: BatchTranscriptionProgress) =>
+                            updateStatus(fileId, status => ({ ...status, batch }));
+
                         markPromptState(fileId, promptId, 'generating');
-                        const result = await runBatchTranscription({
-                            storagePath: media.storagePath,
-                            fileName: file.file.name,
-                            mimeType: media.mimeType,
-                            audioSec: estimateAudioSec(audioBlob, bitrate),
-                            promptName: prompt.name,
-                            originalFileType,
-                            signal,
-                        });
-                        if (!result.success) {
+                        const knownJob = batchJobsRef.current.get(idempotencyKey);
+                        let result: RunBatchTranscriptionResult;
+                        if (knownJob) {
+                            // 🔴 確認停止・確認待ちからの再開。submit は呼ばず、保存した ID の確認だけを再開する
+                            //    （仕様 §A4。再 submit は二重課金と重複文書を生む）。前回の段階は引き継ぐ
+                            updateStatus(fileId, status => ({
+                                ...status,
+                                batch: {
+                                    ...(status.batch?.jobId === knownJob.jobId ? status.batch : {}),
+                                    ...knownJob,
+                                    promptId,
+                                    confirmation: 'polling',
+                                },
+                            }));
+                            result = await resumeBatchTranscription({ ...knownJob, signal, onTick: applyBatchTick });
+                        } else {
+                            const media = uploadedMedia;
+                            if (!media) {
+                                throw new PromptPhaseError(
+                                    'upload',
+                                    '送信用の音声データが準備されていません。音声変換からやり直してください。'
+                                );
+                            }
+                            result = await runBatchTranscription({
+                                storagePath: media.storagePath,
+                                fileName: file.file.name,
+                                mimeType: media.mimeType,
+                                audioSec: estimateAudioSec(audioBlob, bitrate),
+                                promptName: prompt.name,
+                                originalFileType,
+                                signal,
+                                onTick: applyBatchTick,
+                                onSubmitted: ({ jobId, docId }) => {
+                                    batchJobsRef.current.set(idempotencyKey, { jobId, docId });
+                                    setBatch({ jobId, docId, promptId, stage: 'checking', confirmation: 'polling' });
+                                },
+                            });
+                        }
+                        if (result.outcome === 'pending') {
+                            // 🔴 確認の上限に達しただけで失敗ではない（仕様 §A4）。ジョブはサーバで継続し、
+                            //    文書は「処理中」で残る。赤い失敗にせず「確認待ち」として残し、再開は同じ ID で行う
+                            pendingConfirmationPromptIds.push(promptId);
+                            updateStatus(fileId, status => ({
+                                ...withPromptStates(status, {
+                                    ...status.promptStates,
+                                    [promptId]: 'awaiting_confirmation',
+                                }),
+                                ...(status.batch && { batch: { ...status.batch, confirmation: 'pending' as const } }),
+                            }));
+                            return;
+                        }
+                        if (result.outcome === 'failed') {
                             // 🔴 失敗しても文書は消えない（サーバが理由つきで残す）。ここでは経過を伝える。
                             throw new PromptPhaseError(
                                 'text_generation',
-                                result.pending
-                                    ? '文字起こしがまだ完了していません。しばらくしてから文書一覧でご確認ください。'
-                                    : (result.error || '文字起こしに失敗しました。')
+                                result.error || '文字起こしに失敗しました。'
                             );
                         }
                         savedKeysRef.current.add(idempotencyKey);
+                        batchJobsRef.current.delete(idempotencyKey);
+                        updateStatus(fileId, status => ({
+                            ...status,
+                            ...(status.batch && {
+                                batch: { ...status.batch, stage: 'completed' as const, confirmation: 'done' as const },
+                            }),
+                        }));
                     }
                     savedPromptIds.push(promptId);
                     updateStatus(fileId, status => ({
@@ -819,6 +897,19 @@ export const useVideoProcessing = (
                     failedPhase: undefined,
                     transcriptionCount: savedCount,
                     totalTranscriptions: plannedCount,
+                }));
+                return;
+            }
+
+            if (failures.length === 0 && pendingConfirmationPromptIds.length > 0) {
+                // 🔴 全文文字起こしの確認上限（仕様 §A4）。失敗ではないので error にしない。
+                //    文書は「処理中」で残り、サーバ側の文字起こしは継続する。「確認を再開する」は同じ ID の確認再開
+                updateStatus(fileId, status => ({
+                    ...status,
+                    status: 'pending_confirmation',
+                    phase: 'awaiting_confirmation',
+                    error: undefined,
+                    failedPhase: undefined,
                 }));
                 return;
             }

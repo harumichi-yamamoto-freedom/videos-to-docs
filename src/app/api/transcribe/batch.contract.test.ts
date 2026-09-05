@@ -8,7 +8,9 @@
  *    「status が Succeeded で確定処理を最後まで配線している」ことを錠にする。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { AzureBatchResult } from '@/lib/azureBatchContract';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import type { AzureBatchResult, AzureBatchStatus } from '@/lib/azureBatchContract';
+import type { TranscribeJobPublicStatus, TranscribeProgressStage } from '@/lib/transcribeBatchContract';
 
 const documentDb = vi.hoisted(() => ({
     data: undefined as Record<string, unknown> | undefined,
@@ -81,6 +83,7 @@ vi.mock('@/server/transcriptionDocument', async (importActual) => {
         ...actual,
         createProcessingDocument: vi.fn(async () => 'doc-1'),
         attachJobToDocument: vi.fn(actual.attachJobToDocument),
+        writeProcessingProgress: vi.fn(actual.writeProcessingProgress),
     };
 });
 vi.mock('@/server/transcriptionJob', async (importActual) => {
@@ -89,6 +92,7 @@ vi.mock('@/server/transcriptionJob', async (importActual) => {
         ...actual,
         claimJobForFinalize: vi.fn(),
         commitTerminalOutcome: vi.fn(actual.commitTerminalOutcome),
+        recordAzureObservation: vi.fn(actual.recordAzureObservation),
         createTranscriptionJob: vi.fn(async () => 'job-1'),
         getTranscriptionJob: vi.fn(),
         getTranscriptionJobByDocId: vi.fn(),
@@ -101,10 +105,37 @@ import { POST as statusPOST } from './status/route';
 import { resolveRequestSubject } from '@/server/auth';
 import { submitBatchJob, getAzureCredentials, getBatchJob, fetchBatchResult, deleteBatchJob } from '@/server/azureBatchTranscribe';
 import { getSignedReadUrl } from '@/server/mediaSource';
-import { attachJobToDocument, createProcessingDocument } from '@/server/transcriptionDocument';
-import { claimJobForFinalize, commitTerminalOutcome, FINALIZE_LEASE_MS, createTranscriptionJob, getTranscriptionJob, getTranscriptionJobByDocId, updateTranscriptionJob } from '@/server/transcriptionJob';
+import { attachJobToDocument, createProcessingDocument, writeProcessingProgress } from '@/server/transcriptionDocument';
+import { claimJobForFinalize, commitTerminalOutcome, recordAzureObservation, type TranscriptionJob, FINALIZE_LEASE_MS, createTranscriptionJob, getTranscriptionJob, getTranscriptionJobByDocId, updateTranscriptionJob } from '@/server/transcriptionJob';
 import { getTranscriptionDocuments, getTranscriptions, getTranscriptionsByOwnerId, restoreTranscription } from '@/lib/firestore';
 import * as finalization from '@/server/finalizeTranscription';
+
+const syntheticNowMs = 1_788_000_000_000;
+const syntheticCreatedAtMs = syntheticNowMs - 600_000;
+
+const expectedStatus = (status: TranscribeJobPublicStatus, options: {
+    stage?: TranscribeProgressStage; observed?: boolean; error?: string;
+} = {}) => ({
+    status, docId: 'doc-1',
+    stage: options.stage ?? (status === 'succeeded' ? 'completed' : status === 'failed' ? 'failed' : 'checking'),
+    createdAtMs: syntheticCreatedAtMs, audioSec: 600, serverNowMs: syntheticNowMs,
+    ...(options.observed && { azureStatusCheckedAtMs: syntheticNowMs }),
+    ...(options.error !== undefined && { error: options.error }),
+});
+
+// Firestore の merge/set と delete/serverTimestamp を合成データ上で適用する。
+const mergeFirestorePatch = (data: Record<string, unknown> | undefined, patch: Record<string, unknown>) => {
+    const result = { ...data };
+    for (const [key, value] of Object.entries(patch)) {
+        if (value instanceof FieldValue && value.isEqual(FieldValue.delete())) delete result[key];
+        else if (value instanceof FieldValue && value.isEqual(FieldValue.serverTimestamp())) {
+            result[key] = Timestamp.fromMillis(Date.now());
+        } else if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+            result[key] = mergeFirestorePatch(undefined, value as Record<string, unknown>);
+        } else result[key] = value;
+    }
+    return result;
+};
 
 const guest = { kind: 'guest' as const };
 const req = (body: unknown) => new Request('http://t/api', { method: 'POST', body: JSON.stringify(body) });
@@ -120,16 +151,22 @@ const sampleAzureResult = (): AzureBatchResult => ({
 
 beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(Date, 'now').mockReturnValue(syntheticNowMs);
     vi.mocked(resolveRequestSubject).mockResolvedValue(guest);
     documentDb.data = { ownerId: 'GUEST', status: 'processing', title: '合成の文書', transcription: '処理中' };
-    documentDb.jobData = { status: 'finalizing' };
+    documentDb.jobData = {
+        ownerId: 'GUEST', ownerType: 'guest', docId: 'doc-1', status: 'finalizing',
+        azureSelfUrl: 'https://ep/speechtotext/transcriptions/JID?api-version=2024-11-15',
+        audioSec: 600, storagePath: 'audio/GUEST/x.mp3', promptName: 'p',
+        createdAt: Timestamp.fromMillis(syntheticCreatedAtMs), updatedAt: Timestamp.fromMillis(syntheticNowMs),
+    };
     documentDb.commitError = undefined;
     documentDb.ref.get.mockImplementation(async () => ({
         exists: documentDb.data !== undefined,
         data: () => documentDb.data,
     }));
     documentDb.ref.set.mockImplementation(async (patch) => {
-        documentDb.data = { ...documentDb.data, ...patch };
+        documentDb.data = mergeFirestorePatch(documentDb.data, patch);
     });
     documentDb.tx.get.mockImplementation(async (ref) => {
         const data = ref.path === documentDb.jobRef.path ? documentDb.jobData : documentDb.data;
@@ -139,14 +176,15 @@ beforeEach(() => {
         const writes: Array<{ ref: { path: string }; patch: Record<string, unknown> }> = [];
         documentDb.tx.set.mockImplementation((ref, patch) => { writes.push({ ref, patch }); });
         const result = await fn(documentDb.tx);
-        if (documentDb.commitError) {
+        if (documentDb.commitError && writes.some(({ ref, patch }) =>
+            ref.path === documentDb.jobRef.path && (patch.status === 'succeeded' || patch.status === 'failed'))) {
             const error = documentDb.commitError;
             documentDb.commitError = undefined;
             throw error;
         }
         for (const { ref, patch } of writes) {
-            if (ref.path === documentDb.jobRef.path) documentDb.jobData = { ...documentDb.jobData, ...patch };
-            else documentDb.data = { ...documentDb.data, ...patch };
+            if (ref.path === documentDb.jobRef.path) documentDb.jobData = mergeFirestorePatch(documentDb.jobData, patch);
+            else documentDb.data = mergeFirestorePatch(documentDb.data, patch);
         }
         return result;
     });
@@ -222,7 +260,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         id: 'job-1', ownerId: 'GUEST', ownerType: 'guest' as const, docId: 'doc-1',
         azureSelfUrl: 'https://ep/speechtotext/transcriptions/JID?api-version=2024-11-15',
         status: 'running' as const, audioSec: 600, storagePath: 'audio/GUEST/x.mp3',
-        promptName: 'p', createdAtMs: 0, updatedAtMs: 0,
+        promptName: 'p', createdAtMs: syntheticCreatedAtMs, updatedAtMs: syntheticNowMs,
     };
 
     beforeEach(() => {
@@ -237,7 +275,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         vi.mocked(fetchBatchResult).mockResolvedValue(sampleAzureResult());
         const res = await statusPOST(req({ docId: 'doc-1' }));
         expect(res.status).toBe(200);
-        expect(await res.json()).toEqual({ status: 'succeeded', docId: 'doc-1' });
+        expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
         expect(documentDb.ref.get).toHaveBeenCalledTimes(1);
         expect(getTranscriptionJob).toHaveBeenCalledExactlyOnceWith('job-1');
         expect(getTranscriptionJobByDocId).not.toHaveBeenCalled();
@@ -253,7 +291,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
         vi.mocked(fetchBatchResult).mockResolvedValue(sampleAzureResult());
         const res = await statusPOST(req({ docId: 'doc-1' }));
-        expect(await res.json()).toEqual({ status: 'succeeded', docId: 'doc-1' });
+        expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
         expect(getTranscriptionJobByDocId).toHaveBeenCalledExactlyOnceWith('doc-1');
         expect(getTranscriptionJob).not.toHaveBeenCalled();
         expect(documentDb.data).toMatchObject({ status: 'completed' });
@@ -263,7 +301,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
     it('docId から Azure の失敗も文書とジョブへ確定する', async () => {
         vi.mocked(getBatchJob).mockResolvedValue({ status: 'Failed', error: '合成の失敗理由' });
         const res = await statusPOST(req({ docId: 'doc-1' }));
-        expect(await res.json()).toEqual({ status: 'failed', docId: 'doc-1', error: '合成の失敗理由' });
+        expect(await res.json()).toEqual(expectedStatus('failed', { error: '合成の失敗理由', observed: true }));
         expect(documentDb.data).toMatchObject({ status: 'failed', transcription: expect.stringContaining('合成の失敗理由') });
         expect(documentDb.jobData).toMatchObject({ status: 'failed' });
     });
@@ -299,7 +337,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         });
         vi.mocked(getBatchJob).mockResolvedValue({ status: 'Running' });
         const res = await statusPOST(req({ docId: 'doc-1' }));
-        expect(await res.json()).toEqual({ status: 'running', docId: 'doc-1' });
+        expect(await res.json()).toEqual(expectedStatus('running', { stage: 'transcribing', observed: true }));
         expect(getTranscriptionJob).toHaveBeenCalledWith('synthetic-stale-job');
         expect(getTranscriptionJobByDocId).toHaveBeenCalledExactlyOnceWith('doc-1');
         expect(claimJobForFinalize).toHaveBeenCalledExactlyOnceWith('job-1');
@@ -335,10 +373,122 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         vi.mocked(getTranscriptionJob).mockResolvedValue(runningJob);
         vi.mocked(getBatchJob).mockResolvedValue({ status: 'Running' });
         const res = await statusPOST(req({ jobId: 'job-1' }));
-        expect(await res.json()).toEqual({ status: 'running', docId: 'doc-1' });
+        expect(await res.json()).toEqual(expectedStatus('running', { stage: 'transcribing', observed: true }));
         expect(commitTerminalOutcome).not.toHaveBeenCalled();
         expect(claimJobForFinalize).toHaveBeenCalledWith('job-1');
         expect(updateTranscriptionJob).toHaveBeenCalledWith('job-1', { status: 'running' });
+    });
+
+    it.each([
+        ['NotStarted', 'queued'],
+        ['Running', 'transcribing'],
+    ] as const)('Azure %s は %s を返し、文書へ段階を投影する', async (azureStatus, stage) => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: azureStatus });
+        const beforeUpdatedAt = documentDb.jobData?.updatedAt;
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual(expectedStatus('running', { stage, observed: true }));
+        expect(recordAzureObservation).toHaveBeenCalledExactlyOnceWith('job-1', azureStatus);
+        expect(documentDb.jobData).toMatchObject({
+            azureStatus, azureStatusCheckedAt: Timestamp.fromMillis(syntheticNowMs), updatedAt: beforeUpdatedAt,
+        });
+        expect(writeProcessingProgress).toHaveBeenCalledExactlyOnceWith('doc-1', 'GUEST', {
+            jobId: 'job-1', stage, jobCreatedAtMs: syntheticCreatedAtMs, audioSec: 600,
+        });
+        expect(documentDb.data).toMatchObject({
+            status: 'processing', jobId: 'job-1', transcription: '処理中',
+            processingProgress: {
+                stage, stageObservedAt: Timestamp.fromMillis(syntheticNowMs),
+                jobCreatedAtMs: syntheticCreatedAtMs, audioSec: 600,
+            },
+        });
+        expect(fetchBatchResult).not.toHaveBeenCalled();
+        expect(commitTerminalOutcome).not.toHaveBeenCalled();
+    });
+
+    it('同じ段階の再 poll は観測時刻だけを進め、文書の段階時刻を書き直さない', async () => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Running' });
+        await statusPOST(req({ jobId: 'job-1' }));
+        const savedProgress = documentDb.data?.processingProgress;
+        documentDb.tx.set.mockClear();
+        vi.mocked(Date.now).mockReturnValue(syntheticNowMs + 30_000);
+
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+
+        expect(await res.json()).toMatchObject({
+            stage: 'transcribing', azureStatusCheckedAtMs: syntheticNowMs + 30_000,
+            serverNowMs: syntheticNowMs + 30_000,
+        });
+        expect(documentDb.data?.processingProgress).toEqual(savedProgress);
+        expect(documentDb.tx.set).toHaveBeenCalledExactlyOnceWith(documentDb.jobRef, {
+            azureStatus: 'Running', azureStatusCheckedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+    });
+
+    it('Succeeded を観測したら本文取得の前に importing を投影し、保存後に completed にする', async () => {
+        let signalImporting!: () => void;
+        const importing = new Promise<void>(resolve => { signalImporting = resolve; });
+        let finishImport!: () => void;
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult).mockImplementationOnce(() => {
+            signalImporting();
+            return new Promise(resolve => { finishImport = () => resolve(sampleAzureResult()); });
+        });
+
+        const request = statusPOST(req({ jobId: 'job-1' }));
+        await importing;
+        expect(documentDb.data).toMatchObject({ status: 'processing', processingProgress: { stage: 'importing' } });
+        expect(documentDb.jobData).toMatchObject({ status: 'finalizing', azureStatus: 'Succeeded' });
+        expect(commitTerminalOutcome).not.toHaveBeenCalled();
+        expect(deleteBatchJob).not.toHaveBeenCalled();
+
+        vi.mocked(getTranscriptionJob).mockResolvedValueOnce({
+            ...runningJob, status: 'finalizing', azureStatus: 'Succeeded', azureStatusCheckedAtMs: syntheticNowMs,
+        });
+        const concurrent = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await concurrent.json()).toEqual(expectedStatus('running', { stage: 'importing', observed: true }));
+        finishImport();
+        expect(await (await request).json()).toEqual(expectedStatus('succeeded', { observed: true }));
+        expect(documentDb.data).toMatchObject({ status: 'completed', transcription: expect.stringContaining('よろしくお願いします') });
+        expect(documentDb.data).not.toHaveProperty('processingProgress');
+    });
+
+    it.each([
+        [undefined, 'checking'], ['NotStarted', 'queued'], ['Running', 'transcribing'],
+        ['Succeeded', 'importing'], ['Failed', 'checking'], ['Unknown', 'checking'],
+    ] as const)('finalizing は Azure 観測 %s の段階 %s を返す', async (azureStatus, stage) => {
+        vi.mocked(getTranscriptionJob).mockResolvedValue({
+            ...runningJob, status: 'finalizing', azureStatus: azureStatus as AzureBatchStatus | undefined,
+        });
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await res.json()).toEqual(expectedStatus('running', { stage }));
+        expect(getBatchJob).not.toHaveBeenCalled();
+        expect(recordAzureObservation).not.toHaveBeenCalled();
+        expect(writeProcessingProgress).not.toHaveBeenCalled();
+    });
+
+    it.each(['succeeded', 'failed'] as const)('終端 %s は保存済みの Azure Running より優先する', async status => {
+        vi.mocked(getTranscriptionJob).mockResolvedValue({
+            ...runningJob, status, azureStatus: 'Running', azureStatusCheckedAtMs: syntheticNowMs - 60_000,
+        });
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await res.json()).toEqual({
+            ...expectedStatus(status), azureStatusCheckedAtMs: syntheticNowMs - 60_000,
+        });
+        expect(getBatchJob).not.toHaveBeenCalled();
+        expect(writeProcessingProgress).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, 0, -1, NaN, Infinity, 'invalid'])('旧欠損・不正値 %s の任意情報は省略する', async value => {
+        vi.mocked(getTranscriptionJob).mockResolvedValue({
+            ...runningJob, status: 'finalizing', createdAtMs: value, audioSec: value, azureStatusCheckedAtMs: value,
+        } as unknown as TranscriptionJob);
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await res.json()).toEqual({
+            status: 'running', docId: 'doc-1', stage: 'checking', serverNowMs: syntheticNowMs,
+        });
+        expect(getBatchJob).not.toHaveBeenCalled();
     });
 
     it('🔴 Succeeded で結果取得→Markdown化→文書とジョブの原子的確定→Azure削除まで貫通する', async () => {
@@ -346,7 +496,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
         vi.mocked(fetchBatchResult).mockResolvedValue(sampleAzureResult());
         const res = await statusPOST(req({ jobId: 'job-1' }));
-        expect(await res.json()).toEqual({ status: 'succeeded', docId: 'doc-1' });
+        expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
         expect(commitTerminalOutcome).toHaveBeenCalledTimes(1);
         // 実の buildTranscriptMarkdownFromBatch を通した本文が入る（話者ラベル＋時刻）
         expect(commitTerminalOutcome).toHaveBeenCalledWith({
@@ -360,7 +510,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
             status: 'completed', transcription: expect.stringContaining('よろしくお願いします'), title: '合成の文書',
         });
         expect(documentDb.jobData).toMatchObject({ status: 'succeeded', speakers: 2 });
-        expect(documentDb.runTransaction).toHaveBeenCalledTimes(1);
+        expect(documentDb.runTransaction).toHaveBeenCalledTimes(3);
         expect(updateTranscriptionJob).not.toHaveBeenCalled();
         expect(deleteBatchJob).toHaveBeenCalledTimes(1);
         expect(documentDb.tx.set.mock.invocationCallOrder.at(-1)).toBeLessThan(vi.mocked(deleteBatchJob).mock.invocationCallOrder[0]);
@@ -371,7 +521,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         vi.mocked(getBatchJob).mockResolvedValue({ status: 'Failed', error: 'AudioLengthLimitExceeded' });
         const res = await statusPOST(req({ jobId: 'job-1' }));
         const body = await res.json();
-        expect(body.status).toBe('failed');
+        expect(body).toMatchObject(expectedStatus('failed', { observed: true }));
         expect(body.error).toContain('AudioLength');
         expect(commitTerminalOutcome).toHaveBeenCalledTimes(1);
         expect(commitTerminalOutcome).toHaveBeenCalledWith({
@@ -388,7 +538,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
     it('🔴 既に succeeded のジョブは Azure を叩かず即返す（冪等・二重確定しない）', async () => {
         vi.mocked(getTranscriptionJob).mockResolvedValue({ ...runningJob, status: 'succeeded' });
         const res = await statusPOST(req({ jobId: 'job-1' }));
-        expect(await res.json()).toEqual({ status: 'succeeded', docId: 'doc-1' });
+        expect(await res.json()).toEqual(expectedStatus('succeeded'));
         expect(getBatchJob).not.toHaveBeenCalled();
         expect(commitTerminalOutcome).not.toHaveBeenCalled();
         expect(claimJobForFinalize).not.toHaveBeenCalled();
@@ -397,7 +547,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
     it('既に failed のジョブは理由を返し、再確定も文書削除もしない', async () => {
         vi.mocked(getTranscriptionJob).mockResolvedValue({ ...runningJob, status: 'failed', error: '合成の失敗理由' });
         const res = await statusPOST(req({ jobId: 'job-1' }));
-        expect(await res.json()).toEqual({ status: 'failed', docId: 'doc-1', error: '合成の失敗理由' });
+        expect(await res.json()).toEqual(expectedStatus('failed', { error: '合成の失敗理由' }));
         expect(claimJobForFinalize).not.toHaveBeenCalled();
         expect(getBatchJob).not.toHaveBeenCalled();
         expect(documentDb.tx.set).not.toHaveBeenCalled();
@@ -406,7 +556,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
     it('有効な finalizing リースは公開 running として返す', async () => {
         vi.mocked(getTranscriptionJob).mockResolvedValue({ ...runningJob, status: 'finalizing', updatedAtMs: Date.now() });
         const res = await statusPOST(req({ jobId: 'job-1' }));
-        expect(await res.json()).toEqual({ status: 'running', docId: 'doc-1' });
+        expect(await res.json()).toEqual(expectedStatus('running'));
         expect(claimJobForFinalize).not.toHaveBeenCalled();
         expect(getBatchJob).not.toHaveBeenCalled();
     });
@@ -418,7 +568,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
         vi.mocked(fetchBatchResult).mockResolvedValue(sampleAzureResult());
         const res = await statusPOST(req({ jobId: 'job-1' }));
-        expect(await res.json()).toEqual({ status: 'succeeded', docId: 'doc-1' });
+        expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
         expect(claimJobForFinalize).toHaveBeenCalledWith('job-1');
         expect(commitTerminalOutcome).toHaveBeenCalledTimes(1);
     });
@@ -431,7 +581,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
                 .mockResolvedValueOnce(runningJob)
                 .mockResolvedValueOnce({ ...runningJob, status, ...error });
             const res = await statusPOST(req({ jobId: 'job-1' }));
-            expect(await res.json()).toEqual({ status: status === 'finalizing' ? 'running' : status, docId: 'doc-1', ...error });
+            expect(await res.json()).toEqual(expectedStatus(status === 'finalizing' ? 'running' : status, error));
             expect(getTranscriptionJob).toHaveBeenCalledTimes(2);
             expect(getBatchJob).not.toHaveBeenCalled();
             expect(documentDb.tx.set).not.toHaveBeenCalled();
@@ -453,9 +603,9 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         const first = statusPOST(req({ jobId: 'job-1' }));
         await started;
         const second = await statusPOST(req({ jobId: 'job-1' }));
-        expect(await second.json()).toEqual({ status: 'running', docId: 'doc-1' });
+        expect(await second.json()).toEqual(expectedStatus('running'));
         releaseAzure();
-        expect(await (await first).json()).toEqual({ status: 'succeeded', docId: 'doc-1' });
+        expect(await (await first).json()).toEqual(expectedStatus('succeeded', { observed: true }));
         expect(getBatchJob).toHaveBeenCalledTimes(1);
         expect(fetchBatchResult).toHaveBeenCalledTimes(1);
         expect(commitTerminalOutcome).toHaveBeenCalledTimes(1);
@@ -465,7 +615,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
     it('Azure 設定がなくなっても running に戻して再試行できる', async () => {
         vi.mocked(getAzureCredentials).mockReturnValueOnce(null);
         const res = await statusPOST(req({ jobId: 'job-1' }));
-        expect(await res.json()).toEqual({ status: 'running', docId: 'doc-1' });
+        expect(await res.json()).toEqual(expectedStatus('running'));
         expect(updateTranscriptionJob).toHaveBeenCalledWith('job-1', { status: 'running' });
         expect(getBatchJob).not.toHaveBeenCalled();
     });
@@ -475,6 +625,58 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         const res = await statusPOST(req({ jobId: 'job-1' }));
         expect(res.status).toBe(502);
         expect(updateTranscriptionJob).toHaveBeenCalledWith('job-1', { status: 'running' });
+        expect(commitTerminalOutcome).not.toHaveBeenCalled();
+    });
+
+    it.each(['通信失敗', '未知の状態'] as const)('%s は HTTP エラーのまま checking と以前の観測時刻を返す', async failure => {
+        const checkedAtMs = syntheticNowMs - 300_000;
+        const observedJob = {
+            ...runningJob, azureStatus: 'Running' as const, azureStatusCheckedAtMs: checkedAtMs,
+        };
+        vi.mocked(getTranscriptionJob).mockResolvedValue(observedJob);
+        vi.mocked(claimJobForFinalize).mockResolvedValue({ ...observedJob, status: 'finalizing' });
+        documentDb.jobData = {
+            ...documentDb.jobData, azureStatus: 'Running', azureStatusCheckedAt: Timestamp.fromMillis(checkedAtMs),
+        };
+        documentDb.data = {
+            ...documentDb.data, processingProgress: { stage: 'transcribing', stageObservedAt: Timestamp.fromMillis(checkedAtMs) },
+        };
+        const before = { ...documentDb.data };
+        if (failure === '通信失敗') vi.mocked(getBatchJob).mockRejectedValueOnce(new Error('合成の通信障害'));
+        else vi.mocked(getBatchJob).mockResolvedValueOnce({ status: 'Unknown' as AzureBatchStatus });
+
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+        expect(res.status).toBe(502);
+        const body = await res.json();
+        expect(body).toEqual({
+            error: 'upstream_error', message: expect.any(String), docId: 'doc-1', stage: 'checking',
+            azureStatusCheckedAtMs: checkedAtMs, createdAtMs: syntheticCreatedAtMs,
+            audioSec: 600, serverNowMs: syntheticNowMs,
+        });
+        expect(body).not.toHaveProperty('status');
+        expect(recordAzureObservation).not.toHaveBeenCalled();
+        expect(writeProcessingProgress).not.toHaveBeenCalled();
+        expect(documentDb.data).toEqual(before);
+        expect(documentDb.jobData?.azureStatusCheckedAt).toEqual(Timestamp.fromMillis(checkedAtMs));
+        expect(updateTranscriptionJob).toHaveBeenCalledExactlyOnceWith('job-1', { status: 'running' });
+        expect(commitTerminalOutcome).not.toHaveBeenCalled();
+        expect(deleteBatchJob).not.toHaveBeenCalled();
+    });
+
+    it('保存済み Azure 終端から逆戻りする観測は採用せず checking と旧鮮度を返す', async () => {
+        const checkedAtMs = syntheticNowMs - 60_000;
+        documentDb.jobData = {
+            ...documentDb.jobData, azureStatus: 'Succeeded', azureStatusCheckedAt: Timestamp.fromMillis(checkedAtMs),
+        };
+        vi.mocked(getBatchJob).mockResolvedValueOnce({ status: 'Running' });
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+
+        expect(res.status).toBe(502);
+        expect(await res.json()).toMatchObject({
+            stage: 'checking', azureStatusCheckedAtMs: checkedAtMs, serverNowMs: syntheticNowMs,
+        });
+        expect(documentDb.tx.set).not.toHaveBeenCalled();
+        expect(writeProcessingProgress).not.toHaveBeenCalled();
         expect(commitTerminalOutcome).not.toHaveBeenCalled();
     });
 
@@ -505,7 +707,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
             const res = await statusPOST(req({ jobId: 'job-1' }));
             const reason = '文字起こし結果の取り込みに失敗しました。もう一度お試しください。';
             expect(res.status).toBe(200);
-            expect(await res.json()).toEqual({ status: 'failed', docId: 'doc-1', error: reason });
+            expect(await res.json()).toEqual(expectedStatus('failed', { error: reason, observed: true }));
             expect(commitTerminalOutcome).toHaveBeenCalledWith({
                 jobId: 'job-1', docId: 'doc-1', expectedOwnerId: 'GUEST', outcome: { kind: 'failed', reason },
             });
@@ -528,9 +730,12 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
             documentDb.commitError = new Error('合成の commit エラー');
             const res = await statusPOST(req({ jobId: 'job-1' }));
             expect(res.status).toBe(502);
-            expect(documentDb.tx.set).toHaveBeenCalledTimes(2);
-            expect(documentDb.data).toEqual(original);
-            expect(documentDb.jobData).toEqual({ status: 'finalizing' });
+            expect(documentDb.tx.set).toHaveBeenCalledTimes(4);
+            expect(documentDb.data).toMatchObject(original);
+            expect(documentDb.data).toMatchObject({
+                status: 'processing', processingProgress: { stage: stage === 'Failed' ? 'checking' : 'importing' },
+            });
+            expect(documentDb.jobData).toMatchObject({ status: 'finalizing' });
             expect(commitTerminalOutcome).toHaveBeenCalledTimes(1);
             expect(updateTranscriptionJob).not.toHaveBeenCalled();
             expect(deleteBatchJob).not.toHaveBeenCalled();
@@ -538,11 +743,18 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
             vi.mocked(getTranscriptionJob).mockResolvedValueOnce({
                 ...runningJob, status: 'finalizing', updatedAtMs: Date.now() - FINALIZE_LEASE_MS - 1,
             });
-            vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+            vi.mocked(getBatchJob).mockResolvedValue({ status: stage === 'Failed' ? 'Failed' : 'Succeeded' });
             const retried = await statusPOST(req({ jobId: 'job-1' }));
-            expect(await retried.json()).toEqual({ status: 'succeeded', docId: 'doc-1' });
-            expect(documentDb.data).toMatchObject({ status: 'completed', transcription: expect.stringContaining('よろしくお願いします') });
-            expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+            const failed = stage === 'Failed';
+            expect(await retried.json()).toEqual(expectedStatus(failed ? 'failed' : 'succeeded', {
+                observed: true, ...(failed && { error: 'Azure 側で処理に失敗しました。' }),
+            }));
+            expect(documentDb.data).toMatchObject({
+                status: failed ? 'failed' : 'completed',
+                transcription: expect.stringContaining(failed ? 'Azure 側で処理に失敗しました。' : 'よろしくお願いします'),
+            });
+            expect(documentDb.data).not.toHaveProperty('processingProgress');
+            expect(documentDb.jobData).toMatchObject({ status: failed ? 'failed' : 'succeeded' });
             expect(deleteBatchJob).toHaveBeenCalledTimes(1);
         },
     );
@@ -554,7 +766,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
         const res = await statusPOST(req({ jobId: 'job-1' }));
         expect((await res.json()).status).toBe(status === 'Succeeded' ? 'succeeded' : 'failed');
         expect(documentDb.data).toBeUndefined();
-        expect(documentDb.tx.set).toHaveBeenCalledTimes(1);
+        expect(documentDb.tx.set).toHaveBeenCalledTimes(2);
         expect(documentDb.tx.set).toHaveBeenCalledWith(documentDb.jobRef, expect.objectContaining({
             status: status === 'Succeeded' ? 'succeeded' : 'failed',
         }), { merge: true });
@@ -563,9 +775,14 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
     });
 
     it.each(['Succeeded', 'Failed', '取り込み失敗'] as const)(
-        '%s の commit が not_owner なら最新の失敗理由を返し、文書更新も Azure 削除もしない', async (stage) => {
+        '%s の commit が not_owner なら最新の失敗理由を返し、本文更新も Azure 削除もしない', async (stage) => {
             const reason = '別リクエストが確定した合成の失敗理由';
-            documentDb.jobData = { status: 'failed', error: reason };
+            vi.mocked(commitTerminalOutcome).mockImplementationOnce(async params => {
+                // Azure 観測と進捗投影を終えた後、保存直前に別リクエストが確定する。
+                documentDb.jobData = { ...documentDb.jobData, status: 'failed', error: reason };
+                const actual = await vi.importActual<typeof import('@/server/transcriptionJob')>('@/server/transcriptionJob');
+                return actual.commitTerminalOutcome(params);
+            });
             vi.mocked(getTranscriptionJob)
                 .mockResolvedValueOnce(runningJob)
                 .mockResolvedValueOnce({ ...runningJob, status: 'failed', error: reason });
@@ -575,10 +792,11 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
                 vi.mocked(fetchBatchResult).mockRejectedValueOnce(new Error('合成の取得エラー'));
             }
             const res = await statusPOST(req({ jobId: 'job-1' }));
-            expect(await res.json()).toEqual({ status: 'failed', docId: 'doc-1', error: reason });
+            expect(await res.json()).toEqual(expectedStatus('failed', { error: reason }));
             expect(commitTerminalOutcome).toHaveResolvedWith('not_owner');
             expect(getTranscriptionJob).toHaveBeenCalledTimes(2);
-            expect(documentDb.tx.set).not.toHaveBeenCalled();
+            expect(documentDb.tx.set).toHaveBeenCalledTimes(2);
+            expect(documentDb.data).toMatchObject({ status: 'processing', transcription: '処理中' });
             expect(updateTranscriptionJob).not.toHaveBeenCalled();
             expect(deleteBatchJob).not.toHaveBeenCalled();
         },
@@ -586,8 +804,12 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
 
     it.each(['running', 'finalizing', 'succeeded', 'deleted'] as const)(
         'commit 権を失った後の現在状態 %s を返す', async (status) => {
-            // commit の時点では running に戻っていて、再読込時に次の処理が進んでいる場合も含む。
-            documentDb.jobData = status === 'deleted' ? undefined : { status: 'running' };
+            // 観測後の commit 時点で権限を失い、再読込時に次の処理が進んでいる場合も含む。
+            vi.mocked(commitTerminalOutcome).mockImplementationOnce(async params => {
+                documentDb.jobData = status === 'deleted' ? undefined : { ...documentDb.jobData, status: 'running' };
+                const actual = await vi.importActual<typeof import('@/server/transcriptionJob')>('@/server/transcriptionJob');
+                return actual.commitTerminalOutcome(params);
+            });
             vi.mocked(getTranscriptionJob)
                 .mockResolvedValueOnce(runningJob)
                 .mockResolvedValueOnce(status === 'deleted' ? null : { ...runningJob, status });
@@ -595,8 +817,10 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
             vi.mocked(fetchBatchResult).mockResolvedValue(sampleAzureResult());
             const res = await statusPOST(req({ jobId: 'job-1' }));
             if (status === 'deleted') expect(res.status).toBe(404);
-            else expect(await res.json()).toEqual({ status: status === 'finalizing' ? 'running' : status, docId: 'doc-1' });
-            expect(documentDb.tx.set).not.toHaveBeenCalled();
+            else expect(await res.json()).toEqual(expectedStatus(status === 'finalizing' ? 'running' : status));
+            expect(commitTerminalOutcome).toHaveResolvedWith('not_owner');
+            expect(documentDb.tx.set).toHaveBeenCalledTimes(2);
+            expect(documentDb.data).toMatchObject({ status: 'processing', transcription: '処理中' });
             expect(deleteBatchJob).not.toHaveBeenCalled();
         },
     );
@@ -623,6 +847,7 @@ describe.each(['completed', 'failed'] as const)('文書を %s にする際のト
     });
 
     it('所有者が一致する processing のみ更新し、再確定で本文を上書きしない', async () => {
+        documentDb.data = { ...documentDb.data, processingProgress: { stage: 'importing' } };
         await expect(finalizeDocument()).resolves.toBe('committed');
         expect(documentDb.runTransaction).toHaveBeenCalledTimes(1);
         expect(documentDb.tx.get).toHaveBeenCalledWith(documentDb.jobRef);
@@ -631,6 +856,10 @@ describe.each(['completed', 'failed'] as const)('文書を %s にする際のト
             status: terminalStatus,
         }), { merge: true });
         expect(documentDb.data).toMatchObject({ status: terminalStatus, ownerId: 'GUEST', title: '合成の文書' });
+        expect(documentDb.data).not.toHaveProperty('processingProgress');
+        expect(documentDb.tx.set).toHaveBeenCalledWith(documentDb.ref, expect.objectContaining({
+            processingProgress: FieldValue.delete(),
+        }), { merge: true });
         const saved = { ...documentDb.data };
         expect(documentDb.jobData).toMatchObject({ status: terminalStatus === 'completed' ? 'succeeded' : 'failed' });
         await expect(finalizeDocument()).resolves.toBe('not_owner');

@@ -23,19 +23,26 @@ const doubles = vi.hoisted(() => ({
 
 vi.mock('@/lib/logger', () => ({ createLogger: () => ({ info: vi.fn(), warn: doubles.warn, error: vi.fn() }) }));
 vi.mock('firebase-admin/firestore', () => ({
-    FieldValue: { serverTimestamp: () => 'SERVER_TS' },
+    FieldValue: { serverTimestamp: () => 'SERVER_TS', delete: () => 'SERVER_DELETE' },
 }));
 vi.mock('./firebaseAdmin', () => ({
     getAdminFirestore: () => ({
         collection: (name: string) => ({
-            doc: (id: string) => ({ id: `${name}/${id}` }),
+            doc: (id: string) => ({
+                id: `${name}/${id}`,
+                get: async () => {
+                    const data = doubles.jobs.get(`${name}/${id}`);
+                    return { exists: data !== undefined, data: () => data };
+                },
+            }),
             where: doubles.where,
         }),
         runTransaction: doubles.runTransaction,
     }),
 }));
 
-import { claimJobForFinalize, commitTerminalOutcome, FINALIZE_LEASE_MS, getTranscriptionJobByDocId, type TerminalOutcome } from './transcriptionJob';
+import { claimJobForFinalize, commitTerminalOutcome, FINALIZE_LEASE_MS, getTranscriptionJob, getTranscriptionJobByDocId, recordAzureObservation, updateTranscriptionJob, type TerminalOutcome } from './transcriptionJob';
+import type { AzureBatchStatus } from '@/lib/azureBatchContract';
 
 const NOW_MS = 1_800_000_000_000;
 const JOB_ID = 'synthetic-job';
@@ -91,26 +98,27 @@ beforeEach(() => {
             const value = await fn({
                 get: async ref => {
                     if (pendingUpdates.length > 0) throw new Error('Firestore reads must precede writes');
-                    doubles.get(ref);
+                    doubles.get({ id: ref.id });
                     const data = doubles.jobs.get(ref.id);
                     return { exists: data !== undefined, data: () => data };
                 },
                 update: (ref, patch) => {
-                    doubles.update(ref, patch);
+                    doubles.update({ id: ref.id }, patch);
                     pendingUpdates.push({ ref, patch });
                 },
                 set: (ref, patch, options) => {
-                    doubles.set(ref, patch, options);
+                    doubles.set({ id: ref.id }, patch, options);
                     pendingUpdates.push({ ref, patch });
                 },
             });
             if (doubles.commitError) throw doubles.commitError;
             for (const { ref, patch } of pendingUpdates) {
-                doubles.jobs.set(ref.id, {
-                    ...doubles.jobs.get(ref.id),
-                    ...patch,
-                    updatedAt: patch.updatedAt === 'SERVER_TS' ? { toMillis: () => NOW_MS } : patch.updatedAt,
-                });
+                const next = { ...doubles.jobs.get(ref.id) };
+                for (const [key, value] of Object.entries(patch)) {
+                    if (value === 'SERVER_DELETE') delete next[key];
+                    else next[key] = value === 'SERVER_TS' ? { toMillis: () => NOW_MS } : value;
+                }
+                doubles.jobs.set(ref.id, next);
             }
             return value;
         });
@@ -121,6 +129,100 @@ beforeEach(() => {
 
 afterEach(() => {
     vi.restoreAllMocks();
+});
+
+describe('Azure 観測の読み取り', () => {
+    it.each(['NotStarted', 'Running', 'Succeeded', 'Failed'] as const)('%s と Timestamp を読み取る', async azureStatus => {
+        doubles.jobs.set(JOB_PATH, makeJob({ azureStatus, azureStatusCheckedAt: { toMillis: () => NOW_MS - 1000 } }));
+        await expect(getTranscriptionJob(JOB_ID)).resolves.toMatchObject({ azureStatus, azureStatusCheckedAtMs: NOW_MS - 1000 });
+    });
+
+    it('観測のない旧ジョブには観測状態・観測時刻を補わない', async () => {
+        doubles.jobs.set(JOB_PATH, makeJob());
+        const job = await getTranscriptionJob(JOB_ID);
+        expect(job).not.toHaveProperty('azureStatus');
+        expect(job).not.toHaveProperty('azureStatusCheckedAtMs');
+    });
+
+    it.each([
+        undefined, null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, 'synthetic-date',
+        { toMillis: () => Number.NaN }, { toMillis: () => 'synthetic-date' },
+        { toMillis: () => { throw new Error('synthetic timestamp'); } },
+    ])('不正な観測値 %s を省略する', async azureStatusCheckedAt => {
+        doubles.jobs.set(JOB_PATH, makeJob({ azureStatus: 'Unknown', azureStatusCheckedAt }));
+        const job = await getTranscriptionJob(JOB_ID);
+        expect(job).not.toHaveProperty('azureStatus');
+        expect(job).not.toHaveProperty('azureStatusCheckedAtMs');
+    });
+
+    it('既存の数値形式の時刻もミリ秒として読み取る', async () => {
+        doubles.jobs.set(JOB_PATH, makeJob({ azureStatus: 'Running', azureStatusCheckedAt: NOW_MS }));
+        await expect(getTranscriptionJob(JOB_ID)).resolves.toMatchObject({ azureStatusCheckedAtMs: NOW_MS });
+    });
+});
+
+describe('recordAzureObservation', () => {
+    it.each(['NotStarted', 'Running', 'Succeeded', 'Failed'] as const)('%s の観測だけを merge し、リース時計を変更しない', async azureStatus => {
+        const before = makeJob({ status: 'finalizing' });
+        doubles.jobs.set(JOB_PATH, before);
+        await expect(recordAzureObservation(JOB_ID, azureStatus)).resolves.toMatchObject({
+            azureStatus, azureStatusCheckedAtMs: NOW_MS, status: 'finalizing', updatedAtMs: NOW_MS - 30_000,
+        });
+        expect(doubles.set).toHaveBeenCalledExactlyOnceWith(
+            { id: JOB_PATH }, { azureStatus, azureStatusCheckedAt: 'SERVER_TS' }, { merge: true },
+        );
+        expect(doubles.update).not.toHaveBeenCalled();
+        expect(doubles.jobs.get(JOB_PATH)?.updatedAt).toBe(before.updatedAt);
+    });
+
+    it('同じ段階でも有効観測時刻を更新する', async () => {
+        doubles.jobs.set(JOB_PATH, makeJob({ azureStatus: 'Running', azureStatusCheckedAt: NOW_MS - 1000 }));
+        await expect(recordAzureObservation(JOB_ID, 'Running')).resolves.toMatchObject({ azureStatusCheckedAtMs: NOW_MS });
+        expect(doubles.set).toHaveBeenCalledTimes(1);
+    });
+
+    it('存在しないジョブを復活させない', async () => {
+        await expect(recordAzureObservation(JOB_ID, 'Running')).resolves.toBeNull();
+        expect(doubles.set).not.toHaveBeenCalled();
+        expect(doubles.jobs.size).toBe(0);
+    });
+
+    it.each(['succeeded', 'failed'])('終端 %s に遅れた観測を書かない', async status => {
+        const before = makeJob({ status, azureStatus: 'Succeeded', azureStatusCheckedAt: NOW_MS - 1000 });
+        doubles.jobs.set(JOB_PATH, before);
+        await expect(recordAzureObservation(JOB_ID, 'Running')).resolves.toMatchObject({ status, azureStatus: 'Succeeded', azureStatusCheckedAtMs: NOW_MS - 1000 });
+        expect(doubles.set).not.toHaveBeenCalled();
+        expect(doubles.jobs.get(JOB_PATH)).toBe(before);
+    });
+
+    it.each(['NotStarted', 'Running', 'Failed'] as const)('Succeeded 観測後の %s で逆戻り・鮮度更新をしない', async azureStatus => {
+        const before = makeJob({ azureStatus: 'Succeeded', azureStatusCheckedAt: NOW_MS - 1000 });
+        doubles.jobs.set(JOB_PATH, before);
+        await expect(recordAzureObservation(JOB_ID, azureStatus)).resolves.toMatchObject({ azureStatus: 'Succeeded', azureStatusCheckedAtMs: NOW_MS - 1000 });
+        expect(doubles.set).not.toHaveBeenCalled();
+        expect(doubles.jobs.get(JOB_PATH)).toBe(before);
+    });
+
+    it('未知の状態で有効観測を置き換えない', async () => {
+        doubles.jobs.set(JOB_PATH, makeJob({ azureStatus: 'Running', azureStatusCheckedAt: NOW_MS - 1000 }));
+        await expect(recordAzureObservation(JOB_ID, 'Unknown' as AzureBatchStatus)).resolves.toMatchObject({
+            azureStatus: 'Running', azureStatusCheckedAtMs: NOW_MS - 1000,
+        });
+        expect(doubles.set).not.toHaveBeenCalled();
+    });
+
+    it('観測が重なっても Succeeded を Running に戻さない', async () => {
+        doubles.jobs.set(JOB_PATH, makeJob());
+        await Promise.all([recordAzureObservation(JOB_ID, 'Succeeded'), recordAzureObservation(JOB_ID, 'Running')]);
+        expect(doubles.jobs.get(JOB_PATH)?.azureStatus).toBe('Succeeded');
+        expect(doubles.set).toHaveBeenCalledTimes(1);
+    });
+
+    it('観測後も元のリース期限で再取得できる', async () => {
+        doubles.jobs.set(JOB_PATH, makeJob({ status: 'finalizing', updatedAt: NOW_MS - FINALIZE_LEASE_MS - 1 }));
+        await recordAzureObservation(JOB_ID, 'Running');
+        await expect(claimJobForFinalize(JOB_ID)).resolves.toMatchObject({ status: 'finalizing', updatedAtMs: NOW_MS });
+    });
 });
 
 describe('getTranscriptionJobByDocId', () => {
@@ -148,6 +250,37 @@ describe('getTranscriptionJobByDocId', () => {
             { id: JOB_ID, data: () => makeJob() },
         ] });
         await expect(getTranscriptionJobByDocId(DOC_ID)).resolves.toMatchObject({ id: JOB_ID, docId: DOC_ID });
+    });
+});
+
+describe('updateTranscriptionJob の非終端更新', () => {
+    it.each(['running', 'finalizing'] as const)('%s への通常更新は従来どおり updatedAt を更新する', async status => {
+        doubles.jobs.set(JOB_PATH, makeJob({ status: 'finalizing' }));
+        await updateTranscriptionJob(JOB_ID, { status });
+        expect(doubles.set).toHaveBeenCalledExactlyOnceWith(
+            { id: JOB_PATH }, { status, updatedAt: 'SERVER_TS' }, { merge: true },
+        );
+        await expect(getTranscriptionJob(JOB_ID)).resolves.toMatchObject({ status, updatedAtMs: NOW_MS });
+    });
+
+    it.each([undefined, 'succeeded', 'failed'])('遅い running への解放は %s のジョブを復活させない', async status => {
+        if (status !== undefined) doubles.jobs.set(JOB_PATH, makeJob({ status }));
+        const before = new Map(doubles.jobs);
+        await updateTranscriptionJob(JOB_ID, { status: 'running' });
+        expect(doubles.set).not.toHaveBeenCalled();
+        expect(doubles.jobs).toEqual(before);
+    });
+
+    it('終端確定と重なった遅い解放は成功済み状態を保持する', async () => {
+        doubles.jobs.set(JOB_PATH, makeJob({ status: 'finalizing' }));
+        doubles.jobs.set(DOC_PATH, makeDocument());
+        await Promise.all([
+            commitTerminalOutcome(terminalParams(successOutcome)),
+            updateTranscriptionJob(JOB_ID, { status: 'running' }),
+        ]);
+        expect(doubles.jobs.get(JOB_PATH)?.status).toBe('succeeded');
+        expect(doubles.jobs.get(DOC_PATH)?.status).toBe('completed');
+        expect(doubles.set).toHaveBeenCalledTimes(2);
     });
 });
 
@@ -221,6 +354,7 @@ describe('commitTerminalOutcome', () => {
             transcription: successOutcome.transcription,
             generatedByModel: successOutcome.generatedByModel,
             status: 'completed',
+            processingProgress: 'SERVER_DELETE',
             updatedAt: 'SERVER_TS',
         }, { merge: true });
         expect(doubles.set).toHaveBeenNthCalledWith(2, { id: JOB_PATH }, {
@@ -241,7 +375,7 @@ describe('commitTerminalOutcome', () => {
         expect(doubles.set).toHaveBeenCalledTimes(2);
         expect(doubles.set).toHaveBeenNthCalledWith(1, { id: DOC_PATH }, {
             transcription: `文字起こしに失敗しました。\n\n理由: ${failureOutcome.reason}\n\nお手数ですが、もう一度お試しください。`,
-            status: 'failed', updatedAt: 'SERVER_TS',
+            status: 'failed', processingProgress: 'SERVER_DELETE', updatedAt: 'SERVER_TS',
         }, { merge: true });
         expect(doubles.set).toHaveBeenNthCalledWith(2, { id: JOB_PATH }, {
             status: 'failed', error: failureOutcome.reason, updatedAt: 'SERVER_TS',
@@ -268,6 +402,7 @@ describe('commitTerminalOutcome', () => {
         it.each([
             { name: '削除済み', document: undefined },
             { name: '所有者が異なる', document: makeDocument({ ownerId: 'synthetic-other-owner' }) },
+            { name: 'jobId が異なる', document: makeDocument({ jobId: 'synthetic-other-job' }) },
             { name: 'completed', document: makeDocument({ status: 'completed', transcription: '利用者の合成編集' }) },
             { name: 'failed', document: makeDocument({ status: 'failed', transcription: '既存の合成失敗理由' }) },
             { name: 'status 未設定', document: makeDocument({ status: undefined }) },
@@ -311,6 +446,16 @@ describe('commitTerminalOutcome', () => {
             await expect(commitTerminalOutcome(terminalParams(successOutcome))).resolves.toBe('not_owner');
             expect(doubles.jobs).toEqual(committed);
             expect(doubles.set).not.toHaveBeenCalled();
+        });
+
+        it('終端確定で処理中の段階投影を削除し、本文と status を保存する', async () => {
+            doubles.jobs.set(DOC_PATH, makeDocument({
+                jobId: JOB_ID,
+                processingProgress: { stage: 'importing', stageObservedAt: NOW_MS - 1000 },
+            }));
+            await expect(commitTerminalOutcome(terminalParams(outcome))).resolves.toBe('committed');
+            expect(doubles.jobs.get(DOC_PATH)).not.toHaveProperty('processingProgress');
+            expect(doubles.jobs.get(DOC_PATH)?.status).toBe(outcome.kind === 'succeeded' ? 'completed' : 'failed');
         });
     });
 
