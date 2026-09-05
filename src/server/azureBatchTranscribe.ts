@@ -175,6 +175,12 @@ export interface ParsedBatch {
     speakers: number;
     /** 単語時刻は落とした語も数える（黙って減らさない） */
     droppedPhrases: number;
+    /**
+     * 時刻が読めず本文・時刻リンクから落とした句の品質素材（text / confidence / recognitionStatus / phraseIndex / speaker・時刻なし）。
+     * 🔴 本文には使わない。要確認候補の集計にだけ使う（設計 B2: 品質集計は時刻不正による除外より前に行い、時刻不明の候補も数える）。
+     *    常に `droppedAnnotations.length === droppedPhrases`。
+     */
+    droppedAnnotations: TranscriptAnnotation[];
 }
 
 /**
@@ -182,6 +188,9 @@ export interface ParsedBatch {
  * 🔴 単語全部を注釈にすると 2 時間で ~15,000 語になり Firestore の 1 MiB ドキュメント上限に当たる。
  *    UI は段落先頭に時刻リンクを張る方式なので、句単位で十分（設計 §6.4・データモデルの注意）。
  * 🔴 時刻が読めなかった句は落とし、件数を返す（0 埋めでカバレッジを偽らない）。
+ * 🔴 品質素材（設計 B2）: `nBest[0].confidence` は有限かつ 0〜1 のときだけ載せる（欠損・範囲外は undefined のまま。0 埋め・
+ *    文字列変換しない）。`recognitionStatus` は文字列のときだけ。`phraseIndex` は元配列の index（要確認候補の決定的 ID の素材）。
+ *    時刻が読めなかった句の品質素材は `droppedAnnotations` に残す（本文には使わない）。
  */
 export function parseBatchResult(result: AzureBatchResult): ParsedBatch {
     const audioSec = (num(result.durationMilliseconds) ?? 0) / 1000;
@@ -190,31 +199,44 @@ export function parseBatchResult(result: AzureBatchResult): ParsedBatch {
         : [];
 
     const annotations: TranscriptAnnotation[] = [];
+    const droppedAnnotations: TranscriptAnnotation[] = [];
     const speakerSet = new Set<string>();
     let droppedPhrases = 0;
 
-    for (const phrase of phrases) {
-        const offsetTicks = num(asRecord(phrase)?.offsetInTicks);
-        const durationTicks = num(asRecord(phrase)?.durationInTicks);
+    for (let phraseIndex = 0; phraseIndex < phrases.length; phraseIndex += 1) {
+        const phrase = asRecord(phrases[phraseIndex]);
+        const nBest = Array.isArray(phrase?.nBest) ? (phrase.nBest[0] as AzureBatchNBest | undefined) : undefined;
+        const text = str(nBest?.display) ?? '';
+        const confidence = num(nBest?.confidence);
+        const recognitionStatus = str(phrase?.recognitionStatus);
+        const speaker = num(phrase?.speaker);
+        const speakerLabel = speaker !== undefined ? `spk:${speaker}` : null;
+        // 品質素材は時刻の可否より前に確定する（時刻不明の句も要確認候補の集計に含めるため）
+        const quality: TranscriptAnnotation = {
+            text,
+            speaker: speakerLabel,
+            phraseIndex,
+            ...(confidence !== undefined && confidence >= 0 && confidence <= 1 && { confidence }),
+            ...(recognitionStatus !== undefined && { recognitionStatus }),
+        };
+
+        const offsetTicks = num(phrase?.offsetInTicks);
+        const durationTicks = num(phrase?.durationInTicks);
         // Azure の ticks は 100 ns 単位。ms が読めなければ ticks から補う。
-        const offsetMs = num(phrase.offsetMilliseconds)
+        const offsetMs = num(phrase?.offsetMilliseconds)
             ?? (offsetTicks !== undefined ? offsetTicks / 10_000 : undefined);
-        const durationMs = num(phrase.durationMilliseconds)
+        const durationMs = num(phrase?.durationMilliseconds)
             ?? (durationTicks !== undefined ? durationTicks / 10_000 : undefined);
         if (offsetMs === undefined || durationMs === undefined) {
             droppedPhrases += 1;
+            droppedAnnotations.push(quality);
             continue;
         }
-        const nBest = Array.isArray(phrase.nBest) ? (phrase.nBest[0] as AzureBatchNBest | undefined) : undefined;
-        const text = str(nBest?.display) ?? '';
-        const speaker = num(phrase.speaker);
-        const speakerLabel = speaker !== undefined ? `spk:${speaker}` : null;
         if (speakerLabel) speakerSet.add(speakerLabel);
         annotations.push({
-            text,
+            ...quality,
             startSec: offsetMs / 1000,
             endSec: (offsetMs + durationMs) / 1000,
-            speaker: speakerLabel,
         });
     }
 
@@ -235,5 +257,6 @@ export function parseBatchResult(result: AzureBatchResult): ParsedBatch {
         audioSec,
         speakers: speakerSet.size,
         droppedPhrases,
+        droppedAnnotations,
     };
 }

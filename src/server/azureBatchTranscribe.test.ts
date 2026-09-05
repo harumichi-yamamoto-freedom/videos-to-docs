@@ -69,7 +69,10 @@ describe('parseBatchResult', () => {
             startSec: 0.5,
             endSec: 3.5,
             speaker: 'spk:1',
+            phraseIndex: 0,
         }]);
+        expect(parsed.annotations[0]).not.toHaveProperty('confidence');
+        expect(parsed.annotations[0]).not.toHaveProperty('recognitionStatus');
         expect(parsed.droppedPhrases).toBe(0);
     });
 
@@ -139,6 +142,104 @@ describe('parseBatchResult', () => {
         expect(parsed.annotations).toHaveLength(0);
         expect(parsed.audioSec).toBe(0);
         expect(parsed.text).toBe('');
+        expect(parsed.droppedAnnotations).toEqual([]);
+    });
+});
+
+/**
+ * 要確認候補の品質素材（設計 B2）。confidence は有限 0〜1 のときだけ、recognitionStatus は文字列のときだけ載せる。
+ * 欠損・範囲外は undefined のまま（0 埋め・文字列変換しない）。phraseIndex は元配列の index。
+ */
+describe('parseBatchResult の品質素材', () => {
+    const phraseAt = (offsetMs: number, patch: Record<string, unknown> = {}, nBest: Record<string, unknown> = {}) => ({
+        offsetMilliseconds: offsetMs,
+        durationMilliseconds: 1000,
+        speaker: 1,
+        recognitionStatus: 'Success',
+        nBest: [{ display: '合成の句', confidence: 0.9, ...nBest }],
+        ...patch,
+    });
+
+    it('confidence・recognitionStatus・phraseIndex を句ごとに載せる', () => {
+        const parsed = parseBatchResult(sampleResult());
+        expect(parsed.annotations[0]).toMatchObject({ phraseIndex: 0, confidence: 0.9, recognitionStatus: 'Success' });
+        expect(parsed.annotations[1]).toMatchObject({ phraseIndex: 1, confidence: 0.88, recognitionStatus: 'Success' });
+        // 既存の本文・時刻・話者は変わらない
+        expect(parsed.annotations[0]).toMatchObject({ text: 'こんにちは。', startSec: 0.5, endSec: 3.5, speaker: 'spk:1' });
+        expect(parsed.text).toBe('こんにちは。よろしくお願いします。');
+        expect(parsed.droppedAnnotations).toEqual([]);
+    });
+
+    it.each([0, 0.749, 0.75, 1])('境界値 %s の confidence はそのまま載せる（丸めない）', (confidence) => {
+        const parsed = parseBatchResult({ recognizedPhrases: [phraseAt(0, {}, { confidence })] });
+        expect(parsed.annotations[0].confidence).toBe(confidence);
+    });
+
+    it.each([
+        ['欠損', undefined], ['null', null], ['文字列', '0.9'], ['NaN', Number.NaN],
+        ['Infinity', Number.POSITIVE_INFINITY], ['負', -0.01], ['1 超', 1.01],
+    ])('🔴 confidence が%s なら載せない（0 にも高信頼にも置換しない）', (_label, confidence) => {
+        const parsed = parseBatchResult({ recognizedPhrases: [phraseAt(0, {}, { confidence })] });
+        expect(parsed.annotations).toHaveLength(1);
+        expect(parsed.annotations[0]).not.toHaveProperty('confidence');
+        expect(parsed.annotations[0]).toMatchObject({ text: '合成の句', phraseIndex: 0, recognitionStatus: 'Success' });
+    });
+
+    it.each([['欠損', undefined], ['null', null], ['数値', 5]])(
+        'recognitionStatus が%s なら載せない（Success に置換しない）', (_label, recognitionStatus) => {
+            const parsed = parseBatchResult({ recognizedPhrases: [phraseAt(0, { recognitionStatus })] });
+            expect(parsed.annotations[0]).not.toHaveProperty('recognitionStatus');
+            expect(parsed.annotations[0]).toMatchObject({ confidence: 0.9, phraseIndex: 0 });
+        },
+    );
+
+    it('非 Success の recognitionStatus と空の表示テキストもそのまま載せる（正規化しない）', () => {
+        const parsed = parseBatchResult({
+            recognizedPhrases: [phraseAt(0, { recognitionStatus: 'NoMatch' }, { display: '' })],
+        });
+        expect(parsed.annotations[0]).toMatchObject({ text: '', recognitionStatus: 'NoMatch', phraseIndex: 0 });
+    });
+
+    it('nBest が無い句は本文空・confidence 無しで残す', () => {
+        const parsed = parseBatchResult({ recognizedPhrases: [phraseAt(0, { nBest: undefined })] });
+        expect(parsed.annotations[0]).toMatchObject({ text: '', phraseIndex: 0, recognitionStatus: 'Success' });
+        expect(parsed.annotations[0]).not.toHaveProperty('confidence');
+    });
+
+    it('🔴 phraseIndex は元配列の index（前の句が落ちても詰めない）。落ちた句の品質素材は droppedAnnotations に残す', () => {
+        const parsed = parseBatchResult({
+            recognizedPhrases: [
+                // 時刻が読めない（offset 欠落）。品質素材だけ残る
+                { durationMilliseconds: 1000, speaker: 3, recognitionStatus: 'Success', nBest: [{ display: '時刻不明の句', confidence: 0.3 }] },
+                phraseAt(2000),
+            ],
+        });
+        expect(parsed.annotations).toHaveLength(1);
+        expect(parsed.annotations[0]).toMatchObject({ phraseIndex: 1, startSec: 2, endSec: 3 });
+        expect(parsed.droppedPhrases).toBe(1);
+        expect(parsed.droppedAnnotations).toEqual([{
+            text: '時刻不明の句', speaker: 'spk:3', phraseIndex: 0, confidence: 0.3, recognitionStatus: 'Success',
+        }]);
+        expect(parsed.droppedAnnotations[0]).not.toHaveProperty('startSec');
+        expect(parsed.droppedAnnotations[0]).not.toHaveProperty('endSec');
+        // 落ちた句の話者は本文の話者数に数えない（従来どおり）。本文にも載らない
+        expect(parsed.speakers).toBe(1);
+        expect(parsed.text).not.toContain('時刻不明の句');
+    });
+
+    it('droppedAnnotations の件数は常に droppedPhrases と一致する', () => {
+        const parsed = parseBatchResult({
+            recognizedPhrases: [
+                { nBest: [{ display: 'a' }] },
+                phraseAt(0),
+                { offsetMilliseconds: 'invalid', offsetInTicks: 'invalid', nBest: [{ display: 'b' }] },
+                null,
+            ],
+        });
+        expect(parsed.droppedPhrases).toBe(3);
+        expect(parsed.droppedAnnotations).toHaveLength(3);
+        expect(parsed.droppedAnnotations.map((a) => a.phraseIndex)).toEqual([0, 2, 3]);
+        expect(parsed.annotations.map((a) => a.phraseIndex)).toEqual([1]);
     });
 });
 
