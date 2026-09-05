@@ -213,6 +213,25 @@ describe('pollBatchStatus', () => {
         expect(res.status).toBe('running');
     });
 
+    it('🔴 バックオフ待ちの最中に中止されたら、満了を待たず直ちに中止理由で拒否する', async () => {
+        // 実 defaultWait（abort 対応）を使う。502 → バックオフ待ちに入り、その間に abort。
+        // タイマー満了（30秒）を待たずに reject すること（呼出側の停止待ち上限 30 秒を超えさせない）。
+        vi.useFakeTimers();
+        try {
+            const controller = new AbortController();
+            vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+                jsonResponse({ error: 'upstream_error', message: '一時エラー' }, false, 502));
+            // wait は注入せず実 defaultWait を使う
+            const pending = pollBatchStatus('j1', { signal: controller.signal });
+            const rejected = expect(pending).rejects.toThrow('画面を離れた');
+            await vi.advanceTimersByTimeAsync(0); // 1 回目の fetch を解決させ、バックオフ待ちへ
+            controller.abort(new Error('画面を離れた'));
+            await rejected; // タイマーを進めずに reject される
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('タイムアウト時は最後に受け取った有効な応答（段階つき）を返す（上限直後の周回が失敗でも）', async () => {
         // 1 周目: 有効な running（段階つき）→ 待ちで時計が上限を超える → 2 周目: 一時エラー → 上限で返す
         vi.spyOn(globalThis, 'fetch')
@@ -328,7 +347,8 @@ describe('pollBatchStatus', () => {
         const wait = vi.fn(async () => { controller.abort(reason); });
 
         await expect(pollBatchStatus('j1', { signal: controller.signal, wait })).rejects.toBe(reason);
-        expect(wait).toHaveBeenCalledExactlyOnceWith(30_000);
+        // signal のある本番経路では wait に signal も渡す（defaultWait が abort に即応するため）。
+        expect(wait).toHaveBeenCalledExactlyOnceWith(30_000, controller.signal);
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 

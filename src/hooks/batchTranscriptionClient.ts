@@ -197,11 +197,35 @@ export interface PollOptions {
     onTick?: (status: TranscribeStatusResponse) => void;
     /** 分かっていれば渡す。同じ文書の他の確認と実行中リクエストを共有する */
     docId?: string;
-    /** テスト用: 待ちを差し替える */
-    wait?: (ms: number) => Promise<void>;
+    /** テスト用: 待ちを差し替える。signal は省略可（既存の注入は 1 引数のままでよい） */
+    wait?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
-const defaultWait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/**
+ * バックオフ待ち。🔴 中止に即応する。
+ * 30→60 秒のバックオフ中に中止が来ても満了まで待つと、呼出側の停止待ち上限（30 秒）を超えて
+ * 強制破棄ダイアログに進み、ジョブ占有も解放されない（レビュー major）。中止時はタイマーとリスナーを
+ * 解放して中止理由で直ちに reject する。
+ */
+const defaultWait = (ms: number, signal?: AbortSignal): Promise<void> => new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+        reject(abortReason(signal));
+        return;
+    }
+    const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+        cleanup();
+        reject(abortReason(signal as AbortSignal));
+    };
+    const timer = setTimeout(() => {
+        cleanup();
+        resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+});
 
 /**
  * 終端（succeeded/failed）になるまでポーリングする。中止は例外を投げる。
@@ -250,7 +274,9 @@ export async function pollBatchStatus(jobId: string, options: PollOptions = {}):
             // ジョブは Azure 側で継続中。文書は「処理中」のまま残り、後で開けば確定できる。
             return lastStatus ?? { status: 'running', docId: docId ?? '' };
         }
-        await wait(waitMs);
+        // signal がある本番経路では中止に即応する（defaultWait が abort でタイマーを解放して reject）。
+        // signal 無し（テスト等）は従来どおり 1 引数で呼び、待ち差し替えの引数契約を保つ。
+        await (signal ? wait(waitMs, signal) : wait(waitMs));
     }
 }
 
