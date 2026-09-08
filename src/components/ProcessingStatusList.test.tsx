@@ -6,6 +6,9 @@ import {
     CANCEL_LOCAL_LABEL,
     ProcessingStatusList,
     RESUME_CONFIRMATION_LABEL,
+    RETRY_CONVERT_AS_IS_LABEL,
+    RETRY_LOWEST_BITRATE_NOTICE,
+    RETRY_SAVE_ONLY_LABEL,
     STOP_CONFIRMATION_LABEL,
 } from './ProcessingStatusList';
 
@@ -221,5 +224,170 @@ describe('全文文字起こし（バッチ）の段階表示（仕様 §A1・A4
         expect(markup).toContain('音声データをアップロードしています');
         expect(markup).toContain(CANCEL_LOCAL_LABEL);
         expect(markup).not.toContain('全文文字起こし:');
+    });
+});
+
+
+/**
+ * 🔴 サイズ超過だけに出す「変換し直して再試行」（2026-09-04 の実害への手当て）。
+ *    そのまま送られていた音声は下げても効かないので、文言と操作を分ける。
+ */
+describe('サイズ超過からの再変換の導線', () => {
+    const MB = 1024 * 1024;
+
+    const tooLargeStatus = (
+        sizeFailure: FileProcessingStatus['sizeFailure'],
+        overrides: Partial<FileProcessingStatus> = {}
+    ): FileProcessingStatus => createStatus({
+        status: 'error',
+        phase: 'uploading',
+        failedPhase: 'upload',
+        failureKind: 'too_large',
+        error: 'この音声は 600MB で、アップロードできる上限 500MB を超えています。',
+        sizeFailure,
+        ...overrides,
+    });
+
+    const renderWithRetry = (status: FileProcessingStatus) => renderToStaticMarkup(
+        <ProcessingStatusList
+            statuses={[status]}
+            onResumeFile={vi.fn()}
+            onRetryWithConversion={vi.fn()}
+        />
+    );
+
+    it('下げられるときは、実際の下げ先を入れたボタンを出す', () => {
+        const markup = renderWithRetry(tooLargeStatus({ bytes: 600 * MB, bitrate: '96k', wasConverted: true, limitBytes: 500 * MB }));
+
+        expect(markup).toContain('ビットレートを下げて変換し直す（96 kbps → 64 kbps）');
+        // 🔴 同じ大きすぎるデータを送り直すだけのボタンは、どの文言でも置かない。
+        //    保存待ちが無いのでこの行に「再開/保存」系のボタンは 1 つも要らない
+        expect(markup).not.toContain('再開する');
+        expect(markup).not.toContain(RETRY_SAVE_ONLY_LABEL);
+    });
+
+    it('🔴 これ以上下げられない行にも、必ず失敗する「再開する」を置かない', () => {
+        const markup = renderWithRetry(tooLargeStatus({
+            bytes: 600 * MB, bitrate: '64k', wasConverted: true, limitBytes: 500 * MB,
+        }));
+
+        expect(markup).toContain(RETRY_LOWEST_BITRATE_NOTICE);
+        expect(markup).not.toContain('再開する');
+        expect(markup).not.toContain(RETRY_SAVE_ONLY_LABEL);
+    });
+
+    /**
+     * 生成済みの下書きは課金済みの資産なので、回収導線だけは残す。
+     * ただし「生成をやり直す」ではなく保存だけと分かる文言にする。
+     */
+    it('保存待ちの下書きがある行では、保存専用の導線として残す', () => {
+        const markup = renderWithRetry(tooLargeStatus(
+            { bytes: 600 * MB, bitrate: '96k', wasConverted: true, limitBytes: 500 * MB },
+            { savePendingPromptIds: ['prompt-a'] }
+        ));
+
+        expect(markup).toContain(RETRY_SAVE_ONLY_LABEL);
+        expect(markup).not.toContain('>再開する<');
+    });
+
+    it('🔴 そのまま送られていた音声は「下げる」ではなく「変換する」を出す', () => {
+        const markup = renderWithRetry(tooLargeStatus({ bytes: 600 * MB, bitrate: '96k', wasConverted: false, limitBytes: 500 * MB }));
+
+        expect(markup).toContain(RETRY_CONVERT_AS_IS_LABEL);
+        expect(markup).not.toContain('ビットレートを下げて変換し直す');
+    });
+
+    it('これ以上下げられないときはボタンを出さず、打てる手を書く', () => {
+        const markup = renderWithRetry(tooLargeStatus({ bytes: 600 * MB, bitrate: '64k', wasConverted: true, limitBytes: 500 * MB }));
+
+        expect(markup).toContain(RETRY_LOWEST_BITRATE_NOTICE);
+        expect(markup).not.toContain('変換し直す');
+        expect(markup).not.toContain(RETRY_CONVERT_AS_IS_LABEL);
+    });
+
+    it('サイズ以外の失敗には出さない', () => {
+        const markup = renderWithRetry(createStatus({
+            status: 'error', failedPhase: 'text_generation', error: '生成に失敗しました',
+        }));
+
+        expect(markup).toContain('エラーが発生しました');
+        expect(markup).not.toContain('変換し直す');
+        expect(markup).not.toContain(RETRY_CONVERT_AS_IS_LABEL);
+        expect(markup).not.toContain(RETRY_LOWEST_BITRATE_NOTICE);
+    });
+
+    it('失敗していない処理欄には出さない', () => {
+        const markup = renderWithRetry(tooLargeStatus(
+            { bytes: 600 * MB, bitrate: '96k', wasConverted: true, limitBytes: 500 * MB },
+            { status: 'canceled', phase: 'canceled' }
+        ));
+
+        expect(markup).not.toContain('変換し直す');
+    });
+
+    /**
+     * 🔴 再変換ボタンの有無と「再開する」の有無は**同じ述語**で決める。別々に判定すると、
+     *    種別はあるが実測値が無い行で「どのボタンも出ない」状態が作れてしまう。
+     */
+    it('実測値が残っていない失敗では、当て推量の再変換は出さず、通常の再開は残す', () => {
+        const markup = renderWithRetry(tooLargeStatus(undefined));
+
+        expect(markup).not.toContain('変換し直す');
+        expect(markup).not.toContain(RETRY_LOWEST_BITRATE_NOTICE);
+        // 押せる手が 1 つも無い行にはしない
+        expect(markup).toContain('再開する');
+    });
+
+    it('再試行中は押せない（二重押しの防止）', () => {
+        const markup = renderWithRetry(tooLargeStatus(
+            { bytes: 600 * MB, bitrate: '96k', wasConverted: true, limitBytes: 500 * MB },
+            { isResuming: true }
+        ));
+
+        // 🔴 class 名にも "disabled:" が入るので、属性そのもの (disabled="") で見る
+        expect(markup).toMatch(/<button type="button" disabled=""(?:(?!<\/button>)[\s\S])*変換し直しています\.\.\./);
+    });
+
+    it('prop 未指定なら押せないボタンを置かない（既存の呼び出し側は壊れない）', () => {
+        const markup = render([tooLargeStatus({ bytes: 600 * MB, bitrate: '96k', wasConverted: true, limitBytes: 500 * MB })]);
+
+        expect(markup).toContain('エラーが発生しました');
+        expect(markup).not.toContain('変換し直す');
+        // ハンドラが無いので再変換は出せず、必ず失敗するボタンも置かない
+        expect(markup).not.toContain('再開する');
+        expect(markup).not.toContain(RETRY_SAVE_ONLY_LABEL);
+    });
+
+    it('押すと、その fileId で再変換を頼む', () => {
+        const onRetryWithConversion = vi.fn();
+        const status = tooLargeStatus({ bytes: 600 * MB, bitrate: '96k', wasConverted: true, limitBytes: 500 * MB });
+        const tree = ProcessingStatusList({
+            statuses: [status],
+            onResumeFile: vi.fn(),
+            onRetryWithConversion,
+        }) as React.ReactElement;
+
+        const findButton = (
+            node: React.ReactNode,
+            label: string
+        ): React.ReactElement<{ onClick: () => void }> | null => {
+            if (!React.isValidElement<{ children?: React.ReactNode; onClick?: () => void }>(node)) return null;
+            const text = React.Children.toArray(node.props.children)
+                .map(child => (typeof child === 'string' ? child : ''))
+                .join('');
+            if (node.type === 'button' && text.includes(label)) {
+                return node as React.ReactElement<{ onClick: () => void }>;
+            }
+            for (const child of React.Children.toArray(node.props.children)) {
+                const found = findButton(child, label);
+                if (found) return found;
+            }
+            return null;
+        };
+
+        const button = findButton(tree, 'ビットレートを下げて変換し直す');
+        expect(button).not.toBeNull();
+        button!.props.onClick();
+        expect(onRetryWithConversion).toHaveBeenCalledExactlyOnceWith('f1');
     });
 });

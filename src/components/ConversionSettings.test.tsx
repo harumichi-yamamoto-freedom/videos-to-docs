@@ -5,8 +5,10 @@ import {
     AUDIO_BITRATE_OPTIONS,
     ConversionSettings,
     DEFAULT_AUDIO_BITRATE,
+    safeRecordingMinutes,
 } from './ConversionSettings';
 import { estimateMaxRecordingMinutes } from '@/lib/inlineMediaBudget';
+import { GENERATE_SYNC_MAX_MEDIA_BYTES } from '@/lib/generateApiContract';
 
 const render = (bitrate: string, disabled = false) =>
     renderToStaticMarkup(
@@ -35,14 +37,48 @@ describe('ConversionSettings (S2-1: ビットレート選択)', () => {
         expect(checked[0]).toContain('value="64k"');
     });
 
-    it('「扱える録音の長さ」は全文文字起こしの上限 (4時間) で頭打ちにする (500MB では全ビットレートがサイズより先に時間上限へ)', () => {
+    it('低いビットレートは全文文字起こしの上限 (4時間) で頭打ちにする', () => {
         const markup = render('96k');
-        // 500MB のサイズ上限では全ビットレートが 4 時間ぶんを超える → 表示は文字起こしの上限 4 時間で頭打ち
         expect(markup).toContain('約4時間までの録音に対応');
         // サイズ由来の生の長さ (18/12/9/6 時間) は出さない: 文字起こしできない長さを「対応」と誤認させないため
         for (const stale of ['約18時間', '約12時間', '約9時間', '約6時間']) {
             expect(markup).not.toContain(stale);
         }
+    });
+
+    /**
+     * 🔴 実害: 文書生成 (/api/generate) の上限は 200MB で、アップロード上限 (500MB) より低い。
+     *    500MB で計算すると全候補が「約4時間」と出るが、192k で 3 時間の商談は変換後 259MB になり
+     *    **画面が約束した範囲内で** 413 になる。表示は「どの用途でも安全な長さ」でなければならない。
+     */
+    it('🔴 高いビットレートは文書生成のサイズ上限で短くなる（4時間と約束しない）', () => {
+        const markup = render('96k');
+
+        // 192k = 約2時間25分、128k = 約3時間38分（どちらも 200MB 由来）
+        expect(markup).toContain('約2時間25分までの録音に対応');
+        expect(markup).toContain('約3時間38分までの録音に対応');
+        // 4 時間と出てよいのは 64k / 96k だけ＝「約4時間」の出現は 2 回
+        expect(markup.match(/約4時間までの録音に対応/g)).toHaveLength(2);
+    });
+
+    it('safeRecordingMinutes は文書生成の上限と文字起こしの上限の小さいほうを返す', () => {
+        // 64k / 96k は 200MB 由来でも 4 時間を超える → 時間上限側で頭打ち
+        expect(safeRecordingMinutes('64k')).toBe(240);
+        expect(safeRecordingMinutes('96k')).toBe(240);
+        // 128k / 192k はサイズ側が先に効く
+        expect(safeRecordingMinutes('128k'))
+            .toBe(estimateMaxRecordingMinutes('128k', GENERATE_SYNC_MAX_MEDIA_BYTES));
+        expect(safeRecordingMinutes('192k'))
+            .toBe(estimateMaxRecordingMinutes('192k', GENERATE_SYNC_MAX_MEDIA_BYTES));
+        expect(safeRecordingMinutes('192k')).toBeLessThan(240);
+    });
+
+    it('本文は用途ごとに上限が違うことを説明する（「どのビットレートでも4時間」と言い切らない）', () => {
+        const markup = render('96k');
+        expect(markup).toContain('全文文字起こしはどのビットレートでも最長 4 時間');
+        expect(markup).toContain('ビットレートが高いほど扱える録音が短くなります');
+        // 旧文言（全用途で 4 時間を約束していた）が残っていない
+        expect(markup).not.toContain('どのビットレートでも最長 4 時間（全文文字起こしの上限）まで対応します');
     });
 
     it('inline 予算 (Files API へ迂回すれば超えられる内部の分岐点) の分数は出さない', () => {

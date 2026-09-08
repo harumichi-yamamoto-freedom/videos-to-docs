@@ -15,8 +15,24 @@ export const GENERATE_API_PATH = '/api/generate';
 /** サーバが受け付ける入力メディアの MIME (Storage 上の contentType ではなく、元ファイルの種別) */
 export const GENERATE_ALLOWED_MIME_PREFIXES = ['audio/', 'video/'] as const;
 
-/** Storage 上のファイルサイズ上限 (storage.rules の 500MB と一致させる) */
+/** Storage 上のファイルサイズ上限 (storage.rules の 500MB と一致させる)。アップロードの可否はこれで決まる */
 export const GENERATE_MAX_MEDIA_BYTES = 500 * 1024 * 1024;
+
+/**
+ * 同期の文書生成 (`POST /api/generate`) **だけ**に効く上限。
+ *
+ * 🔴 この経路はメディアを丸ごとサーバのメモリに載せる (Storage から Buffer で取得 → Blob 化 →
+ *    inline か Files API へ送信)。ピーク常駐はファイルサイズの数倍になり、関数のメモリ上限
+ *    (1〜2GB) を超えると OOM で落ちる。上限はこの経路が積むメモリで決める。
+ * 🔴 GENERATE_MAX_MEDIA_BYTES (500MB) は **アップロード/Storage 側**の上限で、非同期の全文文字起こし
+ *    (署名 URL を Azure に渡すだけで、サーバは本文を読まない) のために引き上げたもの。
+ *    この経路の上限ではない。500MB をそのまま持ち込むと 1.5GB 前後を積んで落ちる。
+ * 200MB なら、ピークがサイズの 2 倍になっても 400MB 程度で収まる。
+ *
+ * 🔴 超えても**アップロードと全文文字起こしはそのまま使える**。止まるのは文書生成だけなので、
+ *    利用者向けの文言を「アップロードできない」と読ませないこと (mediaSource.syncGenerateTooLargeMessage)。
+ */
+export const GENERATE_SYNC_MAX_MEDIA_BYTES = 200 * 1024 * 1024;
 
 export interface GenerateRequestPrompt {
     /** 監査ログ・エラー文言用の表示名 */
@@ -70,7 +86,7 @@ export interface GenerateResponseBody {
  *   401 unauthorized      ID トークンが無効/期限切れ (未ログインは 401 ではなく GUEST 扱い)
  *   403 forbidden         storagePath の所有者が呼び出し主体と一致しない
  *   404 media_not_found   Storage にファイルが無い
- *   413 media_too_large   GENERATE_MAX_MEDIA_BYTES 超
+ *   413 media_too_large   GENERATE_SYNC_MAX_MEDIA_BYTES 超 (同期経路はメモリに載せるので Storage 上限より低い)
  *   429 rate_limited      時間あたり上限 (adminSettings.rateLimit.documentsPerHour) 超。retryAfterSec あり
  *   502 upstream_error    Gemini 側のエラー (メッセージは利用者向けに読み替え済み)
  *   503 not_configured    サーバに GEMINI_API_KEY / 管理資格情報が無い

@@ -16,10 +16,13 @@ const hookMocks = vi.hoisted(() => ({
     resetProcessing: vi.fn(),
     forceDiscardProcessing: vi.fn(),
     handleStartProcessing: vi.fn(),
+    handleResumeFile: vi.fn(),
     handleRemoveFile: vi.fn(),
     clearFiles: vi.fn(),
     statuses: [] as FileProcessingStatus[],
     fileIds: [] as string[],
+    /** 選択ファイル名の上書き。未指定なら fileIds から .mp4 を作る（従来どおり） */
+    fileNames: null as string[] | null,
     hasActiveJobs: false,
     pendingSaveCount: 0,
     user: { uid: 'user-1' } as { uid: string } | null,
@@ -55,6 +58,12 @@ vi.mock('react', async () => {
     };
 });
 
+const MIME_BY_EXTENSION: Record<string, string> = {
+    '.mp4': 'video/mp4',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+};
+
 vi.mock('@/hooks/useAuth', () => ({
     useAuth: () => ({ user: hookMocks.user, loading: false }),
 }));
@@ -74,10 +83,12 @@ vi.mock('@/hooks/usePromptManagement', () => ({
 
 vi.mock('@/hooks/useFileManagement', () => ({
     useFileManagement: () => ({
-        selectedFiles: hookMocks.fileIds.map(fileId => ({
-            file: { name: `${fileId}.mp4`, type: 'video/mp4' } as File,
-            selectedPromptIds: ['prompt-a'],
-        })),
+        selectedFiles: (hookMocks.fileNames ?? hookMocks.fileIds.map(fileId => `${fileId}.mp4`))
+            .map(name => ({
+                // size は canSendAudioAsIs が読む。読めないと全部「変換に回す」に倒れて判別できない
+                file: { name, type: MIME_BY_EXTENSION[name.slice(name.lastIndexOf('.'))] ?? '', size: 1024 } as File,
+                selectedPromptIds: ['prompt-a'],
+            })),
         handleFilesSelected: vi.fn(),
         handleRemoveFile: hookMocks.handleRemoveFile,
         toggleFilePrompt: vi.fn(),
@@ -128,7 +139,7 @@ vi.mock('@/hooks/useVideoProcessing', () => ({
 vi.mock('@/hooks/useProcessingWorkflow', () => ({
     useProcessingWorkflow: () => ({
         handleStartProcessing: hookMocks.handleStartProcessing,
-        handleResumeFile: vi.fn(),
+        handleResumeFile: hookMocks.handleResumeFile,
         workflowError: null,
         clearWorkflowError: vi.fn(),
         reportWorkflowError: vi.fn(),
@@ -235,10 +246,12 @@ beforeEach(() => {
     vi.clearAllMocks();
     hookMocks.statuses = [];
     hookMocks.fileIds = [];
+    hookMocks.fileNames = null;
     hookMocks.hasActiveJobs = false;
     hookMocks.pendingSaveCount = 0;
     hookMocks.user = { uid: 'user-1' };
     hookMocks.resetProcessing.mockResolvedValue('settled');
+    hookMocks.handleResumeFile.mockResolvedValue({ ok: true });
 });
 
 describe('discard confirmation wiring (V1/U2)', () => {
@@ -482,6 +495,49 @@ describe('bitrate wiring (S2-1)', () => {
         expect(hookMocks.handleStartProcessing.mock.calls[0][3]).toBe(44100);
     });
 
+    /**
+     * 🔴 「この設定は使われません」は canSendAudioAsIs の裏返し。非圧縮を変換に回すように
+     *    直した以上、WAV では設定が**効く**と出なければ表示と実態がずれる（2026-09-04 の誤解の元）。
+     */
+    it('🔴 非圧縮 (WAV) の選択ではビットレート設定を「効く」と表示する', () => {
+        hookMocks.fileNames = ['会議音声.wav'];
+
+        const settings = render().elements.find(element =>
+            typeof element.props.onBitrateChange === 'function'
+        );
+        expect(settings!.props.appliesToSelection).toBe(true);
+    });
+
+    it('そのまま送れる圧縮済み音声だけの選択では「使われません」と表示する', () => {
+        hookMocks.fileNames = ['会議音声.mp3'];
+
+        const settings = render().elements.find(element =>
+            typeof element.props.onBitrateChange === 'function'
+        );
+        expect(settings!.props.appliesToSelection).toBe(false);
+    });
+
+    /**
+     * 🔴 動画直送は変換そのものを飛ばす (`useProcessingWorkflow` の分岐)。
+     *    WAV を選んでいても設定は効かないので、「効く」と出すと表示が実態と食い違う。
+     */
+    it('🔴 動画直送が有効なら、ビットレート設定は「使われません」と表示する', () => {
+        hookMocks.fileNames = ['会議音声.wav'];
+        // 直送のチェックボックスを入れる
+        const checkbox = render().elements.find(element =>
+            element.type === 'input' && element.props.type === 'checkbox'
+        );
+        expect(checkbox, '動画直送のチェックボックスが見つからない').toBeDefined();
+        (checkbox!.props.onChange as (e: { target: { checked: boolean } }) => void)(
+            { target: { checked: true } }
+        );
+
+        const settings = render().elements.find(element =>
+            typeof element.props.onBitrateChange === 'function'
+        );
+        expect(settings!.props.appliesToSelection).toBe(false);
+    });
+
     it('画面で選んだビットレートを開始処理へ渡す', async () => {
         const settings = render().elements.find(element =>
             typeof element.props.onBitrateChange === 'function'
@@ -493,5 +549,89 @@ describe('bitrate wiring (S2-1)', () => {
         await click('変換・文書生成を開始する');
 
         expect(hookMocks.handleStartProcessing.mock.calls[0][2]).toBe('64k');
+    });
+});
+
+
+/**
+ * 🔴 サイズ超過からの「変換し直して再試行」。決めた下げ先を setBitrate に反映しつつ、
+ *    再開には決定値を**直接**渡す（setState の反映待ちに依存しない）。
+ */
+describe('サイズ超過の再試行の配線', () => {
+    const MB = 1024 * 1024;
+
+    const tooLargeStatus = (
+        fileId: string,
+        sizeFailure: FileProcessingStatus['sizeFailure']
+    ): FileProcessingStatus => ({
+        ...createStatus(fileId),
+        phase: 'uploading',
+        failedPhase: 'upload',
+        failureKind: 'too_large',
+        sizeFailure,
+    });
+
+    const retryFor = (fileId: string) => {
+        const list = render().elements.find(element =>
+            typeof element.props.onRetryWithConversion === 'function'
+        );
+        expect(list, 'ProcessingStatusList に onRetryWithConversion が配線されていない').toBeDefined();
+        (list!.props.onRetryWithConversion as (id: string) => void)(fileId);
+    };
+
+    it('決めた下げ先を再開へ直接渡し、強制再変換のオプションを付ける', () => {
+        hookMocks.fileIds = ['media-1'];
+        hookMocks.statuses = [tooLargeStatus('media-1', { bytes: 600 * MB, bitrate: '96k', wasConverted: true, limitBytes: 500 * MB })];
+
+        retryFor('media-1');
+
+        expect(hookMocks.handleResumeFile).toHaveBeenCalledTimes(1);
+        const call = hookMocks.handleResumeFile.mock.calls[0];
+        expect(call[0]).toBe('media-1');
+        // 画面の設定は既定の 96k のままでも、決定値の 64k を渡す
+        expect(call[4]).toBe('64k');
+        expect(call[6]).toEqual({ forceReconvertAtBitrate: '64k' });
+    });
+
+    it('設定表示も決定値に合わせる（表示と実際の動作を一致させる）', () => {
+        hookMocks.fileIds = ['media-1'];
+        hookMocks.statuses = [tooLargeStatus('media-1', { bytes: 600 * MB, bitrate: '192k', wasConverted: true, limitBytes: 500 * MB })];
+
+        retryFor('media-1');
+
+        // 進捗が出ている間は設定 UI を出さないので、次の開始処理へ渡る値で確かめる
+        hookMocks.statuses = [];
+        const settings = render().elements.find(element =>
+            typeof element.props.onBitrateChange === 'function'
+        );
+        expect(settings!.props.bitrate).toBe('128k');
+    });
+
+    it('🔴 そのまま送られていた音声は現ビットレートのまま変換し直す', () => {
+        hookMocks.fileIds = ['media-1'];
+        hookMocks.statuses = [tooLargeStatus('media-1', { bytes: 600 * MB, bitrate: '96k', wasConverted: false, limitBytes: 500 * MB })];
+
+        retryFor('media-1');
+
+        expect(hookMocks.handleResumeFile.mock.calls[0][6])
+            .toEqual({ forceReconvertAtBitrate: '96k' });
+    });
+
+    it('これ以上下げられないときは再開を呼ばない（同じ失敗を繰り返さない）', () => {
+        hookMocks.fileIds = ['media-1'];
+        hookMocks.statuses = [tooLargeStatus('media-1', { bytes: 600 * MB, bitrate: '64k', wasConverted: true, limitBytes: 500 * MB })];
+
+        retryFor('media-1');
+
+        expect(hookMocks.handleResumeFile).not.toHaveBeenCalled();
+    });
+
+    it('サイズ以外の失敗では再開を呼ばない', () => {
+        hookMocks.fileIds = ['media-1'];
+        hookMocks.statuses = [createStatus('media-1')];
+
+        retryFor('media-1');
+
+        expect(hookMocks.handleResumeFile).not.toHaveBeenCalled();
     });
 });

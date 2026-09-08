@@ -17,6 +17,7 @@ import { usePromptManagement } from '@/hooks/usePromptManagement';
 import { useVideoProcessing } from '@/hooks/useVideoProcessing';
 import { useProcessingWorkflow } from '@/hooks/useProcessingWorkflow';
 import { canSendAudioAsIs } from '@/lib/mediaInput';
+import { retryPlanFromStatus } from '@/lib/retryBitrate';
 import { useNavigationGuard } from '@/hooks/useNavigationGuard';
 import { DebugErrorMode, FileProcessingStatus } from '@/types/processing';
 import { Prompt } from '@/lib/prompts';
@@ -252,6 +253,25 @@ export default function HomePage() {
     void handleResumeFile(fileId, selectedFiles, fileIds, processingStatuses, bitrate, sampleRate);
   };
 
+  /**
+   * サイズ超過の失敗を、元ファイルから変換し直してやり直す。
+   * 決めた下げ先を setBitrate にも反映して設定表示と実際の動作を一致させるが、
+   * 🔴 handleResumeFile には決定値を**直接**渡す（setState の反映を待つと前の値で走る）。
+   */
+  const onRetryWithConversion = (fileId: string) => {
+    const status = processingStatuses.find(current => current.fileId === fileId);
+    if (!status) return;
+
+    const plan = retryPlanFromStatus(status);
+    if (!plan || plan.kind === 'unavailable') return;
+
+    setBitrate(plan.bitrate);
+    void handleResumeFile(
+      fileId, selectedFiles, fileIds, processingStatuses, plan.bitrate, sampleRate,
+      { forceReconvertAtBitrate: plan.bitrate },
+    );
+  };
+
   const handlePromptClick = (prompt: Prompt) => {
     setSelectedPrompt(prompt);
   };
@@ -363,7 +383,10 @@ export default function HomePage() {
                   bitrate={bitrate}
                   onBitrateChange={setBitrate}
                   disabled={isBusy}
-                  appliesToSelection={selectedFiles.some(file => !canSendAudioAsIs(file.file))}
+                  appliesToSelection={
+                    // 🔴 動画直送は変換そのものを飛ばすので、どんな入力でもビットレートは効かない
+                    !sendVideoDirectly && selectedFiles.some(file => !canSendAudioAsIs(file.file))
+                  }
                 />
               )}
 
@@ -600,6 +623,7 @@ export default function HomePage() {
           <ProcessingStatusList
             statuses={processingStatuses}
             onResumeFile={onResumeFile}
+            onRetryWithConversion={onRetryWithConversion}
             onCancelFile={cancelJob}
             activeFileIds={activeJobIds}
           />

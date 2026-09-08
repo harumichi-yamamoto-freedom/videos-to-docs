@@ -182,7 +182,15 @@ export class GeminiServerClient {
         logger.info('Files API へアップロードを開始', {
             fileName, mimeType, sizeInMB: (bytes.length / 1024 / 1024).toFixed(2),
         });
-        const blob = new Blob([new Uint8Array(bytes)], { type: mimeType });
+        // 🔴 Buffer を「コピーせずに」Blob へ渡す。`new Uint8Array(bytes)` は全量コピーで、Blob 自身が持つ
+        //    コピーと合わせてピーク常駐がファイルサイズの 3 倍になっていた (500MB のファイルで 1.5GB)。
+        //    Buffer は共有プール上のビューのことがある (byteOffset != 0) ので、backing buffer 全体ではなく
+        //    byteOffset/byteLength で切った範囲だけを渡す。送るバイト列は従来と同一。
+        //    `bytes.buffer` は型の上では ArrayBufferLike (SharedArrayBuffer を含む) だが、Storage の
+        //    download() が返す Buffer の実体は常に通常の ArrayBuffer。BlobPart は共有でない方だけを受ける。
+        const backing = bytes.buffer as ArrayBuffer;
+        const view = new Uint8Array(backing, bytes.byteOffset, bytes.byteLength);
+        const blob = new Blob([view], { type: mimeType });
         const uploaded = await this.genAI.files.upload({
             file: blob,
             config: { mimeType, displayName: fileName },

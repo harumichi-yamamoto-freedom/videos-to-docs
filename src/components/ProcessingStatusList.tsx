@@ -17,11 +17,17 @@ import {
     ProcessingPhase,
 } from '@/types/processing';
 import { describeProgressStage, formatClockTime } from '@/hooks/batchTranscriptionClient';
+import { formatBitrateLabel, retryPlanFromStatus } from '@/lib/retryBitrate';
 
 interface ProcessingStatusListProps {
     statuses: FileProcessingStatus[];
     onResumeFile: (fileId: string) => void;
     onCancelFile?: (fileId: string) => void;
+    /**
+     * サイズ超過の失敗を、元ファイルから変換し直してやり直す。
+     * 未指定でも既存の表示は変わらない（押しても何も起きないボタンは出さない）。
+     */
+    onRetryWithConversion?: (fileId: string) => void;
     /** 実際にジョブを占有しているファイル。これ以外に中止ボタンを出しても何も起きない */
     activeFileIds?: readonly string[];
 }
@@ -53,6 +59,22 @@ export const CANCEL_LOCAL_LABEL = 'このファイルの処理を中止する';
 export const STOP_CONFIRMATION_LABEL = 'この画面での確認を停止する';
 export const RESUME_CONFIRMATION_LABEL = '確認を再開する';
 
+/**
+ * サイズ超過からの再試行の文言。利用者が次に打てる手を必ず書く。
+ * 🔴 「これ以上下げられない」ときはボタンを出さず、代わりに打てる手（分割）を示す。
+ */
+export const RETRY_CONVERT_AS_IS_LABEL = '音声を変換してからやり直す';
+/**
+ * 🔴 サイズ超過の行に通常の「再開する」を出すと、同じ大きすぎるデータを再利用して
+ *    **確定的に同じ失敗**をする。生成済みの下書きを回収する導線だけは残す必要があるので、
+ *    保存だけが残っている場合に限り、保存専用と分かる文言にして出す。
+ */
+export const RETRY_SAVE_ONLY_LABEL = '保存待ちの文書を保存する';
+export const RETRY_LOWEST_BITRATE_NOTICE =
+    'これ以上ビットレートは下げられません。録音を分割してからお試しください。';
+export const describeLowerBitrateRetry = (from: string, to: string): string =>
+    `ビットレートを下げて変換し直す（${formatBitrateLabel(from)} → ${formatBitrateLabel(to)}）`;
+
 /** 全文文字起こしの段階文言。旧サーバ応答で段階が届かない間は「処理中・詳細を確認」 */
 export const describeBatchStage = (batch: BatchTranscriptionProgress): string =>
     batch.stage ? describeProgressStage(batch.stage) : '処理中・詳細を確認';
@@ -69,6 +91,7 @@ export const ProcessingStatusList: React.FC<ProcessingStatusListProps> = ({
     statuses,
     onResumeFile,
     onCancelFile,
+    onRetryWithConversion,
     activeFileIds = [],
 }) => {
     if (statuses.length === 0) {
@@ -94,6 +117,8 @@ export const ProcessingStatusList: React.FC<ProcessingStatusListProps> = ({
                     // 提出後のバッチ段階。音声変換の区間や生成件数とは別物なので、混ぜて出さない（仕様 §A4）
                     const activeBatch = status.batch?.confirmation === 'polling' ? status.batch : null;
                     const batchFreshness = status.batch ? describeBatchFreshness(status.batch) : null;
+                    // サイズ超過の失敗にだけ出す再変換の導線。画面と実行が同じ計画を読む
+                    const retryPlan = status.status === 'error' ? retryPlanFromStatus(status) : null;
 
                     return (
                         <li key={status.fileId} className="rounded-lg border bg-white p-4 shadow-sm">
@@ -209,16 +234,60 @@ export const ProcessingStatusList: React.FC<ProcessingStatusListProps> = ({
                                                 音声変換済みです（再開時は変換をスキップします）
                                             </p>
                                         )}
+
+                                        {/* 🔴 サイズ超過だけに出す。元ファイルから変換をやり直すので、
+                                            そのまま送られていた音声でもビットレートの選択が効く */}
+                                        {retryPlan?.kind === 'unavailable' && (
+                                            <p className="mt-2 text-[13px] text-amber-900">
+                                                {RETRY_LOWEST_BITRATE_NOTICE}
+                                            </p>
+                                        )}
+                                        {onRetryWithConversion && retryPlan && retryPlan.kind !== 'unavailable' && (
+                                            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                                                <p className="text-[13px] text-amber-900">
+                                                    {retryPlan.kind === 'lower_bitrate'
+                                                        ? '元のファイルからビットレートを下げて変換し直すと、送るデータ量が小さくなります。'
+                                                        : 'この音声は変換を通らずそのまま送られていました。変換してから送るとデータ量が小さくなります。'}
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onRetryWithConversion(status.fileId)}
+                                                    disabled={status.isResuming}
+                                                    className="mt-2 flex min-h-11 items-center gap-2 rounded-lg bg-amber-600 px-4 text-sm font-medium text-white transition-colors hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                                                    {status.isResuming
+                                                        ? '変換し直しています...'
+                                                        : retryPlan.kind === 'lower_bitrate'
+                                                            ? describeLowerBitrateRetry(
+                                                                status.sizeFailure?.bitrate ?? '',
+                                                                retryPlan.bitrate
+                                                            )
+                                                            : RETRY_CONVERT_AS_IS_LABEL}
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => onResumeFile(status.fileId)}
-                                        disabled={status.isResuming}
-                                        className="flex min-h-11 shrink-0 items-center gap-2 rounded-lg bg-orange-600 px-4 text-sm font-medium text-white transition-colors hover:bg-orange-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                                        {status.isResuming ? '再開しています...' : '再開する'}
-                                    </button>
+                    {/* 再変換の導線が出せる行では、同じデータを送り直すだけの「再開する」を出さない
+                                        （押しても必ず同じ失敗になる）。
+                                        🔴 表示・非表示の判定は再変換ボタンと**同じ述語** (`retryPlan`) で行う。
+                                        `failureKind` で別々に判定すると、種別はあるが実測値が無い行で
+                                        「どのボタンも出ない」状態が作れてしまう */}
+                                    {(retryPlan === null || savePendingCount > 0) && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onResumeFile(status.fileId)}
+                                            disabled={status.isResuming}
+                                            className="flex min-h-11 shrink-0 items-center gap-2 rounded-lg bg-orange-600 px-4 text-sm font-medium text-white transition-colors hover:bg-orange-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                                            {status.isResuming
+                                                ? '再開しています...'
+                                                : retryPlan !== null
+                                                    ? RETRY_SAVE_ONLY_LABEL
+                                                    : '再開する'}
+                                        </button>
+                                    )}
                                 </div>
                             )}
 
