@@ -9,6 +9,8 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      "e2e/**",
+      "public/ffmpeg/**",
     ],
   },
 ];

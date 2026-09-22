@@ -525,3 +525,12 @@ rm ~/.config/gcloud/keys/$PROJECT-api-generate.json
 - 割当上限 (5.5) に当たって 429 が続くとき: Quotas で一時的に上げる。暴走が疑われるなら先に Vercel Logs で `/api/generate` の呼び出し元 (subject) を数え、特定の subject なら `rateLimits/{subject}` の件数を確認する。
 - SA 鍵が漏れたとき: §3.6 と同じ順番 (先に `keys delete`、次に履歴除去)。この SA は読取中心なので、被害は「音声の読取」と「rateLimits/adminSettings の改竄」に限られる。
 
+
+## 付録: ブラウザ内 FFmpeg (wasm) の core と複数ファイル変換 (2026-09-22)
+
+- core (`@ffmpeg/core` 0.12.6 の `ffmpeg-core.js` / `.wasm`) は **同一オリジン `/ffmpeg/`** から配る。`npm run dev` / `npm run build` の前に
+  `scripts/copy-ffmpeg-core.mjs` が npm パッケージから `public/ffmpeg/` へ複製する (生成物なので git には入れない)。
+  無ければ unpkg に落ちる (`src/lib/ffmpeg.ts` の `loadCoreAssets`)。版は `FFMPEG_CORE_VERSION` と `devDependencies` で揃え、食い違うと複製スクリプトが止まる。
+- 同一 worker で `exec` を約 65 回呼ぶと wasm が死ぬ (upstream ffmpegwasm/ffmpeg.wasm#820)。1 本 = 2 exec にし、`FFMPEG_EXEC_BUDGET` で worker を作り直す。
+  「複数ファイルを入れると 2 本目が『区間 N の変換に失敗しました』」はこれだった。再発の検査は `e2e/ffmpeg-wasm/README.md`。
+- 変換の失敗はブラウザ内で完結しサーバのログには出ない。`clientErrors` に `source: 'audio_conversion'` で `fileName / sizeBytes / execCount / workerDead` が残るので、報告が来たらまずそこを見る。
