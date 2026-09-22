@@ -525,3 +525,10 @@ rm ~/.config/gcloud/keys/$PROJECT-api-generate.json
 - 割当上限 (5.5) に当たって 429 が続くとき: Quotas で一時的に上げる。暴走が疑われるなら先に Vercel Logs で `/api/generate` の呼び出し元 (subject) を数え、特定の subject なら `rateLimits/{subject}` の件数を確認する。
 - SA 鍵が漏れたとき: §3.6 と同じ順番 (先に `keys delete`、次に履歴除去)。この SA は読取中心なので、被害は「音声の読取」と「rateLimits/adminSettings の改竄」に限られる。
 
+
+## 付録: firestore.rules の錠 (2026-09-22)
+
+- `npm run test:rules` が Firestore エミュレータを立てて `rules-tests/` を回す (Java が要る。`brew install openjdk` と PATH)。
+  `users` の一覧は「管理者は全件、一般ユーザーは email の等値検索 + limit(1) だけ」。以前は `allow list` が 2 本あり
+  OR で緩い方が実効になっていて、ログイン済みなら誰でも全ユーザーを列挙できた。ルールを触ったら必ず回す。
+- 旧ルールで落ちることの確認: `RULES_FILE=<旧ファイル> npx vitest run rules-tests`。

@@ -268,8 +268,18 @@ service cloud.firestore {
       // ログイン済みユーザーは誰のプロファイルでも読み取り可能
       allow get: if request.auth != null;
 
-      // 管理者はすべてのユーザーを読み取り可能
-      allow list: if isSuperuser();
+      // 一覧:
+      //   - 管理者はすべてのユーザーを読み取り可能
+      //   - 一般ユーザーは「上司追加のためのメールアドレス検索」だけ。where('email','==',…) を
+      //     クエリで固定していること (list の仮想 doc に email が在る) と limit <= 1 を要求する。
+      // 🔴 以前は `allow list: if isSuperuser()` と `allow list: if request.auth != null && limit <= 1`
+      //    の 2 本に分かれていた。同一メソッドの複数 allow は OR なので後者だけが実効になり、
+      //    ログイン済みなら誰でも orderBy('email') + limit(1) + startAfter の反復で全ユーザーの
+      //    email / displayName / superuser を列挙できた (2026-09-22 レビュー)。1 本にまとめる。
+      allow list: if isSuperuser()
+        || (request.auth != null
+            && request.query.limit <= 1
+            && resource.data.keys().hasAll(['email']));
 
       // ユーザープロファイルの作成（自分のみ・superuser を true で作ることはできない）
       //   update だけを守っても delete→create の作り直しで迂回できるため、create でも
@@ -288,10 +298,6 @@ service cloud.firestore {
 
       // 削除: 自分のプロファイルのみ削除可能
       allow delete: if request.auth != null && request.auth.uid == userId;
-
-      // 上司追加のためにメールアドレス検索を許可
-      allow list: if request.auth != null
-      	&& request.query.limit <= 1;
     }
 
     // adminSettings コレクション
