@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "e2e:ffmpeg:build": "esbuild e2e/ffmpeg-wasm/harness.ts --bundle --format=esm --platform=browser --alias:@/lib/clientErrorReporter=./e2e/ffmpeg-wasm/stubs/clientErrorReporter.ts --alias:@=./src --external:@ffmpeg/ffmpeg --external:@ffmpeg/util --outfile=e2e/ffmpeg-wasm/harness.js"
+    "e2e:ffmpeg:build": "esbuild e2e/ffmpeg-wasm/harness.ts --bundle --format=esm --platform=browser --alias:@/lib/clientErrorReporter=./e2e/ffmpeg-wasm/stubs/clientErrorReporter.ts --alias:@=./src --external:@ffmpeg/ffmpeg --external:@ffmpeg/util --outfile=e2e/ffmpeg-wasm/harness.js",
+    "e2e:app": "cd e2e/app && npx playwright test"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",

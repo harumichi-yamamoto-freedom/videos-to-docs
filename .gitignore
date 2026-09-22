@@ -80,3 +80,6 @@ serviceAccountKey.json
 
 # ffmpeg.wasm core (scripts/copy-ffmpeg-core.mjs が npm の @ffmpeg/core から複製する生成物)
 /public/ffmpeg/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
