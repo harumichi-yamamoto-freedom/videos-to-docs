@@ -257,6 +257,37 @@ function countElements(node: React.ReactNode, type: string): number {
         .reduce<number>((count, child) => count + countElements(child, type), 0);
 }
 
+/** 条件に合う要素をツリー全体から集める（role=alert や input の走査用）。 */
+function collectElements(
+    node: React.ReactNode,
+    match: (props: Record<string, unknown>, type: unknown) => boolean,
+): React.ReactElement<Record<string, unknown>>[] {
+    if (!React.isValidElement<{ children?: React.ReactNode }>(node)) {
+        return [];
+    }
+
+    const self = match(node.props as Record<string, unknown>, node.type)
+        ? [node as React.ReactElement<Record<string, unknown>>]
+        : [];
+
+    return React.Children.toArray(node.props.children).reduce<
+        React.ReactElement<Record<string, unknown>>[]
+    >((found, child) => found.concat(collectElements(child, match)), self);
+}
+
+function findSizeInputs(node: React.ReactNode) {
+    return collectElements(node, (_props, type) => type === 'input') as unknown as React.ReactElement<{
+        value: string;
+        min?: string;
+        step?: string;
+        onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+    }>[];
+}
+
+function findAlertTexts(node: React.ReactNode): string[] {
+    return collectElements(node, props => props.role === 'alert').map(getText);
+}
+
 async function flushPromises(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
@@ -571,6 +602,64 @@ describe('SettingsPanel', () => {
 
         expect(setters.defaultPrompts).toHaveBeenCalledWith([]);
         expect(setters.pendingDeletePromptIndex).toHaveBeenCalledWith(null);
+    });
+
+    // 0 や空欄(Number('')===0)が保存されると validateDocumentSize が全ユーザーへ
+    // false を返し、誰も保存できなくなる。保存前に止めてフィールド脇で伝える。
+    it('1KB未満のサイズ上限は保存せず、フィールド脇のrole=alertで伝える', async () => {
+        const brokenSettings: AdminSettings = { ...settings, maxDocumentSize: 0 };
+        arrangePanelState({ settings: brokenSettings, originalSettings: settings });
+
+        const tree = renderPanel();
+        const saveButton = findButton(tree, '設定を保存');
+
+        expect(findAlertTexts(tree).some(text => text.includes('文書サイズ上限は1KB以上'))).toBe(true);
+        expect(saveButton?.props.disabled).toBe(true);
+
+        await saveButton?.props.onClick();
+
+        expect(mocks.updateAdminSettings).not.toHaveBeenCalled();
+    });
+
+    it('入力欄を空にしても0として保存しない', async () => {
+        const setters = arrangePanelState();
+
+        findSizeInputs(renderPanel())[1].props.onChange({
+            target: { value: '' },
+        } as React.ChangeEvent<HTMLInputElement>);
+
+        expect(setters.settings).toHaveBeenCalledTimes(1);
+        expect(setters.settings).not.toHaveBeenCalledWith(
+            expect.objectContaining({ maxDocumentSize: 0 }),
+        );
+
+        arrangePanelState({
+            settings: { ...settings, maxDocumentSize: Number.NaN },
+            originalSettings: settings,
+        });
+        const brokenTree = renderPanel();
+
+        expect(findButton(brokenTree, '設定を保存')?.props.disabled).toBe(true);
+        await findButton(brokenTree, '設定を保存')?.props.onClick();
+
+        expect(mocks.updateAdminSettings).not.toHaveBeenCalled();
+        expect(getText(brokenTree)).not.toContain('NaN');
+    });
+
+    // 既定値 50000 バイトを入力欄が「49」、直下が「48.83 KB」と出す矛盾の錠。
+    it('サイズ上限の入力欄は下限付きで、直下の表記と同じKB値を出す', () => {
+        const storedSettings: AdminSettings = { ...settings, maxPromptSize: 50000 };
+        arrangePanelState({ settings: storedSettings, originalSettings: storedSettings });
+
+        const tree = renderPanel();
+        const [promptInput, documentInput] = findSizeInputs(tree);
+
+        expect(promptInput.props.value).toBe('48.83');
+        expect(getText(tree)).toContain('現在: 48.83 KB');
+        expect(promptInput.props.min).toBe('1');
+        expect(promptInput.props.step).toBeDefined();
+        expect(documentInput.props.min).toBe('1');
+        expect(documentInput.props.step).toBeDefined();
     });
 
     it('削除確認をキャンセルすると一覧は変わらない', () => {

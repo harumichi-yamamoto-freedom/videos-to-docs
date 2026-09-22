@@ -45,10 +45,11 @@ export const DebugControls: React.FC<DebugControlsProps> = ({
                     </label>
                 </div>
                 <div>
-                    <label className="block text-xs text-red-800 mb-1">
+                    <label htmlFor="debug-error-file-index" className="block text-xs text-red-800 mb-1">
                         エラーを起こすファイル（インデックス）:
                     </label>
                     <input
+                        id="debug-error-file-index"
                         type="number"
                         min="0"
                         value={debugErrorMode.errorAtFileIndex}
@@ -57,10 +58,11 @@ export const DebugControls: React.FC<DebugControlsProps> = ({
                     />
                 </div>
                 <div>
-                    <label className="block text-xs text-red-800 mb-1">
+                    <label htmlFor="debug-error-segment-index" className="block text-xs text-red-800 mb-1">
                         エラーを起こす区間（インデックス）:
                     </label>
                     <input
+                        id="debug-error-segment-index"
                         type="number"
                         min="0"
                         value={debugErrorMode.errorAtSegmentIndex}

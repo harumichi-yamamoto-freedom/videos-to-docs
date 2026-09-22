@@ -82,22 +82,59 @@ const parseRetryAfterMs = (response: Response, json: unknown): number | undefine
     return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : undefined;
 };
 
-/** ジョブを提出。音声は既に Storage にある前提。短命に {jobId, docId} が返る。 */
+/**
+ * 提出の応答を受け取れなかったときの案内（レビュー 2026-09-22 S2）。
+ * 🔴 サーバが受理したかどうかはクライアントから分からない。受理されていれば Azure のジョブと
+ *    「処理中」文書が既にできているので、黙って再提出させると二重課金・重複文書になる。
+ *    本便では同じ storagePath + promptName の処理中文書をクライアントから照合する手段が無いので、
+ *    再提出になることと確認の手順を利用者に見える文言で伝える。
+ */
+export const SUBMIT_RESPONSE_LOST_MESSAGE =
+    '提出の応答を受け取れませんでした。'
+    + '再開すると再提出になり、既に受理されていた場合は文書が重複します。'
+    + '文書一覧で「処理中」の文書が無いか確認してから再開してください。';
+
+/**
+ * 提出の往復が落ちた（サーバが受理済みかもしれない）。サーバが理由つきで拒否した提出
+ * （!ok）とは区別する: そちらは受理されていないと分かっているので重複の案内を付けない。
+ */
+export class TranscribeSubmitResponseLostError extends Error {
+    constructor(readonly reason: unknown) {
+        super(SUBMIT_RESPONSE_LOST_MESSAGE);
+        this.name = 'TranscribeSubmitResponseLostError';
+    }
+}
+
+/**
+ * ジョブを提出。音声は既に Storage にある前提。短命に {jobId, docId} が返る。
+ *
+ * 🔴 中止シグナルを受け取らない（レビュー 2026-09-22 S2）。提出は短命で、サーバが受理した瞬間に
+ *    Azure のジョブと「処理中」文書ができる。ここで往復を切ると {jobId, docId} を取り逃し、
+ *    再開が新規 submit になって二重課金と重複文書を生む。中止すべきは提出後の確認（poll）。
+ */
 export async function submitBatchTranscription(
     req: TranscribeSubmitRequest,
-    signal?: AbortSignal,
 ): Promise<TranscribeSubmitResponse> {
-    const response = await fetch(TRANSCRIBE_SUBMIT_PATH, {
-        method: 'POST',
-        headers: await authHeaders(),
-        body: JSON.stringify(req),
-        ...(signal ? { signal } : {}),
-    });
+    const headers = await authHeaders();
+    const body = JSON.stringify(req);
+    let response: Response;
+    try {
+        response = await fetch(TRANSCRIBE_SUBMIT_PATH, { method: 'POST', headers, body });
+    } catch (error) {
+        // 応答が消えた。受理済みかもしれないので、再提出の危険を伝える文言で返す。
+        throw new TranscribeSubmitResponseLostError(error);
+    }
     const json = await response.json().catch(() => null);
     if (!response.ok) {
         throw new Error(messageFrom(json, `文字起こしの登録に失敗しました (${response.status})`));
     }
-    return json as TranscribeSubmitResponse;
+    const submitted = json as Partial<TranscribeSubmitResponse> | null;
+    // 受理されたのに ID が読めない応答も「応答が消えた」と同じ。null を ID として配らない
+    // （呼出元が保存に失敗し、再開が再 submit になる）。
+    if (!submitted || typeof submitted.jobId !== 'string' || typeof submitted.docId !== 'string') {
+        throw new TranscribeSubmitResponseLostError(json);
+    }
+    return { jobId: submitted.jobId, docId: submitted.docId };
 }
 
 async function fetchTranscriptionStatus(request: TranscribeStatusRequest): Promise<TranscribeStatusResponse> {
@@ -354,19 +391,21 @@ export async function resumeBatchTranscription(
 export async function runBatchTranscription(
     input: RunBatchTranscriptionInput,
 ): Promise<RunBatchTranscriptionResult> {
-    const submitted = await submitBatchTranscription(
-        {
-            storagePath: input.storagePath,
-            fileName: input.fileName,
-            mimeType: input.mimeType,
-            audioSec: input.audioSec,
-            promptName: input.promptName,
-            originalFileType: input.originalFileType,
-            ...(input.title ? { title: input.title } : {}),
-        },
-        input.signal,
-    );
+    // 🔴 提出には中止シグナルを渡さない（submitBatchTranscription の注記）。中止が来ていても
+    //    提出の完了を待ち、ID を呼出元へ渡してから中止扱いにする。ここで切ると ID を取り逃す。
+    const submitted = await submitBatchTranscription({
+        storagePath: input.storagePath,
+        fileName: input.fileName,
+        mimeType: input.mimeType,
+        audioSec: input.audioSec,
+        promptName: input.promptName,
+        originalFileType: input.originalFileType,
+        ...(input.title ? { title: input.title } : {}),
+    });
+    // 🔴 中止済みでも先に渡す。呼出元はこれを保存し、再開を同じ ID の確認で行う（仕様 §A4）。
     input.onSubmitted?.(submitted);
+    // 提出は完了させたうえで中止扱いにする。確認（poll）は 1 回も始めない。
+    if (input.signal?.aborted) throw abortReason(input.signal);
     return resumeBatchTranscription({
         jobId: submitted.jobId,
         docId: submitted.docId,

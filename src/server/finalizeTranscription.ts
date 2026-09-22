@@ -43,9 +43,26 @@ const toMergeChunk = (parsed: ParsedBatch): MergeChunk => ({
     })),
 });
 
+/**
+ * 句の時刻が 1 つも読めず注釈が空になったとき、本文（combinedRecognizedPhrases）だけを保存する旨の断り。
+ * 🔴 この場合は話者ラベルも時刻リンクも作れない（時刻を推測しない）。本文を捨てて空文字で completed にする方が害が大きい。
+ */
+export const TRANSCRIPT_WITHOUT_TIMESTAMPS_NOTICE =
+    '※ 音声の時刻情報が取得できなかったため、話者ラベルと時刻リンクのない本文のみを保存しました。';
+
+/**
+ * 注釈から本文を作れなかったとき（全句の時刻が読めない）の代替本文。
+ * `parsed.text` も空（＝認識ゼロ）なら空文字を返し、終端の判断は呼び出し側に委ねる。
+ */
+const fallbackMarkdown = (parsed: ParsedBatch): string => {
+    const text = parsed.text.trim();
+    return text ? `${TRANSCRIPT_WITHOUT_TIMESTAMPS_NOTICE}\n\n${text}` : '';
+};
+
 /** バッチ結果 1 本を、文書へ保存できる Markdown にする。 */
 export function buildTranscriptMarkdownFromBatch(parsed: ParsedBatch): string {
-    return toTranscriptMarkdown(mergeTranscriptChunks([toMergeChunk(parsed)]));
+    const markdown = toTranscriptMarkdown(mergeTranscriptChunks([toMergeChunk(parsed)]));
+    return markdown.trim() ? markdown : fallbackMarkdown(parsed);
 }
 
 export interface TranscriptWithAnchors {
@@ -214,6 +231,8 @@ export function buildTranscriptWithAnchors(parsed: ParsedBatch): TranscriptWithA
     const chunk = toMergeChunk(parsed);
     const merged = mergeTranscriptChunks([chunk]);
     const markdown = toTranscriptMarkdown(merged);
+    // 注釈から本文が作れなかった（全句の時刻が読めない）ときは素の本文で代替する。時刻が無いのでアンカーは付けない。
+    if (!markdown.trim()) return { markdown: fallbackMarkdown(parsed), phraseLineByIndex: new Map() };
     let phraseLineByIndex: Map<number, number>;
     try {
         phraseLineByIndex = paragraphLinesByPhraseIndex(parsed, chunk, merged.segments, merged.gaps.length, markdown);

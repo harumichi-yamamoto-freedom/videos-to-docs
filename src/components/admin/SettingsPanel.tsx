@@ -31,6 +31,34 @@ type Feedback = {
     message: string;
 };
 
+// サイズ上限は 1KB 未満・非整数を保存させない。0 (空欄の Number('') を含む) が
+// 保存されると validatePromptSize/validateDocumentSize が全ユーザーへ false を返す。
+const MIN_SIZE_LIMIT_BYTES = 1024;
+
+function isValidSizeLimit(bytes: number): boolean {
+    return Number.isInteger(bytes) && bytes >= MIN_SIZE_LIMIT_BYTES;
+}
+
+/**
+ * 入力欄に出す KB 表記。直下の「現在」と同じく小数2桁まで見せ、余分な 0 は落とす。
+ * (toFixed(0) は既定の 50000 バイトを「49」と出し、直下の「48.83 KB」と食い違っていた)
+ */
+function formatSizeLimitInput(bytes: number): string {
+    if (!Number.isFinite(bytes)) return '';
+    return String(Number((bytes / 1024).toFixed(2)));
+}
+
+/** KB 入力をバイトへ。空欄・非数値は 0 ではなく NaN にして検証へ回す。 */
+function parseSizeLimitInput(value: string): number {
+    const trimmed = value.trim();
+    if (trimmed === '') return Number.NaN;
+
+    const kilobytes = Number(trimmed);
+    if (!Number.isFinite(kilobytes)) return Number.NaN;
+
+    return Math.round(kilobytes * 1024);
+}
+
 function getThinkingLevelLabel(level: DefaultPromptTemplate['thinkingLevel']): string {
     const canonicalLevel = canonicalizeThinkingLevel(level);
     return THINKING_LEVELS.find(option => option.id === canonicalLevel)?.label ?? canonicalLevel;
@@ -112,8 +140,20 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
         hasUnsavedChanges,
     }));
 
+    const sizeLimitErrors = {
+        maxPromptSize: settings !== null && !isValidSizeLimit(settings.maxPromptSize)
+            ? 'プロンプトサイズ上限は1KB以上の値で入力してください。'
+            : null,
+        maxDocumentSize: settings !== null && !isValidSizeLimit(settings.maxDocumentSize)
+            ? '文書サイズ上限は1KB以上の値で入力してください。'
+            : null,
+    };
+
     const handleSave = async () => {
         if (!settings) return;
+        // 壊れたサイズ上限は全ユーザーの保存を止めるため、画面側で止める（ボタンの
+        // disabled だけに頼らず、保存経路そのものでも拒否する）。
+        if (sizeLimitErrors.maxPromptSize || sizeLimitErrors.maxDocumentSize) return;
 
         // 同名テンプレートは決定論的IDが衝突しゲスト同期で1件に上書きされるため保存前に拒否する。
         const trimmedNames = defaultPrompts.map(prompt => prompt.name.trim());
@@ -313,18 +353,27 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                     </label>
                     <input
                         type="number"
-                        value={(settings.maxPromptSize / 1024).toFixed(0)}
+                        min="1"
+                        step="0.01"
+                        aria-invalid={sizeLimitErrors.maxPromptSize !== null}
+                        value={formatSizeLimitInput(settings.maxPromptSize)}
                         onChange={(e) =>
                             setSettings({
                                 ...settings,
-                                maxPromptSize: Number(e.target.value) * 1024,
+                                maxPromptSize: parseSizeLimitInput(e.target.value),
                             })
                         }
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
-                    <p className="text-xs text-gray-500 mt-2">
-                        現在: {(settings.maxPromptSize / 1024).toFixed(2)} KB
-                    </p>
+                    {sizeLimitErrors.maxPromptSize ? (
+                        <p role="alert" className="text-xs font-medium text-red-700 mt-2">
+                            {sizeLimitErrors.maxPromptSize}
+                        </p>
+                    ) : (
+                        <p className="text-xs text-gray-500 mt-2">
+                            現在: {(settings.maxPromptSize / 1024).toFixed(2)} KB
+                        </p>
+                    )}
                 </div>
 
                 {/* 文書サイズ上限 */}
@@ -334,18 +383,27 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                     </label>
                     <input
                         type="number"
-                        value={(settings.maxDocumentSize / 1024).toFixed(0)}
+                        min="1"
+                        step="0.01"
+                        aria-invalid={sizeLimitErrors.maxDocumentSize !== null}
+                        value={formatSizeLimitInput(settings.maxDocumentSize)}
                         onChange={(e) =>
                             setSettings({
                                 ...settings,
-                                maxDocumentSize: Number(e.target.value) * 1024,
+                                maxDocumentSize: parseSizeLimitInput(e.target.value),
                             })
                         }
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
-                    <p className="text-xs text-gray-500 mt-2">
-                        現在: {(settings.maxDocumentSize / 1024).toFixed(2)} KB
-                    </p>
+                    {sizeLimitErrors.maxDocumentSize ? (
+                        <p role="alert" className="text-xs font-medium text-red-700 mt-2">
+                            {sizeLimitErrors.maxDocumentSize}
+                        </p>
+                    ) : (
+                        <p className="text-xs text-gray-500 mt-2">
+                            現在: {(settings.maxDocumentSize / 1024).toFixed(2)} KB
+                        </p>
+                    )}
                 </div>
 
                 {/* デフォルトプロンプト */}
@@ -416,7 +474,13 @@ const SettingsPanel = forwardRef<SettingsPanelRef, object>((props, ref) => {
                     {!hasUnsavedChanges() && <div></div>}
                     <button
                         onClick={handleSave}
-                        disabled={saving || syncingGuestPrompts || !hasUnsavedChanges()}
+                        disabled={
+                            saving
+                            || syncingGuestPrompts
+                            || !hasUnsavedChanges()
+                            || sizeLimitErrors.maxPromptSize !== null
+                            || sizeLimitErrors.maxDocumentSize !== null
+                        }
                         className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Save className="w-5 h-5" />

@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "copy-ffmpeg-core": "node scripts/copy-ffmpeg-core.mjs",
+    "predev": "npm run copy-ffmpeg-core",
     "dev": "next dev --turbopack",
+    "prebuild": "npm run copy-ffmpeg-core",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "e2e:ffmpeg:build": "esbuild e2e/ffmpeg-wasm/harness.ts --bundle --format=esm --platform=browser --alias:@/lib/clientErrorReporter=./e2e/ffmpeg-wasm/stubs/clientErrorReporter.ts --alias:@=./src --external:@ffmpeg/ffmpeg --external:@ffmpeg/util --outfile=e2e/ffmpeg-wasm/harness.js",
+    "e2e:app": "cd e2e/app && npx playwright test",
     "test:rules": "firebase emulators:exec --only firestore --project demo-vtd \"vitest run rules-tests\""
   },
   "dependencies": {
@@ -26,6 +31,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@ffmpeg/core": "0.12.6",
     "@firebase/rules-unit-testing": "^5.0.2",
     "@tailwindcss/postcss": "^4",
     "@types/jszip": "^3.4.0",

@@ -50,6 +50,7 @@ import {
     MAX_MESSAGE_LENGTH,
     MAX_STACK_LENGTH,
     isClientErrorReporterInstalled,
+    reportHandledError,
     setupClientErrorReporter,
     teardownClientErrorReporter,
 } from './clientErrorReporter';
@@ -374,5 +375,62 @@ describe('clientErrorReporter (S2-8)', () => {
 
             expect(() => fireError({ error: new Error('boom') })).not.toThrow();
         });
+    });
+});
+
+describe('reportHandledError (捕捉済み失敗の痕跡)', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mocks.addDoc.mockResolvedValue({ id: 'doc' });
+        mocks.identity.userId = 'GUEST';
+        mocks.identity.ownerType = 'guest';
+        teardownClientErrorReporter();
+    });
+
+    afterEach(() => {
+        teardownClientErrorReporter();
+    });
+
+    it('購読中なら logger と clientErrors の両方へ source と context 付きで送る', async () => {
+        setupClientErrorReporter();
+        reportHandledError({
+            source: 'audio_conversion',
+            message: '音声変換に失敗: RuntimeError: memory access out of bounds',
+            context: { fileName: 'booth.mp4', sizeBytes: 1300000000, workerDead: true, execCount: 64 },
+        });
+        await flush();
+
+        expect(mocks.loggerError).toHaveBeenCalledOnce();
+        expect(mocks.addDoc).toHaveBeenCalledOnce();
+        expect(sentPayload()).toMatchObject({
+            source: 'audio_conversion',
+            message: '音声変換に失敗: RuntimeError: memory access out of bounds',
+            context: { fileName: 'booth.mp4', sizeBytes: 1300000000, workerDead: true, execCount: 64 },
+            userId: 'GUEST',
+            ownerType: 'guest',
+        });
+        expect(Object.values(sentPayload())).not.toContain(undefined);
+    });
+
+    it('購読前 (setup していない) は logger だけで、Firestore へは送らない', async () => {
+        reportHandledError({ source: 'audio_conversion', message: 'x' });
+        await flush();
+        expect(mocks.loggerError).toHaveBeenCalledOnce();
+        expect(mocks.addDoc).not.toHaveBeenCalled();
+    });
+
+    it('未捕捉エラーと同じ throttle に従う', async () => {
+        setupClientErrorReporter({ throttleMs: 60_000 });
+        reportHandledError({ source: 'audio_conversion', message: '同じ' });
+        reportHandledError({ source: 'audio_conversion', message: '同じ' });
+        await flush();
+        expect(mocks.addDoc).toHaveBeenCalledOnce();
+        expect(mocks.loggerError).toHaveBeenCalledTimes(2);
+    });
+
+    it('logger が throw しても伝播しない', () => {
+        setupClientErrorReporter();
+        mocks.loggerError.mockImplementationOnce(() => { throw new Error('logger down'); });
+        expect(() => reportHandledError({ source: 'audio_conversion', message: 'x' })).not.toThrow();
     });
 });

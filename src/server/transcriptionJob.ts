@@ -84,6 +84,11 @@ export interface TranscriptionJob {
     speakers?: number;
     createdAtMs: number;
     updatedAtMs: number;
+    /**
+     * Azure が Succeeded になった後、結果の取り込み（結果取得・解析・整形）に失敗した回数。
+     * 🔴 一時失敗（ネットワーク・5xx・タイムアウト）で永久 failed にしないための再試行回数。上限は status route が持つ。
+     */
+    importFailureCount?: number;
     /** 最後に取得した有効な Azure 状態。内部の finalizing とは区別する。 */
     azureStatus?: AzureBatchStatus;
     /** 有効観測のサーバ時刻。updatedAt のリース時計には使わない。 */
@@ -146,6 +151,8 @@ const parseJob = (id: string, data: FirebaseFirestore.DocumentData | undefined):
         promptName: String(data.promptName ?? ''),
         ...(typeof data.error === 'string' && { error: data.error }),
         ...(typeof data.speakers === 'number' && { speakers: data.speakers }),
+        ...(typeof data.importFailureCount === 'number' && Number.isFinite(data.importFailureCount)
+            && { importFailureCount: data.importFailureCount }),
         createdAtMs: toMs(data.createdAt),
         updatedAtMs: toMs(data.updatedAt),
         ...(isAzureBatchStatus(data.azureStatus) && { azureStatus: data.azureStatus }),
@@ -322,7 +329,7 @@ export async function commitTerminalOutcome(params: {
 
 export async function updateTranscriptionJob(
     jobId: string,
-    patch: Partial<Pick<TranscriptionJob, 'status' | 'error' | 'speakers'>>,
+    patch: Partial<Pick<TranscriptionJob, 'status' | 'error' | 'speakers' | 'importFailureCount'>>,
 ): Promise<void> {
     const firestore = db();
     const ref = firestore.collection(TRANSCRIPTION_JOBS_COLLECTION).doc(jobId);

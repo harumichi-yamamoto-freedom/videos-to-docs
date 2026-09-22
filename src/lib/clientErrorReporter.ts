@@ -33,13 +33,22 @@ export const MAX_STACK_LENGTH = 8000;
 const DEFAULT_THROTTLE_MS = 60_000;
 const DEFAULT_MAX_REPORTS_PER_PAGE = 20;
 
-export type ClientErrorSource = 'window.error' | 'unhandledrejection';
+/**
+ * 'window.error' / 'unhandledrejection' は未捕捉。
+ * 'audio_conversion' はアプリが捕まえて画面に出した失敗を、痕跡を残すために明示的に送るもの
+ * (ブラウザ内 FFmpeg の失敗はサーバにも Firestore にも出ないので、これが唯一の観測点)。
+ */
+export type ClientErrorSource = 'window.error' | 'unhandledrejection' | 'audio_conversion';
+
+/** 捕捉済み失敗に添える数値・文言 (Firestore へそのまま入れるので入れ子にしない) */
+export type ClientErrorContext = Record<string, string | number | boolean>;
 
 /** logger.error のメタデータ兼 Firestore へ送る本文 (undefined のキーは送信前に落とす) */
 export interface ClientErrorReport {
     message: string;
     stack?: string;
     source: ClientErrorSource;
+    context?: ClientErrorContext;
     /** 発生ページ (location.href) */
     url: string;
     /** 発生時刻 (クライアント時計・ISO 8601)。Firestore 側には別途 createdAt=serverTimestamp も付く */
@@ -130,6 +139,35 @@ export function isClientErrorReporterInstalled(): boolean {
     return state !== null;
 }
 
+export interface HandledErrorDraft {
+    source: Exclude<ClientErrorSource, 'window.error' | 'unhandledrejection'>;
+    message: string;
+    code?: string;
+    context?: ClientErrorContext;
+}
+
+/**
+ * アプリが捕まえて画面に出した失敗を、未捕捉エラーと同じ経路 (logger + Firestore `clientErrors`) で残す。
+ * 未捕捉エラーと同じ throttle / 上限に従う。購読が無い (SSR・setup 前) ときは logger だけ。
+ * 決して throw しない。
+ */
+export function reportHandledError(draft: HandledErrorDraft): void {
+    try {
+        const entry = finalize({
+            source: draft.source,
+            message: draft.message,
+            code: draft.code,
+            context: draft.context,
+        });
+        reporterLogger.error('捕捉済みの失敗を記録', undefined, { ...entry });
+        if (state) {
+            void sendToFirestore(state, entry);
+        }
+    } catch {
+        // 観測層の失敗はアプリに伝播させない
+    }
+}
+
 // ---- 内部 ------------------------------------------------------------------
 
 function report(current: ReporterState, build: () => ClientErrorReport, rawError: unknown): void {
@@ -211,7 +249,7 @@ function buildFromRejection(reason: unknown): ClientErrorReport {
 
 type ReportDraft = Pick<
     ClientErrorReport,
-    'source' | 'message' | 'stack' | 'code' | 'filename' | 'lineno' | 'colno'
+    'source' | 'message' | 'stack' | 'code' | 'filename' | 'lineno' | 'colno' | 'context'
 >;
 
 function finalize(draft: ReportDraft): ClientErrorReport {
@@ -219,6 +257,7 @@ function finalize(draft: ReportDraft): ClientErrorReport {
         message: truncate(draft.message, MAX_MESSAGE_LENGTH),
         stack: draft.stack === undefined ? undefined : truncate(draft.stack, MAX_STACK_LENGTH),
         source: draft.source,
+        context: draft.context,
         url: window.location.href,
         timestamp: new Date().toISOString(),
         filename: draft.filename,
@@ -283,8 +322,8 @@ function truncate(text: string, max: number): string {
     return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
-function withoutUndefined(entry: ClientErrorReport): Record<string, string | number> {
-    const result: Record<string, string | number> = {};
+function withoutUndefined(entry: ClientErrorReport): Record<string, string | number | ClientErrorContext> {
+    const result: Record<string, string | number | ClientErrorContext> = {};
     for (const [key, value] of Object.entries(entry)) {
         if (value !== undefined) {
             result[key] = value;

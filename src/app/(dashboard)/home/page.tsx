@@ -642,6 +642,7 @@ export default function HomePage() {
               onPromptClick={handlePromptClick}
               onCreateClick={handlePromptCreateClick}
               onPromptDeleted={handlePromptDeleted}
+              onDefaultsInitialized={handlePromptDeleted}
               updateTrigger={promptUpdateTrigger}
             />
           </div>

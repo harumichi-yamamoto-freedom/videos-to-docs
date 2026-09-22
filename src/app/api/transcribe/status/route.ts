@@ -58,6 +58,21 @@ export const dynamic = 'force-dynamic';
 
 const logger = createLogger('api/transcribe/status');
 
+/**
+ * Azure が Succeeded になった後の**結果取り込み**（結果取得・解析・整形）を、何回まで作り直せるか。
+ * 🔴 一時失敗（ネットワーク断・5xx・タイムアウト）で 1 回でも終端化すると、Azure 側に完成した結果があるのに
+ *    文書が永久に failed になる（再提出＝再課金）。終端化せず確定権を解放し、次の poll で取り直す。
+ *    ただし決定的な失敗（壊れた結果 JSON 等）で無限に running を返し続けないよう、この回数で打ち切る。
+ */
+export const MAX_IMPORT_FAILURES = 5;
+
+/** 取り込みを打ち切ったときの利用者向け文言 */
+const IMPORT_EXHAUSTED_REASON =
+    `文字起こし結果の取り込みに ${MAX_IMPORT_FAILURES} 回失敗しました。時間をおいて再提出してください。`;
+
+/** Azure は成功したが、本文が 1 文字も無いときの利用者向け文言 */
+const NO_SPEECH_REASON = '音声から文字を認識できませんでした。無音や対応外の形式でないか確認してください。';
+
 const jsonResponse = (body: unknown, status: number): Response =>
     new Response(JSON.stringify(body), {
         status,
@@ -262,17 +277,41 @@ async function finalizeIfTerminal(job: TranscriptionJob): Promise<Response> {
         ({ markdown, phraseLineByIndex } = buildTranscriptWithAnchors(parsed));
         generatedByModel = describeBatchModel(parsed);
     } catch {
-        const reason = '文字起こし結果の取り込みに失敗しました。もう一度お試しください。';
-        logger.warn('文字起こし結果の取り込みに失敗', { jobId: job.id });
+        // 🔴 取り込みの失敗は終端化しない（Azure 側には結果が残っている）。確定権を解放し、次の poll で取り直す。
+        const failures = (job.importFailureCount ?? 0) + 1;
+        logger.warn('文字起こし結果の取り込みに失敗', { jobId: job.id, failures });
+        if (failures < MAX_IMPORT_FAILURES) {
+            await updateTranscriptionJob(job.id, { status: 'running', importFailureCount: failures });
+            // 未取り込みの結果は削除しない（次の poll で同じ結果を取り直す）。
+            return statusResponse({ ...job, status: 'running' }, 'importing');
+        }
+        // 上限到達。決定的な失敗で無限に再試行し続けない。
         const committed = await commitTerminalOutcome({
             jobId: job.id,
             docId: job.docId,
             expectedOwnerId: job.ownerId,
-            outcome: { kind: 'failed', reason },
+            outcome: { kind: 'failed', reason: IMPORT_EXHAUSTED_REASON },
         });
         if (committed === 'not_owner') return getCurrentPublicStatus(job.id);
         // 未取り込みの結果は削除せず、Azure 側の TTL に任せる。
-        return statusResponse({ ...job, status: 'failed', error: reason });
+        return statusResponse({ ...job, status: 'failed', error: IMPORT_EXHAUSTED_REASON });
+    }
+    // 🔴 本文が 1 文字も無いまま completed にしない（利用者には「成功したのに空の文書」に見える）。
+    //    注釈が空でも素の本文があれば buildTranscriptWithAnchors が本文を返す。ここが空＝認識ゼロ。
+    if (!markdown.trim()) {
+        logger.warn('認識結果が空のため failed にする', {
+            jobId: job.id, audioSec: parsed.audioSec, droppedPhrases: parsed.droppedPhrases,
+        });
+        const committed = await commitTerminalOutcome({
+            jobId: job.id,
+            docId: job.docId,
+            expectedOwnerId: job.ownerId,
+            outcome: { kind: 'failed', reason: NO_SPEECH_REASON },
+        });
+        if (committed === 'not_owner') return getCurrentPublicStatus(job.id);
+        // 結果自体は取り込めている（取り直しても同じ）ので Azure 側は後始末する。
+        await deleteBatchJob(job.azureSelfUrl, credentials);
+        return statusResponse({ ...job, status: 'failed', error: NO_SPEECH_REASON });
     }
     // 要確認候補（設計 B4）: 本文が読めるなら候補側の失敗で文書を failed にしない。再確定でも同じ入力から決定的に作り直す。
     const review = buildReviewForDocument(job, parsed, markdown, phraseLineByIndex);

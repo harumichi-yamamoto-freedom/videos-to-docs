@@ -1,0 +1,47 @@
+{
+ "label": "fix_real_2.9GB_x1",
+ "results": [
+  {
+   "name": "永島 正明-20240324_FB①-015.mp4",
+   "sizeBytes": 2928694522,
+   "ok": true,
+   "outBytes": 258644053,
+   "error": null,
+   "elapsedMs": 248586,
+   "durationSec": 21560,
+   "lastStatus": {
+    "status": "converting",
+    "phase": "audio_conversion",
+    "done": 1,
+    "segs": 1,
+    "totalDuration": 21560
+   }
+  }
+ ],
+ "fatal": null,
+ "elapsedSec": 255,
+ "rssPeakRendererMb": 523
+}
+{
+ "label": "cliff_10min_lo",
+ "results": [
+  {
+   "name": "seg_lo.mp4",
+   "sizeBytes": 67503074,
+   "durationSec": 600,
+   "ok": false,
+   "outBytes": 3901504,
+   "error": "Error: 区間65: FFmpeg実行失敗: FFmpeg の実行環境が停止しました（RuntimeError: memory access out of bounds）",
+   "elapsedMs": 5960,
+   "lastStatus": {
+    "done": 64,
+    "segs": 120,
+    "execCount": 65
+   }
+  }
+ ],
+ "fatal": null,
+ "elapsedSec": 12,
+ "rssPeakRendererMb": 314
+}
+E2E2_DONE

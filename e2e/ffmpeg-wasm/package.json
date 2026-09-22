@@ -1,0 +1,13 @@
+{
+  "name": "videos-to-docs-e2e-ffmpeg-wasm",
+  "private": true,
+  "description": "ブラウザ内 FFmpeg.wasm の実機検査 (exec の崖・WORKERFS・複数ファイル連続)。CI では回さない",
+  "scripts": {
+    "install-browser": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "lighthouse": "^12.8.2",
+    "playwright": "^1.55.0"
+  }
+}
