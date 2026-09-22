@@ -31,7 +31,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@ffmpeg/core": "^0.12.6",
+    "@ffmpeg/core": "0.12.6",
     "@firebase/rules-unit-testing": "^5.0.2",
     "@tailwindcss/postcss": "^4",
     "@types/jszip": "^3.4.0",
