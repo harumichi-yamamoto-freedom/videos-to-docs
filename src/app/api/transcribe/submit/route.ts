@@ -4,8 +4,8 @@
  * 短命な関数: 音声を分割せず、Azure バッチジョブを 1 本投げ、処理中の文書とジョブ状態を作って即返す。
  * 完了は /api/transcribe/status（poll）または webhook で拾う。Vercel 300 秒には当たらない。
  *
- * 検査順: 本文 → 主体(401) → 所有権(403) → Azure 設定(503) → Storage 存在/サイズ(404/413)
- *        → 音声長(400) → 時間あたり上限(429) → 署名URL → バッチ提出 → 文書/ジョブ作成 → 200。
+ * 検査順: 本文 → 主体(401) → 所有権(403) → Azure 設定(503) → 音声長(400) → Storage 存在/サイズ(404/413)
+ *        → 音声長とサイズの整合(400) → 時間あたり上限(429) → 署名URL → バッチ提出 → 文書/ジョブ作成 → 200。
  * 🔴 レートは **1 ジョブ 1 消費**（チャンク方式の最大 36 消費/商談を解消）。
  */
 import { createLogger } from '@/lib/logger';
@@ -34,6 +34,18 @@ const logger = createLogger('api/transcribe/submit');
 
 /** Azure batch は完了まで最大24時間。長尺は内部再試行で音源取得が6時間を超え得るため、24時間有効にする。 */
 const SIGNED_URL_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 申告された音声長（audioSec）の裏取りに使う、暗黙ビットレート（sizeBytes×8÷audioSec）の許容範囲。
+ * 🔴 audioSec はクライアントの自己申告で、240 分上限の判定に使われる。実長は Azure の結果が正だが提出時には無いので、
+ *    ここでは Storage 上の実サイズと釣り合わない申告だけを弾く（正確な長さの検証はしない・できない）。
+ * 下限 8kbps: 実録音の最低水準（96kbps mono の 1 時間 ≈ 43MB）から見て十分に保守的。1MB を 4 時間と申告する型を止める。
+ * 上限 20Mbps: 通常は変換後の MP3（64k〜192k）だが、試験的な「動画を直接送信」では動画ファイルがそのまま
+ *    Storage に置かれる（1080p の h264 で数 Mbps）。それを弾かない余裕を持たせつつ、1GB を 1 秒と申告する型
+ *    （= 8Gbps）は止める。
+ */
+const MIN_IMPLIED_BITRATE_BPS = 8_000;
+const MAX_IMPLIED_BITRATE_BPS = 20_000_000;
 
 const jsonResponse = (body: unknown, status: number, extraHeaders: Record<string, string> = {}): Response =>
     new Response(JSON.stringify(body), {
@@ -107,7 +119,17 @@ export async function POST(request: Request): Promise<Response> {
         }
 
         // Storage 上のサイズ確認（バッチは 1GB まで）
-        await statMedia(body.storagePath, AZURE_BATCH_MAX_AUDIO_BYTES);
+        const media = await statMedia(body.storagePath, AZURE_BATCH_MAX_AUDIO_BYTES);
+
+        // 音声長の申告の裏取り（サイズと釣り合わない申告だけを弾く。実長の正は Azure の結果）
+        const impliedBitrateBps = media.sizeBytes > 0 ? (media.sizeBytes * 8) / body.audioSec : null;
+        if (impliedBitrateBps !== null
+            && (impliedBitrateBps < MIN_IMPLIED_BITRATE_BPS || impliedBitrateBps > MAX_IMPLIED_BITRATE_BPS)) {
+            logger.warn('音声長の申告がファイルサイズと釣り合わない', {
+                sizeBytes: media.sizeBytes, audioSec: body.audioSec, impliedBitrateBps: Math.round(impliedBitrateBps),
+            });
+            throw invalid('音声の長さの情報がファイルと一致しません。ページを再読み込みして、もう一度お試しください。');
+        }
 
         // 🔴 1 ジョブ 1 消費。チャンク方式の「1 試行 1 消費（最大 36/商談）」を解消。
         const rate = await enforceRateLimit(subject, clientIpFromHeaders(request.headers));

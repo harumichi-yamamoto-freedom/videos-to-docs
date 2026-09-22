@@ -54,16 +54,24 @@ const baseOf = (selfUrl: string): string => selfUrl.split('?')[0];
 const withApiVersion = (url: string): string =>
     url.includes('api-version=') ? url : `${url}${url.includes('?') ? '&' : '?'}api-version=${AZURE_BATCH_API_VERSION}`;
 
+/**
+ * 結果の取得に付ける制限時間。
+ * 🔴 応答しない相手に当たると、素の fetch は関数の実行時間を使い切るまで返らない（Vercel 側の打ち切りで
+ *    「取り込み失敗」の記録さえ残らない）。必ず自分で打ち切り、呼び出し側が再試行できる例外にする。
+ */
+export const RESULT_FETCH_TIMEOUT_MS = 30_000;
+
 async function azureFetch(
     url: string,
     credentials: AzureCredentials,
-    init: { method?: string; body?: unknown } = {},
+    init: { method?: string; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<{ status: number; json: unknown }> {
     const headers: Record<string, string> = { [AZURE_BATCH_API_KEY_HEADER]: credentials.apiKey };
     if (init.body !== undefined) headers['content-type'] = 'application/json';
     const res = await fetch(url, {
         method: init.method ?? 'GET',
         headers,
+        ...(init.signal !== undefined ? { signal: init.signal } : {}),
         ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
     });
     const text = await res.text();
@@ -132,7 +140,9 @@ export async function getBatchJob(selfUrl: string, credentials: AzureCredentials
 /** 成功したジョブの結果ファイル（kind==='Transcription'）を取得する。 */
 export async function fetchBatchResult(selfUrl: string, credentials: AzureCredentials): Promise<AzureBatchResult> {
     const filesUrl = `${baseOf(selfUrl)}/files?api-version=${AZURE_BATCH_API_VERSION}`;
-    const { status, json } = await azureFetch(filesUrl, credentials);
+    const { status, json } = await azureFetch(filesUrl, credentials, {
+        signal: AbortSignal.timeout(RESULT_FETCH_TIMEOUT_MS),
+    });
     if (status !== 200) {
         throw new GenerateApiError('upstream_error', `文字起こし結果の一覧を取得できませんでした (${status})。`);
     }
@@ -148,7 +158,7 @@ export async function fetchBatchResult(selfUrl: string, credentials: AzureCreden
     }
     if (!contentUrl) throw new GenerateApiError('upstream_error', '文字起こし結果ファイルが見つかりませんでした。');
     // 結果ファイルは SAS 付きの一時 URL。鍵ヘッダは不要。
-    const res = await fetch(contentUrl);
+    const res = await fetch(contentUrl, { signal: AbortSignal.timeout(RESULT_FETCH_TIMEOUT_MS) });
     if (!res.ok) throw new GenerateApiError('upstream_error', `文字起こし結果を取得できませんでした (${res.status})。`);
     return (await res.json()) as AzureBatchResult;
 }

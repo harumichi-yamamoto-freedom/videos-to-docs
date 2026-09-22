@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { parseBatchResult, getAzureCredentials, deleteBatchJob } from './azureBatchTranscribe';
+import { parseBatchResult, getAzureCredentials, deleteBatchJob, fetchBatchResult, RESULT_FETCH_TIMEOUT_MS } from './azureBatchTranscribe';
 import type { AzureBatchResult } from '@/lib/azureBatchContract';
 
 const { warnMock } = vi.hoisted(() => ({ warnMock: vi.fn() }));
@@ -240,6 +240,46 @@ describe('parseBatchResult の品質素材', () => {
         expect(parsed.droppedAnnotations).toHaveLength(3);
         expect(parsed.droppedAnnotations.map((a) => a.phraseIndex)).toEqual([0, 2, 3]);
         expect(parsed.annotations.map((a) => a.phraseIndex)).toEqual([1]);
+    });
+});
+
+describe('fetchBatchResult', () => {
+    const credentials = { endpoint: 'https://example.invalid', apiKey: 'synthetic-api-key' };
+    const selfUrl = 'https://example.invalid/transcriptions/synthetic-job?api-version=2024-11-15';
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.clearAllMocks();
+    });
+
+    /** 結果一覧 → 結果 JSON の 2 回の取得をこの順で返すモック */
+    const stubResultFetch = () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                values: [{ kind: 'Transcription', links: { contentUrl: 'https://result.invalid/synthetic.json' } }],
+            }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify(sampleResult()), { status: 200 }));
+        vi.stubGlobal('fetch', fetchMock);
+        return fetchMock;
+    };
+
+    it('🔴 結果一覧・結果 JSON のどちらの取得にも 30 秒のタイムアウトを付ける（応答しない相手で関数を占有しない）', async () => {
+        const fetchMock = stubResultFetch();
+
+        await expect(fetchBatchResult(selfUrl, credentials)).resolves.toMatchObject({ durationMilliseconds: 120_000 });
+
+        expect(RESULT_FETCH_TIMEOUT_MS).toBe(30_000);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        for (const [, init] of fetchMock.mock.calls) {
+            expect(init?.signal).toBeInstanceOf(AbortSignal);
+        }
+    });
+
+    it('タイムアウトで中断された取得は例外になる（呼び出し側が取り込み失敗として扱える）', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(
+            Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })));
+
+        await expect(fetchBatchResult(selfUrl, credentials)).rejects.toThrow();
     });
 });
 

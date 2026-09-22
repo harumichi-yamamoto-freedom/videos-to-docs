@@ -106,10 +106,12 @@ vi.mock('@/server/reviewCandidates', async (importActual) => {
 });
 
 import { POST as submitPOST } from './submit/route';
-import { POST as statusPOST } from './status/route';
+import { MAX_IMPORT_FAILURES, POST as statusPOST } from './status/route';
 import { resolveRequestSubject } from '@/server/auth';
 import { submitBatchJob, getAzureCredentials, getBatchJob, fetchBatchResult, deleteBatchJob } from '@/server/azureBatchTranscribe';
-import { getSignedReadUrl } from '@/server/mediaSource';
+import { getSignedReadUrl, statMedia } from '@/server/mediaSource';
+import { enforceRateLimit } from '@/server/rateLimit';
+import { GenerateApiError } from '@/server/errors';
 import { attachJobToDocument, createProcessingDocument, writeProcessingProgress } from '@/server/transcriptionDocument';
 import { claimJobForFinalize, commitTerminalOutcome, recordAzureObservation, type TranscriptionJob, FINALIZE_LEASE_MS, createTranscriptionJob, getTranscriptionJob, getTranscriptionJobByDocId, updateTranscriptionJob } from '@/server/transcriptionJob';
 import { getTranscriptionDocuments, getTranscriptions, getTranscriptionsByOwnerId, restoreTranscription } from '@/lib/firestore';
@@ -279,6 +281,46 @@ describe('POST /api/transcribe/submit（実ルートの配線）', () => {
         const { audioSec, ...noSec } = validBody; void audioSec;
         const res = await submitPOST(req(noSec));
         expect(res.status).toBe(400);
+    });
+
+    it('🔴 時間あたり上限に達したら 429 と retry-after を返し、Azure へ提出しない', async () => {
+        // 上限の規則は rateLimit 側が単一の正。ここは「ルートが実際に enforceRateLimit を通っている」ことだけを錠にする。
+        vi.mocked(enforceRateLimit).mockRejectedValueOnce(new GenerateApiError(
+            'rate_limited', '短時間の実行回数が上限に達しました。しばらくしてからお試しください。', { retryAfterSec: 42 }));
+        const res = await submitPOST(req(validBody));
+        expect(res.status).toBe(429);
+        expect(res.headers.get('retry-after')).toBe('42');
+        expect(await res.json()).toMatchObject({ error: 'rate_limited', retryAfterSec: 42 });
+        // 提出も署名 URL 発行も文書作成も起きない（消費だけして止まる、の逆も無い）
+        expect(getSignedReadUrl).not.toHaveBeenCalled();
+        expect(submitBatchJob).not.toHaveBeenCalled();
+        expect(createProcessingDocument).not.toHaveBeenCalled();
+        expect(createTranscriptionJob).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['申告が長すぎる（1MB を 4 時間と申告）', 1_000_000, 4 * 3600],
+        ['申告が短すぎる（1GB を 1 秒と申告）', 1_000_000_000, 1],
+    ])('🔴 音声長の申告がファイルサイズと釣り合わない: %s は 400 で弾く', async (_label, sizeBytes, audioSec) => {
+        vi.mocked(statMedia).mockResolvedValueOnce({ storagePath: validBody.storagePath, sizeBytes });
+        const res = await submitPOST(req({ ...validBody, audioSec }));
+        expect(res.status).toBe(400);
+        expect(await res.json()).toMatchObject({ error: 'invalid_request' });
+        // 上限の消費も提出もしない
+        expect(enforceRateLimit).not.toHaveBeenCalled();
+        expect(submitBatchJob).not.toHaveBeenCalled();
+        expect(createProcessingDocument).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['96kbps mono の 1 時間 ≈ 43MB', 43_000_000, 3600],
+        ['64kbps の 4 時間 ≈ 115MB', 115_000_000, 4 * 3600],
+        ['192kbps の 10 分 ≈ 14MB', 14_400_000, 600],
+    ])('実在する録音（%s）は通す', async (_label, sizeBytes, audioSec) => {
+        vi.mocked(statMedia).mockResolvedValueOnce({ storagePath: validBody.storagePath, sizeBytes });
+        const res = await submitPOST(req({ ...validBody, audioSec }));
+        expect(res.status).toBe(200);
+        expect(submitBatchJob).toHaveBeenCalledTimes(1);
     });
 });
 
@@ -712,7 +754,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
     });
 
     it.each(['結果一覧取得', '結果 JSON 取得', '結果解析', 'Markdown 化'])(
-        'Succeeded 後の%s失敗は理由付き failed にし、未取り込みの Azure 結果を残す', async (stage) => {
+        '🔴 Succeeded 後の%s失敗は終端化せず、確定権を解放して次の poll に回す', async (stage) => {
             vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
             vi.mocked(fetchBatchResult).mockResolvedValue(sampleAzureResult());
             if (stage === '結果一覧取得' || stage === '結果 JSON 取得') {
@@ -736,25 +778,113 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
             }
 
             const res = await statusPOST(req({ jobId: 'job-1' }));
-            const reason = '文字起こし結果の取り込みに失敗しました。もう一度お試しください。';
             expect(res.status).toBe(200);
-            expect(await res.json()).toEqual(expectedStatus('failed', { error: reason, observed: true }));
-            expect(commitTerminalOutcome).toHaveBeenCalledWith({
-                jobId: 'job-1', docId: 'doc-1', expectedOwnerId: 'GUEST', outcome: { kind: 'failed', reason },
+            // 1 回の取り込み失敗で文書を永久に failed にしない（次の poll で取り直せる状態で返す）
+            expect(await res.json()).toEqual(expectedStatus('running', { stage: 'importing', observed: true }));
+            expect(commitTerminalOutcome).not.toHaveBeenCalled();
+            expect(documentDb.data).toMatchObject({ status: 'processing', title: '合成の文書', transcription: '処理中' });
+            // 確定権（リース）は解放し、取り込み失敗回数だけ進める
+            expect(updateTranscriptionJob).toHaveBeenCalledExactlyOnceWith('job-1', {
+                status: 'running', importFailureCount: 1,
             });
-            expect(documentDb.data).toMatchObject({ status: 'failed', title: '合成の文書' });
-            expect(documentDb.data?.transcription).toContain(reason);
-            expect(documentDb.jobData).toMatchObject({ status: 'failed', error: reason });
-            expect(updateTranscriptionJob).not.toHaveBeenCalled();
+            // 未取り込みの Azure 結果は残す（次の poll で取り直すため）
             expect(deleteBatchJob).not.toHaveBeenCalled();
         },
     );
+
+    it('🔴 取り込みの一時失敗の次の poll で本文を取り直して completed にする', async () => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult)
+            .mockRejectedValueOnce(new Error('合成のネットワークエラー'))
+            .mockResolvedValue(sampleAzureResult());
+
+        const first = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await first.json()).toEqual(expectedStatus('running', { stage: 'importing', observed: true }));
+        expect(documentDb.data).toMatchObject({ status: 'processing' });
+
+        const second = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await second.json()).toEqual(expectedStatus('succeeded', { observed: true }));
+        expect(fetchBatchResult).toHaveBeenCalledTimes(2);
+        expect(documentDb.data).toMatchObject({
+            status: 'completed', transcription: expect.stringContaining('よろしくお願いします'),
+        });
+        expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+        expect(deleteBatchJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('🔴 取り込み失敗が 5 回続いたら failed にする（無限に running で回さない）', async () => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult).mockRejectedValue(new Error('合成の取得エラー'));
+        // 失敗回数はジョブに残り、次の poll が引き継ぐ（確定権の取得・解放も実際の書き込みを模す）
+        vi.mocked(claimJobForFinalize).mockImplementation(async () => {
+            documentDb.jobData = { ...documentDb.jobData, status: 'finalizing' };
+            return { ...runningJob, status: 'finalizing', updatedAtMs: Date.now() };
+        });
+        vi.mocked(updateTranscriptionJob).mockImplementation(async (_jobId, patch) => {
+            documentDb.jobData = { ...documentDb.jobData, ...patch };
+        });
+
+        for (let attempt = 1; attempt <= 4; attempt += 1) {
+            const res = await statusPOST(req({ jobId: 'job-1' }));
+            expect(await res.json()).toEqual(expectedStatus('running', { stage: 'importing', observed: true }));
+            expect(documentDb.jobData).toMatchObject({ status: 'running', importFailureCount: attempt });
+            expect(documentDb.data).toMatchObject({ status: 'processing' });
+            expect(commitTerminalOutcome).not.toHaveBeenCalled();
+        }
+
+        const reason = '文字起こし結果の取り込みに 5 回失敗しました。時間をおいて再提出してください。';
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await res.json()).toEqual(expectedStatus('failed', { error: reason, observed: true }));
+        expect(commitTerminalOutcome).toHaveBeenCalledExactlyOnceWith({
+            jobId: 'job-1', docId: 'doc-1', expectedOwnerId: 'GUEST', outcome: { kind: 'failed', reason },
+        });
+        expect(documentDb.data).toMatchObject({ status: 'failed' });
+        expect(documentDb.data?.transcription).toContain(reason);
+        expect(documentDb.jobData).toMatchObject({ status: 'failed', error: reason });
+        expect(deleteBatchJob).not.toHaveBeenCalled();
+    });
+
+    it('🔴 Succeeded でも認識がゼロ（本文も注釈も空）なら completed にせず理由付き failed にする', async () => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult).mockResolvedValue({
+            durationMilliseconds: 600_000, recognizedPhrases: [], combinedRecognizedPhrases: [],
+        });
+        const reason = '音声から文字を認識できませんでした。無音や対応外の形式でないか確認してください。';
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await res.json()).toEqual(expectedStatus('failed', { error: reason, observed: true }));
+        expect(commitTerminalOutcome).toHaveBeenCalledExactlyOnceWith({
+            jobId: 'job-1', docId: 'doc-1', expectedOwnerId: 'GUEST', outcome: { kind: 'failed', reason },
+        });
+        expect(documentDb.data).toMatchObject({ status: 'failed' });
+        expect(documentDb.data?.transcription).toContain(reason);
+        expect(documentDb.jobData).toMatchObject({ status: 'failed', error: reason });
+        // 結果は取り込めている（取り直しても同じ）ので Azure 側は後始末する
+        expect(deleteBatchJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('🔴 全句の時刻が読めなくても本文があれば completed にして本文を保存する', async () => {
+        vi.mocked(getBatchJob).mockResolvedValue({ status: 'Succeeded' });
+        vi.mocked(fetchBatchResult).mockResolvedValue({
+            durationMilliseconds: 600_000,
+            combinedRecognizedPhrases: [{ display: 'これは合成の商談本文です。' }],
+            recognizedPhrases: [
+                { speaker: 1, recognitionStatus: 'Success', nBest: [{ display: 'これは合成の商談本文です。', confidence: 0.95 }] },
+            ],
+        });
+        const res = await statusPOST(req({ jobId: 'job-1' }));
+        expect(await res.json()).toEqual(expectedStatus('succeeded', { observed: true }));
+        expect(documentDb.data).toMatchObject({ status: 'completed' });
+        expect(documentDb.data?.transcription).toContain('これは合成の商談本文です。');
+        expect(documentDb.jobData).toMatchObject({ status: 'succeeded' });
+    });
 
     it.each(['Succeeded', 'Failed', '取り込み失敗'] as const)(
         '%s の終端 commit が失敗すると両方非終端に留まり、リース切れ後に本文を保存できる', async (stage) => {
             vi.mocked(getBatchJob).mockResolvedValue({ status: stage === 'Failed' ? 'Failed' : 'Succeeded' });
             vi.mocked(fetchBatchResult).mockResolvedValue(sampleAzureResult());
             if (stage === '取り込み失敗') {
+                // 取り込み失敗が終端化するのは上限回に達したときだけ（それ以前は running のまま）
+                documentDb.jobData = { ...documentDb.jobData, importFailureCount: MAX_IMPORT_FAILURES - 1 };
                 vi.mocked(fetchBatchResult).mockRejectedValueOnce(new Error('合成の取得エラー'));
             }
             const original = { ...documentDb.data };
@@ -820,6 +950,7 @@ describe('POST /api/transcribe/status（確定処理の配線）', () => {
             vi.mocked(getBatchJob).mockResolvedValue({ status: stage === 'Failed' ? 'Failed' : 'Succeeded' });
             vi.mocked(fetchBatchResult).mockResolvedValue(sampleAzureResult());
             if (stage === '取り込み失敗') {
+                documentDb.jobData = { ...documentDb.jobData, importFailureCount: MAX_IMPORT_FAILURES - 1 };
                 vi.mocked(fetchBatchResult).mockRejectedValueOnce(new Error('合成の取得エラー'));
             }
             const res = await statusPOST(req({ jobId: 'job-1' }));

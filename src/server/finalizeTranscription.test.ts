@@ -16,6 +16,7 @@ import {
     buildTranscriptMarkdownFromBatch,
     buildTranscriptWithAnchors,
     DOCUMENT_OVERHEAD_HEADROOM_BYTES,
+    TRANSCRIPT_WITHOUT_TIMESTAMPS_NOTICE,
     FIRESTORE_MAX_DOCUMENT_BYTES,
     reviewFitsDocument,
     sourceTextHashOf,
@@ -222,6 +223,42 @@ describe('buildTranscriptWithAnchors', () => {
         expect(markdown).toBe(buildTranscriptMarkdownFromBatch(parsed));
         expect(phraseLineByIndex.size).toBe(0);
         expect(warnMock).toHaveBeenCalledWith('段落アンカーの算出に失敗（本文は保存・アンカー無し）', { reason: '合成の内部エラー' });
+    });
+});
+
+describe('注釈が空でも本文がある結果（時刻の読めない句だけの Succeeded）', () => {
+    /** 全句の時刻が読めず落ちた結果。本文（combinedRecognizedPhrases）だけが残る。 */
+    const combinedOnly = parsedOf([], {
+        text: 'これは合成の商談本文です。',
+        speakers: 0,
+        droppedPhrases: 1,
+        droppedAnnotations: [{ text: 'これは合成の商談本文です。', speaker: 'spk:1', phraseIndex: 0 }],
+    });
+
+    it('🔴 注釈が空でも parsed.text があれば本文にする（空文字のまま completed にしない）', () => {
+        const { markdown, phraseLineByIndex } = buildTranscriptWithAnchors(combinedOnly);
+        expect(markdown).toContain('これは合成の商談本文です。');
+        // 話者・時刻が無いことを先頭 1 行で断る（利用者が「いつもと違う」で混乱しないように）
+        expect(markdown.split(/\r\n?|\n/)[0]).toBe(TRANSCRIPT_WITHOUT_TIMESTAMPS_NOTICE);
+        // 時刻が無い＝段落アンカーは作れない（推測しない）
+        expect(phraseLineByIndex.size).toBe(0);
+    });
+
+    it('buildTranscriptMarkdownFromBatch も同じ本文を返す（保存経路と表示経路で食い違わない）', () => {
+        expect(buildTranscriptMarkdownFromBatch(combinedOnly)).toBe(buildTranscriptWithAnchors(combinedOnly).markdown);
+    });
+
+    it('注釈も本文も空（認識ゼロ）なら空文字のまま返す（終端の判断は呼び出し側）', () => {
+        expect(buildTranscriptMarkdownFromBatch(parsedOf([], { text: '' }))).toBe('');
+        expect(buildTranscriptMarkdownFromBatch(parsedOf([], { text: '  \n \t ' }))).toBe('');
+        expect(buildTranscriptWithAnchors(parsedOf([], { text: '' })).markdown).toBe('');
+    });
+
+    it('注釈がある通常の結果には注記を足さない（既存の見た目を変えない）', () => {
+        const normal = parsedOf([phrase(0, 'こんにちは。', 0, 1, 'spk:1')], { text: 'こんにちは。' });
+        const { markdown } = buildTranscriptWithAnchors(normal);
+        expect(markdown).not.toContain(TRANSCRIPT_WITHOUT_TIMESTAMPS_NOTICE);
+        expect(markdown).toBe('[00:00](#t=0) **spk:1** こんにちは。');
     });
 });
 
