@@ -130,6 +130,35 @@ describe('adminSettings', () => {
         expect(mocks.setDoc).not.toHaveBeenCalled();
     });
 
+    // 管理画面の入力検証をすり抜けて 0 や NaN が保存されると、一般実行APIの
+    // validatePromptSize/validateDocumentSize が全ユーザーへ false を返す。
+    // 読み側でも既定値へ戻し、壊れた1レコードで全員の保存が止まらないようにする。
+    it.each([
+        { scenario: '0', stored: 0 },
+        { scenario: '負値', stored: -1 },
+        { scenario: '非有限', stored: Number.NaN },
+    ])('保存済みサイズ上限が壊れていても($scenario)一般実行APIは既定値へ戻す', async ({ stored }) => {
+        mocks.getDoc.mockResolvedValue({
+            exists: () => true,
+            data: () => ({
+                maxPromptSize: stored,
+                maxDocumentSize: stored,
+                defaultPrompts: INITIAL_DEFAULT_PROMPTS,
+            }),
+        });
+
+        await expect(validatePromptSize('prompt')).resolves.toEqual({
+            valid: true,
+            size: 6,
+            maxSize: 50000,
+        });
+        await expect(validateDocumentSize('document')).resolves.toEqual({
+            valid: true,
+            size: 8,
+            maxSize: 500000,
+        });
+    });
+
     it('管理画面用の取得だけが未作成configを初期化する', async () => {
         mocks.getDoc.mockResolvedValue({
             exists: () => false,

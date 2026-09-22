@@ -261,6 +261,19 @@ function withCanonicalDefaultPrompts(
     };
 }
 
+/**
+ * 保存済みのサイズ上限を実行時に採用してよいか。
+ * 0・負値・非有限が保存されていると validatePromptSize/validateDocumentSize が
+ * 全ユーザーへ false を返して保存を止めるため、既定値へ戻す。
+ * (`?? defaults` は undefined しか拾わないので 0 を素通りさせていた)
+ */
+function resolveSizeLimit(value: number | undefined, fallback: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        return fallback;
+    }
+    return value;
+}
+
 function withRuntimeDefaults(settings: Partial<AdminSettings>): AdminSettings {
     const defaults = getDefaultSettings();
 
@@ -268,8 +281,8 @@ function withRuntimeDefaults(settings: Partial<AdminSettings>): AdminSettings {
         {
             ...defaults,
             ...settings,
-            maxPromptSize: settings.maxPromptSize ?? defaults.maxPromptSize,
-            maxDocumentSize: settings.maxDocumentSize ?? defaults.maxDocumentSize,
+            maxPromptSize: resolveSizeLimit(settings.maxPromptSize, defaults.maxPromptSize),
+            maxDocumentSize: resolveSizeLimit(settings.maxDocumentSize, defaults.maxDocumentSize),
             rateLimit: {
                 ...defaults.rateLimit,
                 ...settings.rateLimit,
