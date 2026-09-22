@@ -470,6 +470,71 @@ describe('runBatchTranscription', () => {
             lastStatus: { status: 'running', docId: 'd1', stage: 'queued' },
         });
     });
+
+    /**
+     * 🔴 提出の往復中に中止・通信断が起きると jobId を取り逃し、再開が再 submit になる
+     *    （二重課金・重複文書。レビュー 2026-09-22 S2）。
+     */
+    it('🔴 提出の往復中に中止されても提出は完了させ、onSubmitted で ID を渡してから中止で拒否する', async () => {
+        const controller = new AbortController();
+        const stopReason = new Error('この画面での確認を停止しました。');
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+            (url, init) => new Promise<Response>((resolve, reject) => {
+                // 実 fetch と同じく、渡されたシグナルの中止でこの往復を落とす
+                const signal = (init as RequestInit | undefined)?.signal ?? undefined;
+                if (signal?.aborted) { reject(signal.reason); return; }
+                signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+                // 提出の応答が返る前に、利用者が中止する
+                if (url === TRANSCRIBE_SUBMIT_PATH) controller.abort(stopReason);
+                setTimeout(() => resolve(jsonResponse(url === TRANSCRIBE_SUBMIT_PATH
+                    ? { jobId: 'j1', docId: 'd1' }
+                    : { status: 'running', docId: 'd1' })), 0);
+            }),
+        );
+        const onSubmitted = vi.fn();
+
+        await expect(runBatchTranscription({ ...input, signal: controller.signal, onSubmitted }))
+            .rejects.toBe(stopReason);
+
+        // 🔴 サーバが受理した瞬間に Azure のジョブと「処理中」文書ができる。ID を取り逃すと
+        //    再開が新規 submit になり、二重課金と重複文書を生む。中止でも ID は必ず渡す。
+        expect(onSubmitted).toHaveBeenCalledExactlyOnceWith({ jobId: 'j1', docId: 'd1' });
+        // 中止すべきは提出後の確認。状態確認は 1 回も送らない
+        expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([TRANSCRIBE_SUBMIT_PATH]);
+    });
+
+    it('🔴 提出の応答が消えたら、再開が再提出になり文書が重複し得ることを伝える文言で失敗する', async () => {
+        const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+        const onSubmitted = vi.fn();
+
+        const error = await runBatchTranscription({ ...input, onSubmitted }).catch((e: unknown) => e);
+
+        expect((error as Error).message).toContain('提出の応答を受け取れませんでした。');
+        expect((error as Error).message).toContain('再開すると再提出になり、既に受理されていた場合は文書が重複します。');
+        expect((error as Error).message).toContain('文書一覧で「処理中」の文書が無いか確認してから再開してください。');
+        expect(onSubmitted).not.toHaveBeenCalled();
+        expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([TRANSCRIBE_SUBMIT_PATH]);
+    });
+
+    it('サーバが理由つきで拒否した提出には重複の案内を付けない（受理されていないと分かっている）', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            jsonResponse({ error: 'audio_too_long', message: '音声が長すぎます' }, false, 400));
+
+        const error = await runBatchTranscription(input).catch((e: unknown) => e);
+
+        expect((error as Error).message).toBe('音声が長すぎます');
+        expect((error as Error).message).not.toContain('文書が重複します');
+    });
+
+    it('🔴 受理された応答から ID が読めないときも「応答が消えた」として扱う（null を ID として配らない）', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(null));
+        const onSubmitted = vi.fn();
+
+        const error = await runBatchTranscription({ ...input, onSubmitted }).catch((e: unknown) => e);
+
+        expect((error as Error).message).toContain('提出の応答を受け取れませんでした。');
+        expect(onSubmitted).not.toHaveBeenCalled();
+    });
 });
 
 const STATUS_POLL_TIMEOUT_MS_FOR_TEST = 91 * 60_000;

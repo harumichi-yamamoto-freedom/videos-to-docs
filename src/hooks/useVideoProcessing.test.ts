@@ -1250,6 +1250,59 @@ describe('useVideoProcessing 全文文字起こし（バッチ）の確認待ち
         expect(batchMocks.runBatchTranscription).toHaveBeenCalledTimes(1);
         expect(batchMocks.resumeBatchTranscription).not.toHaveBeenCalled();
     });
+
+    /**
+     * 🔴 提出の往復中の中止（レビュー 2026-09-22 S2）。提出は中止で切らずに完了し、
+     *    ID は中止の後に届く。届いた ID を保持できないと再開が再 submit になり、二重課金と
+     *    重複文書を生む。ここは呼出元側の錠（client 側の錠は batchTranscriptionClient.test.ts）。
+     */
+    it('🔴 提出の往復中に中止しても、遅れて届いた ID を保持して再開は確認から始める（再 submit しない）', async () => {
+        batchMocks.runBatchTranscription.mockImplementation((input: RunBatchTranscriptionInput) =>
+            new Promise<RunBatchTranscriptionResult>((_resolve, reject) => {
+                // 実装の契約: 提出は中止で切らず、完了させて ID を渡してから中止で拒否する
+                input.signal?.addEventListener('abort', () => {
+                    input.onSubmitted?.(submitted);
+                    reject(input.signal?.reason);
+                }, { once: true });
+            }));
+        const hook = useProcessingHarness([transcriptPrompt]);
+        const file = createFile([TRANSCRIPT_PROMPT_ID]);
+
+        const processing = hook.processTranscription(createJob(file), audioBlob, '192k', 44100);
+        await vi.waitFor(() => expect(batchMocks.runBatchTranscription).toHaveBeenCalledTimes(1));
+        hook.cancelJob(FILE_ID, 'この画面での確認を停止しました。');
+        await processing;
+
+        expect(getCurrentStatus()).toMatchObject({ status: 'canceled', phase: 'canceled' });
+        expect(getCurrentStatus().batch).toMatchObject({
+            jobId: 'job-1', docId: 'doc-1', promptId: TRANSCRIPT_PROMPT_ID, confirmation: 'stopped',
+        });
+
+        batchMocks.resumeBatchTranscription.mockResolvedValue(succeededResult);
+        await hook.processTranscriptionResume(createJob(file), audioBlob, [], '192k', 44100);
+
+        expect(batchMocks.runBatchTranscription).toHaveBeenCalledTimes(1);
+        expect(serviceMocks.uploadAudioToStorage).toHaveBeenCalledTimes(1);
+        expect(batchMocks.resumeBatchTranscription).toHaveBeenCalledExactlyOnceWith(
+            expect.objectContaining({ jobId: 'job-1', docId: 'doc-1' }),
+        );
+        expect(getCurrentStatus().status).toBe('completed');
+    });
+
+    it('🔴 提出の応答が消えた失敗は、再提出で文書が重複し得る案内を利用者に見える文言で出す', async () => {
+        batchMocks.runBatchTranscription.mockRejectedValue(new Error(
+            '提出の応答を受け取れませんでした。'
+            + '再開すると再提出になり、既に受理されていた場合は文書が重複します。'
+            + '文書一覧で「処理中」の文書が無いか確認してから再開してください。'));
+        const hook = useProcessingHarness([transcriptPrompt]);
+
+        await hook.processTranscription(createJob(createFile([TRANSCRIPT_PROMPT_ID])), audioBlob, '192k', 44100);
+
+        expect(getCurrentStatus()).toMatchObject({ status: 'error', failedPhase: 'text_generation' });
+        expect(getCurrentStatus().error).toContain('提出の応答を受け取れませんでした。');
+        expect(getCurrentStatus().error).toContain('既に受理されていた場合は文書が重複します。');
+        expect(getCurrentStatus().error).toContain('文書一覧で「処理中」の文書が無いか確認してから再開してください。');
+    });
 });
 
 
