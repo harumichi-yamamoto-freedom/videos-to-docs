@@ -511,6 +511,43 @@ describe('PromptListSidebar', () => {
         expect(mocks.getCurrentUserId).toHaveBeenCalled();
     });
 
+    it('0件で既定プロンプトを自動生成したら onDefaultsInitialized を1回だけ呼ぶ（親の選択肢を読み直させる）', async () => {
+        // 2026-09-22: ホームの「適用するプロンプトを選ぶ」は別読み込みで、自動生成を知らずに
+        // 「全文文字起こし」だけの一覧で止まっていた。生成後に親へ知らせるのがこの錠。
+        const onDefaultsInitialized = vi.fn();
+        mocks.getPrompts
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([{ ...prompt, isDefault: true }]);
+        mocks.getDocs.mockResolvedValue({ empty: true });
+        mocks.getDefaultPrompts.mockResolvedValue([
+            { name: '初期プロンプト', content: '初期本文', model: 'gemini-test', thinkingLevel: 'default' as const },
+        ]);
+        configureHookState({ ownerKey: GUEST_OWNER_KEY, status: 'loading', prompts: [] });
+        renderSidebar({ onDefaultsInitialized });
+
+        effects[0]();
+        for (let index = 0; index < 12; index += 1) {
+            await Promise.resolve();
+        }
+
+        expect(mocks.getPrompts).toHaveBeenCalledTimes(2);
+        expect(onDefaultsInitialized).toHaveBeenCalledTimes(1);
+    });
+
+    it('最初から一覧があるときは onDefaultsInitialized を呼ばない', async () => {
+        const onDefaultsInitialized = vi.fn();
+        configureHookState({ ownerKey: GUEST_OWNER_KEY, status: 'loading', prompts: [] });
+        renderSidebar({ onDefaultsInitialized });
+
+        effects[0]();
+        for (let index = 0; index < 12; index += 1) {
+            await Promise.resolve();
+        }
+
+        expect(mocks.getPrompts).toHaveBeenCalledTimes(1);
+        expect(onDefaultsInitialized).not.toHaveBeenCalled();
+    });
+
     it('uidがGUESTのログインユーザーをゲストと同じ世代にしない', () => {
         mocks.useAuth.mockReturnValue({ user: { uid: 'GUEST' }, loading: false });
         const setters = configureHookState({

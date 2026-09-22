@@ -53,7 +53,13 @@ export interface GenerateRequestBody {
     storagePath: string;
     /** 元ファイル名 (ログとエラー文言用) */
     fileName: string;
-    /** 元ファイルの MIME (audio/* か video/*)。Gemini へ渡す種別 */
+    /**
+     * `storagePath` に置いたデータの MIME (audio/* か video/*)。Gemini へ渡す種別と、既定プロンプトの
+     * 音声/動画の選択 (server/geminiServer.ts defaultPromptFor) に使う。
+     * 🔴 「元ファイルの MIME」ではない。動画をブラウザで mp3 に変換して上げたときは `audio/mpeg`
+     *    (元の名前は `fileName` に残る)。動画直送のときだけ `video/*`。決めるのは
+     *    hooks/useVideoProcessing.ts resolveMediaMimeType。
+     */
     mimeType: string;
     prompt: GenerateRequestPrompt;
 }

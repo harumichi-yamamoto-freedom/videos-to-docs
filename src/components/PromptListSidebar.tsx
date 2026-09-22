@@ -27,6 +27,13 @@ export interface PromptListSidebarProps {
     onPromptClick: (prompt: Prompt) => void;
     onCreateClick: () => void;
     onPromptDeleted?: () => void;
+    /**
+     * 一覧が 0 件で既定プロンプトを自動生成し終えたときに呼ぶ。
+     * 🔴 ホームの「適用するプロンプトを選ぶ」は別の読み込み（usePromptManagement）を持ち、
+     *    この自動生成を知らないまま「全文文字起こし」だけの一覧で止まっていた（初回訪問・空 DB で再現）。
+     *    親はここで選択肢を読み直す。
+     */
+    onDefaultsInitialized?: () => void;
     updateTrigger?: number;
 }
 
@@ -34,10 +41,13 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
     onPromptClick,
     onCreateClick,
     onPromptDeleted,
+    onDefaultsInitialized,
     updateTrigger,
 }) => {
     const { user, loading: authLoading } = useAuth();
     const ownerType = user ? 'user' : 'guest';
+    const onDefaultsInitializedRef = useRef(onDefaultsInitialized);
+    onDefaultsInitializedRef.current = onDefaultsInitialized;
     const ownerId = user?.uid ?? 'GUEST';
     // ownerType も含め、uid が "GUEST" のユーザーとゲストを別世代として扱う。
     const ownerKey = authLoading ? null : JSON.stringify([ownerType, ownerId]);
@@ -135,6 +145,9 @@ export const PromptListSidebar: React.FC<PromptListSidebarProps> = ({
 
                 data = await getPrompts();
                 if (!isCurrentRequest()) return;
+                // 親の選択肢（usePromptManagement）は別読み込みなので、生成を知らせて読み直してもらう。
+                // ref 経由にするのは、親が毎レンダー新しい関数を渡しても読み込みの依存を揺らさないため
+                onDefaultsInitializedRef.current?.();
             }
 
             if (showLoading) {

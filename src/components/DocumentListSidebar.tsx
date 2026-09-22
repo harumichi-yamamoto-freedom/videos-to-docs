@@ -883,7 +883,7 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                     </div>
                 ) : transcriptions.length === 0 ? (
                     <div className="bg-white rounded-xl p-8 shadow-sm">
-                        <div className="flex flex-col items-center justify-center text-gray-400 text-center">
+                        <div className="flex flex-col items-center justify-center text-gray-500 text-center">
                             <FileText className="w-12 h-12 mb-2 opacity-50" />
                             <p className="text-sm">文書がまだありません</p>
                             <p className="text-xs mt-1">ホームで文書を生成してください。</p>
@@ -891,7 +891,7 @@ export const DocumentListSidebar: React.FC<DocumentListSidebarProps> = ({
                     </div>
                 ) : filteredTranscriptions.length === 0 ? (
                     <div className="bg-white rounded-xl p-8 shadow-sm">
-                        <div className="flex flex-col items-center justify-center text-gray-400 text-center">
+                        <div className="flex flex-col items-center justify-center text-gray-500 text-center">
                             <Search className="w-10 h-10 mb-2 opacity-50" />
                             <p className="text-sm">検索条件に一致する文書がありません</p>
                             <p className="text-xs mt-1">別のキーワードをお試しください。</p>

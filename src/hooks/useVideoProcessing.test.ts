@@ -1656,3 +1656,25 @@ describe('useVideoProcessing 提出に渡す音声長（実測を優先する）
         expect(getCurrentStatus().sizeFailure).toMatchObject({ durationSec: 9000 });
     });
 });
+
+describe('resolveMediaMimeType（/api/generate に送る mimeType は storagePath 上のデータの種別）', () => {
+    // 2026-09-22: e2e で「変換済み動画の mimeType は audio/mpeg」を観測し、契約コメント
+    // (generateApiContract.ts) の「元ファイルの MIME」と食い違っていた。実装の意図はこちら
+    // (Gemini へ渡すのは変換後のバイト列なので、その種別を送る) で、コメントを直した。ここで固定する。
+    it('変換済み (Blob が audio/mpeg) の動画は audio/mpeg を送る', async () => {
+        const { resolveMediaMimeType } = await import('./useVideoProcessing');
+        expect(resolveMediaMimeType('audio/mpeg', 'video')).toBe('audio/mpeg');
+    });
+
+    it('動画直送 (Blob が video/*) は video/* をそのまま送る', async () => {
+        const { resolveMediaMimeType } = await import('./useVideoProcessing');
+        expect(resolveMediaMimeType('video/mp4', 'video')).toBe('video/mp4');
+        expect(resolveMediaMimeType('video/quicktime', 'video')).toBe('video/quicktime');
+    });
+
+    it('Blob に種別が無いときだけ元ファイルの区分から補う', async () => {
+        const { resolveMediaMimeType } = await import('./useVideoProcessing');
+        expect(resolveMediaMimeType('', 'video')).toBe('video/mp4');
+        expect(resolveMediaMimeType('', 'audio')).toBe('audio/mpeg');
+    });
+});
