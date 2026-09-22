@@ -534,3 +534,10 @@ rm ~/.config/gcloud/keys/$PROJECT-api-generate.json
 - 同一 worker で `exec` を約 65 回呼ぶと wasm が死ぬ (upstream ffmpegwasm/ffmpeg.wasm#820)。1 本 = 2 exec にし、`FFMPEG_EXEC_BUDGET` で worker を作り直す。
   「複数ファイルを入れると 2 本目が『区間 N の変換に失敗しました』」はこれだった。再発の検査は `e2e/ffmpeg-wasm/README.md`。
 - 変換の失敗はブラウザ内で完結しサーバのログには出ない。`clientErrors` に `source: 'audio_conversion'` で `fileName / sizeBytes / execCount / workerDead` が残るので、報告が来たらまずそこを見る。
+
+## 付録: firestore.rules の錠 (2026-09-22)
+
+- `npm run test:rules` が Firestore エミュレータを立てて `rules-tests/` を回す (Java が要る。`brew install openjdk` と PATH)。
+  `users` の一覧は「管理者は全件、一般ユーザーは email の等値検索 + limit(1) だけ」。以前は `allow list` が 2 本あり
+  OR で緩い方が実効になっていて、ログイン済みなら誰でも全ユーザーを列挙できた。ルールを触ったら必ず回す。
+- 旧ルールで落ちることの確認: `RULES_FILE=<旧ファイル> npx vitest run rules-tests`。
